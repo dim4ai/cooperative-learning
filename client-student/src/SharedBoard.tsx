@@ -5,7 +5,7 @@ import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
 import { socket, myName } from './socket';
 
-export function SharedBoard({ room }: { room: string }) {
+export function SharedBoard({ room, readOnly }: { room: string; readOnly?: boolean }) {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const skipChanges = useRef(0);
   const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,6 +38,7 @@ export function SharedBoard({ room }: { room: string }) {
   const lastSent = useRef<string>('');
 
   const handleChange = useCallback((elements: readonly ExcalidrawElement[], _appState: AppState) => {
+    if (readOnly) return;
     if (skipChanges.current > 0) {
       skipChanges.current--;
       return;
@@ -62,16 +63,22 @@ export function SharedBoard({ room }: { room: string }) {
       onPointerDown={e => {
         const target = e.target as HTMLElement;
         const container = e.currentTarget as HTMLElement;
-        if (target.closest('.App-toolbar, .App-menu__left')) {
+        if (target.closest('.App-toolbar, .selected-shape-actions')) {
           container.classList.remove('is-drawing');
         } else {
           container.classList.add('is-drawing');
         }
       }}
     >
+      <style>{`
+        .excalidraw button[data-testid="main-menu-trigger"] { display: none !important; }
+        .is-drawing .excalidraw .selected-shape-actions { opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+        .excalidraw .selected-shape-actions { transition: opacity 0.15s; }
+      `}</style>
       <Excalidraw
         excalidrawAPI={api => { apiRef.current = api; }}
         onChange={handleChange}
+        viewModeEnabled={readOnly}
         UIOptions={{ canvasActions: { export: false, loadScene: false, saveToActiveFile: false } }}
       />
     </div>
