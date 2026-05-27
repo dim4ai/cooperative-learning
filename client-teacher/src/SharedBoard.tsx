@@ -3,63 +3,48 @@ import { Excalidraw } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI, AppState } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
-import { socket, myName } from './socket';
+import { socket } from './socket';
 
-export function SharedBoard({ room, readOnly }: { room: string; readOnly?: boolean }) {
+export function SharedBoard() {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const skipChanges = useRef(0);
   const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSent = useRef<string>('');
 
   useEffect(() => {
     function onElements(incoming: readonly ExcalidrawElement[]) {
       const api = apiRef.current;
       if (!api || incoming.length === 0) return;
-
-      // Merge: for each incoming element, take it if it has higher version or doesn't exist locally
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const localMap = new Map(api.getSceneElements().map((el: any) => [el.id, el]));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const el of incoming as any[]) {
         const local = localMap.get(el.id);
-        if (!local || el.version > local.version) {
-          localMap.set(el.id, el);
-        }
+        if (!local || el.version > local.version) localMap.set(el.id, el);
       }
-
       skipChanges.current++;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       api.updateScene({ elements: Array.from(localMap.values()) as any, captureUpdate: 'NEVER' });
     }
-
     socket.on('boardElements', onElements);
     return () => { socket.off('boardElements', onElements); };
-  }, [room]);
-
-  const lastSent = useRef<string>('');
+  }, []);
 
   const handleChange = useCallback((elements: readonly ExcalidrawElement[], _appState: AppState) => {
-    if (readOnly) return;
-    if (skipChanges.current > 0) {
-      skipChanges.current--;
-      return;
-    }
+    if (skipChanges.current > 0) { skipChanges.current--; return; }
     if (elements.length === 0) return;
-
     if (sendTimer.current) clearTimeout(sendTimer.current);
     sendTimer.current = setTimeout(() => {
       const serialized = JSON.stringify(elements.map(el => el.id + ':' + el.version));
       if (serialized === lastSent.current) return;
       lastSent.current = serialized;
-      const stamped = elements.map(el =>
-        el.customData?.author ? el : { ...el, customData: { ...el.customData, author: myName } }
-      );
-      socket.emit('boardElements', stamped);
+      socket.emit('boardElements', elements);
     }, 80);
   }, []);
 
   return (
     <div
-      style={{ width: '100%', height: '100%', borderRadius: 4, overflow: 'hidden', border: '1px solid #ccc', boxSizing: 'border-box' }}
+      style={{ width: '100%', height: '100%', overflow: 'hidden' }}
       onPointerDown={e => {
         const target = e.target as HTMLElement;
         const container = e.currentTarget as HTMLElement;
@@ -78,7 +63,6 @@ export function SharedBoard({ room, readOnly }: { room: string; readOnly?: boole
       <Excalidraw
         excalidrawAPI={api => { apiRef.current = api; }}
         onChange={handleChange}
-        viewModeEnabled={readOnly}
         UIOptions={{ canvasActions: { export: false, loadScene: false, saveToActiveFile: false } }}
       />
     </div>
