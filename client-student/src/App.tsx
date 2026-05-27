@@ -77,6 +77,7 @@ export default function App() {
   });
   const [connected, setConnected] = useState(false);
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
+  const [monitor, setMonitor] = useState<LivekitInfo | null>(null);
   const [, setSharedText] = useState('');
   const [seats, setSeats] = useState<Seat[]>([]);
   const [poll, setPoll] = useState<{ question: string; options: string[]; myVote: number | null } | null>(null);
@@ -88,6 +89,7 @@ export default function App() {
     socket.on('disconnect', () => setConnected(false));
     socket.on('state', setLessonState);
     socket.on('seats', setSeats);
+    socket.on('monitor', (info: LivekitInfo) => setMonitor(info));
     socket.on('livekit', (info: LivekitInfo) => {
       setLivekit(info);
       setSharedText('');
@@ -147,6 +149,18 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, overflow: 'hidden' }}>
+        {/* Silent monitor connection to main-room so teacher can see us during pair work */}
+        {monitor && livekit && livekit.room !== 'main-room' && (
+          <LiveKitRoom
+            key={'monitor-' + monitor.token}
+            serverUrl={monitor.url}
+            token={monitor.token}
+            connect={true}
+            video={true}
+            audio={false}
+            style={{ display: 'none' }}
+          />
+        )}
         {livekit ? (
           <LiveKitRoom
             key={livekit.room}
