@@ -49,11 +49,13 @@ const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: boolean }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   if (seats.length === 0) return (
-    <div style={{ color: '#aaa', padding: 24 }}>Задайте количество мест</div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 15 }}>
+      Задайте количество мест в левой панели
+    </div>
   );
 
   const numGroups = Math.max(...seats.map(s => s.groupIndex)) + 1;
@@ -76,6 +78,12 @@ export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: bool
 
   return (
     <div style={{ position: 'relative', padding: `${showSelf ? 200 : 16}px 16px 16px`, boxSizing: 'border-box' }}>
+      <style>{`
+        @keyframes pairPulse {
+          0%, 100% { border-color: #f39c12; box-shadow: 0 0 0 2px #f39c1266; }
+          50% { border-color: #f39c1244; box-shadow: none; }
+        }
+      `}</style>
       {showSelf && <SelfPreview />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignContent: 'flex-start' }}>
       {Array.from({ length: numGroups }, (_, g) => {
@@ -90,13 +98,18 @@ export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: bool
             flexDirection: 'column',
             gap: 8,
           }}>
-            {[0, 1].map(row => (
+            {[0, 1].map(row => {
+              const pairRoom = `pair-g${g}-r${row}`;
+              const isCalling = callingRooms?.has(pairRoom) ?? false;
+              return (
               <div key={row} style={{
                 display: 'flex',
                 gap: 6,
-                border: `1px solid ${color}`,
+                border: `1px solid ${isCalling ? '#f39c12' : color}`,
                 borderRadius: 6,
                 padding: 6,
+                position: 'relative',
+                animation: isCalling ? 'pairPulse 1.2s infinite' : 'none',
               }}>
             {[0, 1].map(col => {
               const seat = groupSeats.find(s => s.row === row && s.col === col);
@@ -106,7 +119,7 @@ export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: bool
               const isTarget = !seat.occupant && !!selected;
               return (
                 <div key={seat.id}
-                  onClick={() => seat.occupant ? handleOccupiedClick(seat.occupant) : handleEmptyClick(seat.id)}
+                  onClick={() => readOnly ? undefined : seat.occupant ? handleOccupiedClick(seat.occupant) : handleEmptyClick(seat.id)}
                   style={{
                     width: 160, height: 120,
                     background: '#f5f5f5',
@@ -116,7 +129,7 @@ export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: bool
                     position: 'relative', overflow: 'hidden',
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center',
-                    cursor: seat.occupant || isTarget ? 'pointer' : 'default',
+                    cursor: !readOnly && (seat.occupant || isTarget) ? 'pointer' : 'default',
                     transition: 'all 0.15s',
                     fontSize: 12, color: '#555',
                   }}
@@ -127,16 +140,30 @@ export function SeatingMap({ seats, showSelf }: { seats: Seat[]; showSelf?: bool
                       <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
                         {seat.occupant}
                       </div>
-                      <div onClick={e => clearSeat(e, seat.id)} style={{ position: 'relative', zIndex: 1, fontSize: 10, color: '#bbb', cursor: 'pointer', marginTop: 2 }}>✕</div>
-                    </>
+                      {!readOnly && <div onClick={e => clearSeat(e, seat.id)} style={{ position: 'relative', zIndex: 1, fontSize: 10, color: '#bbb', cursor: 'pointer', marginTop: 2 }}>✕</div>}
+</>
                   ) : (
                     <div style={{ fontSize: 32, color: isTarget ? '#4a4' : '#ddd', lineHeight: 1 }}>{seatNum}</div>
                   )}
                 </div>
               );
             })}
+              {isCalling && (
+                <div
+                  onClick={() => onJoinPair?.(pairRoom)}
+                  style={{
+                    position: 'absolute', left: '50%', top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    fontSize: 36, zIndex: 10,
+                    cursor: onJoinPair ? 'pointer' : 'default',
+                    filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))',
+                  }}
+                  title="Перейти к паре"
+                >🔔</div>
+              )}
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

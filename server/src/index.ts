@@ -224,6 +224,9 @@ io.on('connection', async (socket) => {
   socket.emit('seats', seats);
 
   await livekit.createRoom({ name: 'main-room' }).catch(() => {});
+  // Monitor token — student stays visible to teacher in main-room even during pair work
+  const monToken = await makeLivekitToken(name, 'main-room');
+  socket.emit('monitor', { url: LIVEKIT_WS_URL, token: monToken, room: 'main-room' });
   await sendToRoom(socket.id, 'main-room');
 
   socket.on('setCapacity', (n: number) => {
@@ -325,6 +328,44 @@ io.on('connection', async (socket) => {
     currentPoll = null;
     io.emit('poll', null);
     io.emit('pollResults', null);
+  });
+
+  socket.on('joinPair', async ({ room }: { room: string }) => {
+    if (role !== 'teacher') return;
+    await sendToRoom(socket.id, room);
+    // Dismiss call indicator for this room
+    for (const [id, p] of state.participants) {
+      if (p.role === 'teacher') {
+        io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false });
+      }
+    }
+    // Notify students in the pair room that teacher is coming
+    for (const [id, p] of state.participants) {
+      if (p.livekitRoom === room && p.role === 'student') {
+        io.sockets.sockets.get(id)?.emit('teacherJoined');
+      }
+    }
+  });
+
+  socket.on('leavePair', async () => {
+    if (role !== 'teacher') return;
+    await sendToRoom(socket.id, 'main-room');
+  });
+
+  socket.on('callTeacher', ({ room }: { room: string }) => {
+    for (const [id, p] of state.participants) {
+      if (p.role === 'teacher') {
+        io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true });
+      }
+    }
+  });
+
+  socket.on('dismissCall', ({ room }: { room: string }) => {
+    for (const [id, p] of state.participants) {
+      if (p.role === 'teacher') {
+        io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false });
+      }
+    }
   });
 
   socket.on('disconnect', () => {

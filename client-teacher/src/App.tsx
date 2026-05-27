@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { LiveKitRoom, useLocalParticipant } from '@livekit/components-react';
+import { LiveKitRoom, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
+import { Track } from 'livekit-client';
 import { socket } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
@@ -33,8 +34,63 @@ const LESSON_STAGES: { value: Stage; label: string }[] = [
   { value: 'fours',      label: 'Четвёрки' },
 ];
 
-const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63'];
-const groupColor = (g: number) => PALETTE[g % PALETTE.length];
+function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
+  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+
+  return (
+    <div style={{ height: '100%', display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      {/* Board */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <SharedBoard />
+      </div>
+
+      {/* Right column: cameras + back button */}
+      <div style={{ width: 180, display: 'flex', flexDirection: 'column', gap: 8, padding: 8, background: '#1a1a1a', justifyContent: 'center' }}>
+        {cameraTracks.map(t => (
+          <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
+            <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
+              {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
+            </div>
+          </div>
+        ))}
+        <div style={{ marginTop: 'auto' }}>
+          <button
+            onClick={onLeave}
+            style={{
+              width: '100%', padding: '8px 0', borderRadius: 6, border: 'none',
+              background: '#2e2e3e', color: '#aaa', cursor: 'pointer', fontSize: 13,
+            }}
+          >
+            ← Назад
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CapacityInput() {
+  const [value, setValue] = useState('16');
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      <input
+        type="number"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        min={4} step={4}
+        style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #444', background: '#2e2e3e', color: '#fff', fontSize: 13 }}
+        onKeyDown={e => { if (e.key === 'Enter') socket.emit('setCapacity', Number(value)); }}
+      />
+      <button
+        onClick={() => socket.emit('setCapacity', Number(value))}
+        style={{ flex: 1, padding: '4px 6px', borderRadius: 4, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer', fontSize: 12 }}
+      >
+        ОК
+      </button>
+    </div>
+  );
+}
 
 type GroupMode = 'board' | 'screen';
 
@@ -46,7 +102,7 @@ function ScreenShareSync({ active }: { active: boolean }) {
   return null;
 }
 
-function StudentGrid({ students, stage, seats, hasLivekit, groupMode }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode }) {
+function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void }) {
   if (stage === 'waiting') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} />;
   }
@@ -65,27 +121,7 @@ function StudentGrid({ students, stage, seats, hasLivekit, groupMode }: { studen
   }
 
   if (stage === 'pairs' || stage === 'fours') {
-    const groups = new Map<string, Participant[]>();
-    for (const s of students) {
-      const room = s.livekitRoom ?? '—';
-      if (!groups.has(room)) groups.set(room, []);
-      groups.get(room)!.push(s);
-    }
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: 16, alignContent: 'flex-start' }}>
-        {Array.from(groups.entries()).map(([room, members], i) => (
-          <div key={room} style={{
-            border: `2px solid ${groupColor(i)}`,
-            borderRadius: 8,
-            padding: 8,
-            display: 'flex',
-            gap: 8,
-          }}>
-            {members.map(s => <StudentTile key={s.id} name={s.name} color={groupColor(i)} />)}
-          </div>
-        ))}
-      </div>
-    );
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} />;
   }
 
   return (
@@ -126,6 +162,7 @@ export default function App() {
   const [seats, setSeats] = useState<Seat[]>([]);
 const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
+  const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     socket.connect();
@@ -134,6 +171,13 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
     socket.on('state', setState);
     socket.on('seats', setSeats);
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
+    socket.on('callTeacher', ({ room, calling }: { room: string; calling: boolean }) => {
+      setCallingRooms(prev => {
+        const next = new Set(prev);
+        calling ? next.add(room) : next.delete(room);
+        return next;
+      });
+    });
     return () => { socket.disconnect(); };
   }, []);
 
@@ -152,7 +196,14 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
           <span style={{ color: connected ? '#2ecc71' : '#e74c3c' }}>●</span> Учитель
         </div>
 
-{state.stage === 'waiting' ? (
+        {state.stage === 'waiting' && (
+          <>
+            <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Мест в классе</div>
+            <CapacityInput />
+          </>
+        )}
+
+        {state.stage === 'waiting' ? (
           <button
             onClick={() => socket.emit('setStage', 'group')}
             style={{
@@ -219,8 +270,11 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
           )}
         </div>
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} />}
-        <div style={{ flex: 1, overflow: state.stage === 'group' ? 'hidden' : 'auto' }}>
-          <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} />
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          {livekit?.room.startsWith('pair-') || livekit?.room.startsWith('fours-')
+            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
+            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} />
+          }
         </div>
       </div>
 
@@ -231,6 +285,7 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
 
   return (
     <LiveKitRoom
+      key={livekit.room}
       serverUrl={livekit.url}
       token={livekit.token}
       connect={true}
