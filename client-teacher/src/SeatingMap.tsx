@@ -89,15 +89,32 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
       {Array.from({ length: numGroups }, (_, g) => {
         const groupSeats = seats.filter(s => s.groupIndex === g);
         const color = groupColor(g);
+        const foursRoom = `fours-${g + 1}`;
+        const isGroupCalling = callingRooms?.has(foursRoom) ?? false;
         return (
           <div key={g} style={{
-            border: `3px solid ${color}`,
+            border: `3px solid ${isGroupCalling ? '#f39c12' : color}`,
             borderRadius: 10,
             padding: 8,
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
+            position: 'relative',
+            animation: isGroupCalling ? 'pairPulse 1.2s infinite' : 'none',
           }}>
+            {isGroupCalling && (
+              <div
+                onClick={() => onJoinPair?.(foursRoom)}
+                style={{
+                  position: 'absolute', left: '50%', top: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  fontSize: 44, zIndex: 10,
+                  cursor: onJoinPair ? 'pointer' : 'default',
+                  filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))',
+                }}
+                title="Перейти к группе"
+              >🔔</div>
+            )}
             {[0, 1].map(row => {
               const pairRoom = `pair-g${g}-r${row}`;
               const isCalling = callingRooms?.has(pairRoom) ?? false;
