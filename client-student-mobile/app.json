@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Кооперативное обучение",
+    "slug": "cooperative-student",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "cooperative",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cooperative.student",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Микрофон нужен для общения на уроке"
+      }
+    },
+    "android": {
+      "package": "com.cooperative.student",
+      "adaptiveIcon": {
+        "backgroundColor": "#4a90e2"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "usesCleartextTraffic": true
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
