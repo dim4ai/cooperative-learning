@@ -25,7 +25,7 @@ fi
 
 echo "==> Собираю APK"
 cd android
-./gradlew assembleRelease
+./gradlew assembleRelease --console=plain
 
 APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
 echo ""
