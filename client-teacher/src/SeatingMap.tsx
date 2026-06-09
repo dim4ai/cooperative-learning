@@ -134,13 +134,15 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const seatNum = row * 2 + col + 1;
               const isSelected = !!selected && seat.occupant === selected;
               const isTarget = !seat.occupant && !!selected;
+              const individualRoom = seat.occupant ? `individual-${seat.occupant}` : null;
+              const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
               return (
                 <div key={seat.id}
                   onClick={() => readOnly ? undefined : seat.occupant ? handleOccupiedClick(seat.occupant) : handleEmptyClick(seat.id)}
                   style={{
                     width: 160, height: 120,
                     background: '#f5f5f5',
-                    border: isTarget ? `2px dashed #4a4` : `1px solid #ccc`,
+                    border: isSeatCalling ? '2px solid #f39c12' : isTarget ? `2px dashed #4a4` : `1px solid #ccc`,
                     boxShadow: isSelected ? `0 0 0 3px ${color}` : 'none',
                     borderRadius: 6,
                     position: 'relative', overflow: 'hidden',
@@ -149,6 +151,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                     cursor: !readOnly && (seat.occupant || isTarget) ? 'pointer' : 'default',
                     transition: 'all 0.15s',
                     fontSize: 12, color: '#555',
+                    animation: isSeatCalling ? 'pairPulse 1.2s infinite' : 'none',
                   }}
                 >
                   {seat.occupant ? (
@@ -158,7 +161,19 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                         {seat.occupant}
                       </div>
                       {!readOnly && <div onClick={e => clearSeat(e, seat.id)} style={{ position: 'relative', zIndex: 1, fontSize: 10, color: '#bbb', cursor: 'pointer', marginTop: 2 }}>✕</div>}
-</>
+                      {isSeatCalling && (
+                        <div
+                          onClick={e => { e.stopPropagation(); onJoinPair?.(individualRoom!); }}
+                          style={{
+                            position: 'absolute', right: 4, top: 4,
+                            fontSize: 22, zIndex: 10,
+                            cursor: onJoinPair ? 'pointer' : 'default',
+                            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))',
+                          }}
+                          title="Ответить"
+                        >🔔</div>
+                      )}
+                    </>
                   ) : (
                     <div style={{ fontSize: 32, color: isTarget ? '#4a4' : '#ddd', lineHeight: 1 }}>{seatNum}</div>
                   )}
