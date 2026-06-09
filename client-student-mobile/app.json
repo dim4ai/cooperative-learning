@@ -42,12 +42,6 @@
           }
         }
       ],
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#ffffff"
-        }
-      ]
     ],
     "experiments": {
       "typedRoutes": true
