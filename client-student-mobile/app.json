@@ -45,7 +45,6 @@
       [
         "expo-splash-screen",
         {
-          "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
       ]
@@ -56,7 +55,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": ""
+        "projectId": "f827d8c1-45a8-4deb-8a51-ad552ac45177"
       }
     }
   }
