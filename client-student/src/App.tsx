@@ -8,7 +8,8 @@ import { IndividualLayout } from './IndividualLayout';
 import { GroupView } from './GroupView';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
-import { socket, myName } from './socket';
+import { SharedBoard } from './SharedBoard';
+import { socket, myName, isBoardOnly, myBoardRoom } from './socket';
 
 function SelfPreview() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
@@ -71,7 +72,24 @@ function useTimer(timerEndsAt: number | null) {
   return secondsLeft;
 }
 
+function BoardOnlyMode({ room, readOnly }: { room: string; readOnly: boolean }) {
+  useEffect(() => {
+    socket.connect();
+    return () => { socket.disconnect(); };
+  }, []);
+  return (
+    <div style={{ width: '100vw', height: '100vh' }}>
+      <SharedBoard room={room} readOnly={readOnly} />
+    </div>
+  );
+}
+
 export default function App() {
+  if (isBoardOnly) {
+    const readOnly = new URLSearchParams(window.location.search).get('readonly') === '1';
+    return <BoardOnlyMode room={myBoardRoom} readOnly={readOnly} />;
+  }
+
   const [lessonState, setLessonState] = useState<LessonState>({
     stage: 'waiting',
     timerEndsAt: null,

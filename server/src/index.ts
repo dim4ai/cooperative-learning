@@ -14,7 +14,7 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-type Role = 'teacher' | 'student';
+type Role = 'teacher' | 'student' | 'board';
 type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
 
 interface Participant {
@@ -70,6 +70,9 @@ const sharedTexts = new Map<string, string>();
 
 // Whiteboard snapshot per room name
 const boardSnapshots = new Map<string, unknown>();
+
+// Board-only WebView connections (mobile students viewing/drawing the board)
+const boardConnections = new Map<string, { room: string }>();
 
 interface Poll {
   question: string;
@@ -216,7 +219,34 @@ async function sendAllToMain() {
 }
 
 io.on('connection', async (socket) => {
-  const { name, role } = socket.handshake.auth as { name: string; role: Role };
+  const { name, role } = socket.handshake.auth as { name: string; role: Role; boardRoom?: string };
+
+  // Board-only connection: mobile student viewing/drawing the board via WebView
+  if (role === 'board') {
+    const boardRoom = (socket.handshake.auth as { boardRoom?: string }).boardRoom ?? '';
+    boardConnections.set(socket.id, { room: boardRoom });
+    console.log(`+ board viewer: ${name} @ ${boardRoom}`);
+    const snapshot = boardSnapshots.get(boardRoom);
+    if (snapshot) socket.emit('boardElements', snapshot);
+    socket.on('boardElements', (elements: unknown) => {
+      boardSnapshots.set(boardRoom, elements);
+      for (const [id, p] of state.participants) {
+        if (p.livekitRoom === boardRoom) {
+          io.sockets.sockets.get(id)?.emit('boardElements', elements);
+        }
+      }
+      for (const [id, bc] of boardConnections) {
+        if (bc.room === boardRoom && id !== socket.id) {
+          io.sockets.sockets.get(id)?.emit('boardElements', elements);
+        }
+      }
+    });
+    socket.on('disconnect', () => {
+      boardConnections.delete(socket.id);
+      console.log(`- board viewer: ${name} @ ${boardRoom}`);
+    });
+    return;
+  }
 
   state.participants.set(socket.id, { id: socket.id, name, role, livekitRoom: null });
   console.log(`+ ${role}: ${name}`);
@@ -304,6 +334,11 @@ io.on('connection', async (socket) => {
     boardSnapshots.set(room, elements);
     for (const [id, p] of state.participants) {
       if (p.livekitRoom === room && id !== socket.id) {
+        io.sockets.sockets.get(id)?.emit('boardElements', elements);
+      }
+    }
+    for (const [id, bc] of boardConnections) {
+      if (bc.room === room) {
         io.sockets.sockets.get(id)?.emit('boardElements', elements);
       }
     }
