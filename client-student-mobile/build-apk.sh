@@ -18,9 +18,14 @@ cd "$BUILD_DIR"
 echo "==> Устанавливаю зависимости"
 npm install --prefer-offline
 
-if [ ! -d android ]; then
-  echo "==> Первый запуск: expo prebuild"
+if [ ! -d android ] || [ app.json -nt android/.prebuild-stamp ]; then
+  echo "==> expo prebuild"
+  rm -rf android
   npx expo prebuild --platform android --no-install
+  # Ограничиваем сборку только arm64 — быстрее, достаточно для реальных устройств
+  sed -i 's/abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"/abiFilters "arm64-v8a"/' \
+    android/app/build.gradle
+  touch android/.prebuild-stamp
 fi
 
 echo "==> Собираю APK"
