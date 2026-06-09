@@ -3,6 +3,7 @@ import { LiveKitRoom, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { VideoRoom } from './VideoRoom';
 import { DeskLayout } from './DeskLayout';
+import { FoursLayout } from './FoursLayout';
 import { GroupView } from './GroupView';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
@@ -104,8 +105,11 @@ export default function App() {
   }, []);
 
   const students = lessonState.participants.filter(p => p.role === 'student');
-  const showDesk = livekit && (lessonState.stage === 'pairs' || lessonState.stage === 'fours');
+  const showDesk = livekit && lessonState.stage === 'pairs';
+  const showFours = livekit && lessonState.stage === 'fours';
   const showGroup = livekit && lessonState.stage === 'group';
+  const myGroupIndex = seats.find(s => s.occupant === myName)?.groupIndex ?? -1;
+  const groupSeats = seats.filter(s => s.groupIndex === myGroupIndex);
 
   return (
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -178,9 +182,11 @@ export default function App() {
                 </div>
               : showGroup
                 ? <GroupView />
-                : showDesk
-                  ? <DeskLayout room={livekit.room} />
-                  : <VideoRoom />
+                : showFours
+                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} />
+                  : showDesk
+                    ? <DeskLayout room={livekit.room} />
+                    : <VideoRoom />
             }
           </LiveKitRoom>
         ) : (

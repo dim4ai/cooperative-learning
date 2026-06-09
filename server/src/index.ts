@@ -333,12 +333,8 @@ io.on('connection', async (socket) => {
   socket.on('joinPair', async ({ room }: { room: string }) => {
     if (role !== 'teacher') return;
     await sendToRoom(socket.id, room);
-    // Dismiss call indicator for this room
-    for (const [id, p] of state.participants) {
-      if (p.role === 'teacher') {
-        io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false });
-      }
-    }
+    // Dismiss call indicator for this room on teacher side
+    socket.emit('callTeacher', { room, calling: false });
     // Notify students in the pair room that teacher is coming
     for (const [id, p] of state.participants) {
       if (p.livekitRoom === room && p.role === 'student') {
