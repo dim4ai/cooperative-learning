@@ -4,6 +4,7 @@ import { Track } from 'livekit-client';
 import { VideoRoom } from './VideoRoom';
 import { DeskLayout } from './DeskLayout';
 import { FoursLayout } from './FoursLayout';
+import { IndividualLayout } from './IndividualLayout';
 import { GroupView } from './GroupView';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
@@ -108,6 +109,7 @@ export default function App() {
   const showDesk = livekit && lessonState.stage === 'pairs';
   const showFours = livekit && lessonState.stage === 'fours';
   const showGroup = livekit && lessonState.stage === 'group';
+  const showIndividual = livekit && lessonState.stage === 'individual';
   const myGroupIndex = seats.find(s => s.occupant === myName)?.groupIndex ?? -1;
   const groupSeats = seats.filter(s => s.groupIndex === myGroupIndex);
 
@@ -182,7 +184,9 @@ export default function App() {
                 </div>
               : showGroup
                 ? <GroupView />
-                : showFours
+                : showIndividual
+                  ? <IndividualLayout />
+                  : showFours
                   ? <FoursLayout room={livekit.room} groupSeats={groupSeats} />
                   : showDesk
                     ? <DeskLayout room={livekit.room} />

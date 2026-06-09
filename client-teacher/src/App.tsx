@@ -120,6 +120,10 @@ function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRoo
     return <div style={{ color: '#aaa', padding: 32 }}>Нет подключённых учеников</div>;
   }
 
+  if (stage === 'individual') {
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} />;
+  }
+
   if (stage === 'pairs' || stage === 'fours') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} />;
   }
@@ -271,7 +275,7 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
         </div>
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
-          {livekit?.room.startsWith('pair-') || livekit?.room.startsWith('fours-')
+          {livekit?.room.startsWith('pair-') || livekit?.room.startsWith('fours-') || livekit?.room.startsWith('individual-')
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} />
           }
