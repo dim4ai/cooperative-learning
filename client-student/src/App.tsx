@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LiveKitRoom, useTracks, VideoTrack } from '@livekit/components-react';
+import { LiveKitRoom, RoomAudioRenderer, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { VideoRoom } from './VideoRoom';
 import { DeskLayout } from './DeskLayout';
@@ -192,9 +192,10 @@ export default function App() {
             token={livekit.token}
             connect={true}
             video={true}
-            audio={true}
+            audio={lessonState.stage !== 'group' && lessonState.stage !== 'waiting'}
             style={{ height: '100%' }}
           >
+            <RoomAudioRenderer />
             {lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />

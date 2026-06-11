@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LiveKitRoom, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
+import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket } from './socket';
 import { SeatingMap } from './SeatingMap';
@@ -294,9 +294,10 @@ const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
       token={livekit.token}
       connect={true}
       video={true}
-      audio={false}
+      audio={true}
       style={{ display: 'contents' }}
     >
+      <RoomAudioRenderer />
       {inner}
     </LiveKitRoom>
   );
