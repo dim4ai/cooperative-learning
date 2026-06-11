@@ -11,7 +11,9 @@ const livekit = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 type Role = 'teacher' | 'student' | 'board';
@@ -401,6 +403,12 @@ io.on('connection', async (socket) => {
 
   socket.on('disconnect', () => {
     state.participants.delete(socket.id);
+    if (role === 'student') {
+      for (const seat of seats) {
+        if (seat.occupant === name) seat.occupant = null;
+      }
+      io.emit('seats', seats);
+    }
     console.log(`- ${role}: ${name}`);
     broadcastState();
   });
