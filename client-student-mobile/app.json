@@ -35,6 +35,7 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
+            "kotlinVersion": "2.1.0",
             "usesCleartextTraffic": true
           },
           "ios": {

@@ -49,7 +49,8 @@ const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; }) {
+  const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
   if (seats.length === 0) return (
@@ -156,7 +157,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                 >
                   {seat.occupant ? (
                     <>
-                      <SeatVideo identity={seat.occupant} />
+                      {hasLivekit && <SeatVideo identity={seat.occupant} />}
                       <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
                         {seat.occupant}
                       </div>
