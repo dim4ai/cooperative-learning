@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 13111,
-    allowedHosts: ['redacted-domain.example'],
+    allowedHosts: ['teacher.redacted-internal.example'],
   },
 })

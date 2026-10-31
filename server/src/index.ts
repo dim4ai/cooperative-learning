@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
 const LIVEKIT_URL = 'http://REDACTED-IP:7880';
-const LIVEKIT_WS_URL = 'wss://redacted-domain.example:13017';
+const LIVEKIT_WS_URL = 'wss://livekit.redacted-internal.example';
 const API_KEY = 'REDACTED';
 const API_SECRET = 'REDACTED';
 
@@ -383,6 +383,15 @@ io.on('connection', async (socket) => {
   socket.on('leavePair', async () => {
     if (role !== 'teacher') return;
     await sendToRoom(socket.id, 'main-room');
+  });
+
+  socket.on('mute', ({ target }: { target: string | 'all' }) => {
+    if (role !== 'teacher') return;
+    for (const [id, p] of state.participants) {
+      if (p.role === 'student' && (target === 'all' || p.name === target)) {
+        io.sockets.sockets.get(id)?.emit('muted');
+      }
+    }
   });
 
   socket.on('callTeacher', ({ room }: { room: string }) => {
