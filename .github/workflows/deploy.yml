@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build teacher client
+        working-directory: client-teacher
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build student client
+        working-directory: client-student
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build server
+        working-directory: server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy static clients
+        run: |
+          rsync -a --delete client-teacher/dist/ /srv/co-learn/teacher/
+          rsync -a --delete client-student/dist/ /srv/co-learn/student/
+
+      - name: Deploy and restart server
+        run: |
+          rsync -a --delete server/dist/ /srv/co-learn/server/dist/
+          cp server/package.json server/package-lock.json /srv/co-learn/server/
+          cd /srv/co-learn/server && npm ci --omit=dev
+          pm2 restart co-learn-server || pm2 start dist/index.js --name co-learn-server --cwd /srv/co-learn/server
+          pm2 save
