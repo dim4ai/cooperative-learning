@@ -1,11 +1,18 @@
+import 'dotenv/config';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
-const LIVEKIT_URL = 'http://REDACTED-IP:7880';
-const LIVEKIT_WS_URL = 'wss://livekit.redacted-internal.example';
-const API_KEY = 'REDACTED';
-const API_SECRET = 'REDACTED';
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required env var: ${name}`);
+  return value;
+}
+
+const LIVEKIT_URL = requireEnv('LIVEKIT_URL');
+const LIVEKIT_WS_URL = requireEnv('LIVEKIT_WS_URL');
+const API_KEY = requireEnv('LIVEKIT_API_KEY');
+const API_SECRET = requireEnv('LIVEKIT_API_SECRET');
 
 const livekit = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
 

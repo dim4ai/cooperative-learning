@@ -13,7 +13,7 @@ const auth = boardOnly
   ? { name: myName, role: 'board' as const, boardRoom }
   : { name: myName, role: 'student' as const };
 
-export const socket = io('https://redacted-domain.example:13013', {
+export const socket = io(import.meta.env.VITE_API_URL, {
   auth,
   autoConnect: false,
 });

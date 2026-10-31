@@ -1,2 +1,2 @@
-export const SERVER_URL = 'https://redacted-domain.example:13013';
-export const STUDENT_WEB_URL = 'https://redacted-domain.example:13015';
+export const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL!;
+export const STUDENT_WEB_URL = process.env.EXPO_PUBLIC_STUDENT_WEB_URL!;
