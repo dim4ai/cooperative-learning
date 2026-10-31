@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
-import { LiveKitRoom, AudioSession } from '@livekit/react-native';
+import { LiveKitRoom, AudioSession, useLocalParticipant, useRoomContext } from '@livekit/react-native';
+import { RoomEvent } from 'livekit-client';
 import { SERVER_URL } from '../src/config';
 import { WaitingView } from '../src/components/WaitingView';
 import { BoardView } from '../src/components/BoardView';
@@ -30,6 +31,20 @@ interface PollData {
   question: string;
   options: string[];
   myVote: number | null;
+}
+
+function MicControl({ enabled }: { enabled: boolean }) {
+  const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext();
+
+  useEffect(() => {
+    const apply = () => localParticipant?.setMicrophoneEnabled(enabled);
+    apply();
+    room.on(RoomEvent.Connected, apply);
+    return () => { room.off(RoomEvent.Connected, apply); };
+  }, [enabled, localParticipant, room]);
+
+  return null;
 }
 
 const STAGE_LABELS: Record<Stage, string> = {
@@ -62,6 +77,8 @@ export default function LessonScreen() {
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
   const [poll, setPoll] = useState<PollData | null>(null);
   const [calling, setCalling] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+
 
   const secondsLeft = useTimer(lessonState.timerEndsAt);
 
@@ -83,6 +100,7 @@ export default function LessonScreen() {
     socket.on('seats', setSeats);
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('poll', (data: PollData | null) => setPoll(data));
+    socket.on('muted', () => setMicOn(false));
     socket.on('teacherJoined', () => setCalling(false));
 
     socket.connect();
@@ -109,6 +127,11 @@ export default function LessonScreen() {
   }
 
   const stage = lessonState.stage;
+
+  useEffect(() => {
+    setMicOn(stage !== 'group');
+  }, [stage]);
+
   const boardStage = stage === 'group' || stage === 'pairs' || stage === 'fours';
   const boardReadOnly = stage === 'group';
 
@@ -120,6 +143,11 @@ export default function LessonScreen() {
         <Text style={styles.stageLabel}>{STAGE_LABELS[stage]}</Text>
         {secondsLeft !== null && (
           <Text style={styles.timer}>{secondsLeft}с</Text>
+        )}
+        {livekit && (
+          <TouchableOpacity onPress={() => setMicOn(v => !v)} style={[styles.micBtn, { backgroundColor: micOn ? '#27ae60' : '#e74c3c' }]}>
+            <Text style={styles.micBtnText}>{micOn ? '🎤' : '🔇'}</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -136,12 +164,15 @@ export default function LessonScreen() {
       {/* LiveKit audio (invisible) */}
       {livekit && (
         <LiveKitRoom
+          key={livekit.room}
           serverUrl={livekit.url}
           token={livekit.token}
           connect={true}
-          audio={true}
+          audio={false}
           video={false}
-        />
+        >
+          <MicControl enabled={micOn} />
+        </LiveKitRoom>
       )}
 
       {/* Stage content */}
@@ -202,6 +233,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#e74c3c',
+  },
+  micBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtnText: {
+    fontSize: 18,
   },
   content: {
     flex: 1,

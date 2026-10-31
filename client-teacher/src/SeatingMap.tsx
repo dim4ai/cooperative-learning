@@ -49,7 +49,7 @@ const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -161,7 +161,12 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                       <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
                         {seat.occupant}
                       </div>
-                      {!readOnly && <div onClick={e => clearSeat(e, seat.id)} style={{ position: 'relative', zIndex: 1, fontSize: 10, color: '#bbb', cursor: 'pointer', marginTop: 2 }}>✕</div>}
+                      {!readOnly && (
+                        <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
+                          <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>
+                          {onMute && <div onClick={e => { e.stopPropagation(); onMute(seat.occupant!); }} style={{ fontSize: 13, cursor: 'pointer' }} title="Заглушить">🔇</div>}
+                        </div>
+                      )}
                       {isSeatCalling && (
                         <div
                           onClick={e => { e.stopPropagation(); onJoinPair?.(individualRoom!); }}

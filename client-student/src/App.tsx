@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { LiveKitRoom, RoomAudioRenderer, useTracks, VideoTrack } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { LiveKitRoom, RoomAudioRenderer, useTracks, VideoTrack, useLocalParticipant, useRoomContext } from '@livekit/components-react';
+import { Track, RoomEvent } from 'livekit-client';
 import { VideoRoom } from './VideoRoom';
 import { DeskLayout } from './DeskLayout';
 import { FoursLayout } from './FoursLayout';
@@ -10,6 +10,20 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { socket, myName, isBoardOnly, myBoardRoom } from './socket';
+
+function MicControl({ enabled }: { enabled: boolean }) {
+  const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext();
+
+  useEffect(() => {
+    const apply = () => localParticipant?.setMicrophoneEnabled(enabled);
+    apply();
+    room.on(RoomEvent.Connected, apply);
+    return () => { room.off(RoomEvent.Connected, apply); };
+  }, [enabled, localParticipant, room]);
+
+  return null;
+}
 
 function SelfPreview() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
@@ -101,7 +115,12 @@ export default function App() {
   const [, setSharedText] = useState('');
   const [seats, setSeats] = useState<Seat[]>([]);
   const [poll, setPoll] = useState<{ question: string; options: string[]; myVote: number | null } | null>(null);
+  const [micOn, setMicOn] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
+
+  useEffect(() => {
+    setMicOn(lessonState.stage !== 'group');
+  }, [lessonState.stage]);
 
   useEffect(() => {
     socket.connect();
@@ -120,6 +139,7 @@ export default function App() {
     socket.on('poll', (data: { question: string; options: string[]; myVote: number | null } | null) => {
       setPoll(data);
     });
+    socket.on('muted', () => setMicOn(false));
     return () => { socket.disconnect(); };
   }, []);
 
@@ -146,6 +166,27 @@ export default function App() {
         <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
           {students.length} уч.
         </span>
+        {livekit && (
+          <button
+            onClick={() => setMicOn(v => !v)}
+            title={micOn ? 'Выключить микрофон' : 'Включить микрофон'}
+            style={{
+              background: micOn ? '#27ae60' : '#e74c3c',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 20,
+              width: 36,
+              height: 36,
+              fontSize: 18,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {micOn ? '🎤' : '🔇'}
+          </button>
+        )}
       </div>
 
       {poll && (
@@ -192,10 +233,11 @@ export default function App() {
             token={livekit.token}
             connect={true}
             video={true}
-            audio={lessonState.stage !== 'group' && lessonState.stage !== 'waiting'}
+            audio={false}
             style={{ height: '100%' }}
           >
             <RoomAudioRenderer />
+            <MicControl enabled={micOn} />
             {lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />
