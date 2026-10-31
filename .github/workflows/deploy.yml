@@ -12,12 +12,16 @@ jobs:
 
       - name: Build teacher client
         working-directory: client-teacher
+        env:
+          VITE_API_URL: https://api.co-learn.ru
         run: |
           npm ci
           npm run build
 
       - name: Build student client
         working-directory: client-student
+        env:
+          VITE_API_URL: https://api.co-learn.ru
         run: |
           npm ci
           npm run build
@@ -30,13 +34,13 @@ jobs:
 
       - name: Deploy static clients
         run: |
-          rsync -a --delete client-teacher/dist/ /srv/co-learn/teacher/
-          rsync -a --delete client-student/dist/ /srv/co-learn/student/
+          rsync -a --delete client-teacher/dist/ ~/co-learn/teacher/
+          rsync -a --delete client-student/dist/ ~/co-learn/student/
 
       - name: Deploy and restart server
         run: |
-          rsync -a --delete server/dist/ /srv/co-learn/server/dist/
-          cp server/package.json server/package-lock.json /srv/co-learn/server/
-          cd /srv/co-learn/server && npm ci --omit=dev
-          pm2 restart co-learn-server || pm2 start dist/index.js --name co-learn-server --cwd /srv/co-learn/server
+          rsync -a --delete server/dist/ ~/co-learn/server/dist/
+          cp server/package.json server/package-lock.json ~/co-learn/server/
+          cd ~/co-learn/server && npm ci --omit=dev
+          pm2 restart co-learn-server || pm2 start dist/index.js --name co-learn-server --cwd ~/co-learn/server
           pm2 save
