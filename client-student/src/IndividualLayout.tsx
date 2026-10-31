@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useTracks, VideoTrack } from '@livekit/components-react';
+import { useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket, myName } from './socket';
 
-function CamBox({ track, label }: { track: ReturnType<typeof useTracks>[0]; label: string }) {
+function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: string }) {
+  if (!track.publication) return null;
   return (
     <div style={{ width: 200, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', position: 'relative', flexShrink: 0 }}>
       <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
