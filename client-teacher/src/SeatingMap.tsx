@@ -49,7 +49,7 @@ const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -90,7 +90,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
       {Array.from({ length: numGroups }, (_, g) => {
         const groupSeats = seats.filter(s => s.groupIndex === g);
         const color = groupColor(g);
-        const foursRoom = `fours-${g + 1}`;
+        const foursRoom = `${lessonCode}:fours-${g + 1}`;
         const isGroupCalling = callingRooms?.has(foursRoom) ?? false;
         return (
           <div key={g} style={{
@@ -117,7 +117,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               >🔔</div>
             )}
             {[0, 1].map(row => {
-              const pairRoom = `pair-g${g}-r${row}`;
+              const pairRoom = `${lessonCode}:pair-g${g}-r${row}`;
               const isCalling = callingRooms?.has(pairRoom) ?? false;
               return (
               <div key={row} style={{
@@ -135,7 +135,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const seatNum = row * 2 + col + 1;
               const isSelected = !!selected && seat.occupant === selected;
               const isTarget = !seat.occupant && !!selected;
-              const individualRoom = seat.occupant ? `individual-${seat.occupant}` : null;
+              const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
               return (
                 <div key={seat.id}

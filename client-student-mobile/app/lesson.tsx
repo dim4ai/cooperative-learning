@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { io, Socket } from 'socket.io-client';
@@ -68,7 +68,7 @@ function useTimer(timerEndsAt: number | null) {
 }
 
 export default function LessonScreen() {
-  const { name } = useLocalSearchParams<{ name: string }>();
+  const { name, code } = useLocalSearchParams<{ name: string; code: string }>();
 
   const socketRef = useRef<Socket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -78,15 +78,17 @@ export default function LessonScreen() {
   const [poll, setPoll] = useState<PollData | null>(null);
   const [calling, setCalling] = useState(false);
   const [micOn, setMicOn] = useState(false);
+  const [waitingForLesson, setWaitingForLesson] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
 
 
   const secondsLeft = useTimer(lessonState.timerEndsAt);
 
   useEffect(() => {
-    if (!name) { router.replace('/'); return; }
+    if (!name || !code) { router.replace('/'); return; }
 
     const socket = io(SERVER_URL, {
-      auth: { name, role: 'student' },
+      auth: { name, role: 'student', lessonId: code },
       autoConnect: false,
     });
     socketRef.current = socket;
@@ -96,12 +98,24 @@ export default function LessonScreen() {
     socket.on('state', (s: LessonState) => {
       setLessonState(s);
       setCalling(false);
+      setWaitingForLesson(false);
+      setConfirmed(true);
     });
     socket.on('seats', setSeats);
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('poll', (data: PollData | null) => setPoll(data));
     socket.on('muted', () => setMicOn(false));
     socket.on('teacherJoined', () => setCalling(false));
+    socket.on('lessonError', ({ error }: { error: string }) => {
+      if (error === 'lesson not found') {
+        setWaitingForLesson(true);
+      } else if (error === 'too many attempts') {
+        Alert.alert('Слишком много попыток', 'Подождите минуту и попробуйте снова');
+        router.replace('/');
+      } else {
+        router.replace('/');
+      }
+    });
 
     socket.connect();
 
@@ -110,8 +124,15 @@ export default function LessonScreen() {
     return () => {
       socket.disconnect();
       AudioSession.stopAudioSession().catch(() => {});
+      setConfirmed(false);
     };
-  }, [name]);
+  }, [name, code]);
+
+  useEffect(() => {
+    if (!waitingForLesson) return;
+    const id = setInterval(() => { socketRef.current?.connect(); }, 30000);
+    return () => clearInterval(id);
+  }, [waitingForLesson]);
 
   function toggleCall() {
     const socket = socketRef.current;
@@ -134,6 +155,34 @@ export default function LessonScreen() {
 
   const boardStage = stage === 'group' || stage === 'pairs' || stage === 'fours';
   const boardReadOnly = stage === 'group';
+
+  if (waitingForLesson) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.waitingContainer}>
+          <Text style={styles.waitingTitle}>Ждём начала занятия…</Text>
+          <Text style={styles.waitingCode}>Код: {code}</Text>
+          <Text style={styles.waitingHint}>Проверяем каждые 30 секунд</Text>
+          <TouchableOpacity style={styles.waitingButton} onPress={() => socketRef.current?.connect()}>
+            <Text style={styles.waitingButtonText}>Проверить сейчас</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.replace('/')}>
+            <Text style={styles.waitingChangeCode}>Изменить код</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!confirmed) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.waitingContainer}>
+          <Text style={styles.waitingHint}>Подключаемся к занятию…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -186,6 +235,7 @@ export default function LessonScreen() {
             <BoardView
               myName={name ?? ''}
               room={livekit.room}
+              lessonId={code ?? ''}
               readOnly={boardReadOnly}
             />
             {!boardReadOnly && (
@@ -208,6 +258,43 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  waitingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 24,
+  },
+  waitingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a2e',
+  },
+  waitingCode: {
+    fontSize: 15,
+    color: '#666',
+  },
+  waitingHint: {
+    fontSize: 13,
+    color: '#999',
+  },
+  waitingButton: {
+    marginTop: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  waitingButtonText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  waitingChangeCode: {
+    fontSize: 13,
+    color: '#aaa',
+    marginTop: 8,
   },
   header: {
     flexDirection: 'row',

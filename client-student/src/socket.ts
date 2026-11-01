@@ -1,17 +1,31 @@
 import { io } from 'socket.io-client';
 
 const params = new URLSearchParams(window.location.search);
-const urlName = params.get('name');
 const boardOnly = params.get('boardonly') === '1';
 const boardRoom = params.get('room') ?? '';
 
-export const myName = urlName || prompt('Your name:') || 'Student';
 export const isBoardOnly = boardOnly;
 export const myBoardRoom = boardRoom;
 
+export let myName = params.get('name') ?? '';
+export let lessonId = params.get('lessonId') ?? '';
+
+export function setJoinInfo(name: string, code: string) {
+  myName = name;
+  lessonId = code;
+}
+
+export function setName(name: string) {
+  myName = name;
+}
+
+export function setLessonId(code: string) {
+  lessonId = code;
+}
+
 const auth = boardOnly
-  ? { name: myName, role: 'board' as const, boardRoom }
-  : { name: myName, role: 'student' as const };
+  ? (cb: (data: object) => void) => cb({ name: myName, role: 'board', boardRoom, lessonId })
+  : (cb: (data: object) => void) => cb({ name: myName, role: 'student', lessonId });
 
 export const socket = io(import.meta.env.VITE_API_URL, {
   auth,
