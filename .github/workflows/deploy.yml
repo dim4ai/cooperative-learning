@@ -26,6 +26,12 @@ jobs:
           npm ci
           npm run build
 
+      - name: Build lesson editor
+        working-directory: client-editor
+        run: |
+          npm ci
+          npm run build
+
       - name: Build server
         working-directory: server
         run: |
@@ -36,6 +42,8 @@ jobs:
         run: |
           rsync -a --delete client-teacher/dist/ ~/co-learn/teacher/
           rsync -a --delete client-student/dist/ ~/co-learn/student/
+          mkdir -p ~/co-learn/editor
+          rsync -a --delete client-editor/dist/ ~/co-learn/editor/
 
       - name: Deploy and restart server
         run: |
