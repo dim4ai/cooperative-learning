@@ -28,8 +28,8 @@ export async function pickLessonFile(): Promise<Opened | null> {
   return file ? { file, handle: null } : null
 }
 
-export async function pickMediaFiles(): Promise<File[]> {
-  return pickViaInput('image/*,video/*,application/pdf', true)
+export async function pickMediaFiles(accept = 'image/*,video/*,application/pdf'): Promise<File[]> {
+  return pickViaInput(accept, true)
 }
 
 /**

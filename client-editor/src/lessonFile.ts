@@ -2,7 +2,7 @@
 //   lesson.json      — LessonFile (meta + blocks), attachments reference media by name
 //   media/<name>     — attachment bytes
 import { unzip, zip, strFromU8, strToU8, type Unzipped, type Zippable } from 'fflate'
-import type { LessonFile } from './types'
+import { usedMediaNames, type LessonFile } from './types'
 
 export const LESSON_EXT = '.lesson.zip'
 export type Media = Record<string, Blob>
@@ -14,7 +14,7 @@ export interface LoadedLesson {
 }
 
 export async function packLesson(lesson: LessonFile, media: Media): Promise<Blob> {
-  const used = new Set(lesson.blocks.flatMap(b => b.attachments.map(a => a.name)))
+  const used = usedMediaNames(lesson.blocks)
   const files: Zippable = {
     'lesson.json': strToU8(JSON.stringify(lesson, null, 2)),
   }
@@ -50,13 +50,11 @@ export async function unpackLesson(file: Blob): Promise<LoadedLesson> {
 
   const media: Media = {}
   const missing: string[] = []
-  for (const block of lesson.blocks) {
-    block.attachments ??= []
-    for (const a of block.attachments) {
-      const data = entries[`media/${a.name}`]
-      if (data) media[a.name] = new Blob([data as Uint8Array<ArrayBuffer>], { type: mimeFromName(a.name) })
-      else missing.push(a.name)
-    }
+  for (const block of lesson.blocks) block.attachments ??= []
+  for (const name of usedMediaNames(lesson.blocks)) {
+    const data = entries[`media/${name}`]
+    if (data) media[name] = new Blob([data as Uint8Array<ArrayBuffer>], { type: mimeFromName(name) })
+    else missing.push(name)
   }
   return { lesson, media, missing }
 }
