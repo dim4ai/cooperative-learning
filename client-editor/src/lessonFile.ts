@@ -2,7 +2,7 @@
 //   lesson.json      — LessonFile (meta + blocks), attachments reference media by name
 //   media/<name>     — attachment bytes
 import { unzip, zip, strFromU8, strToU8, type Unzipped, type Zippable } from 'fflate'
-import { usedMediaNames, type LessonFile } from './types'
+import { normalizeBlocks, usedMediaNames, type LessonFile } from './types'
 
 export const LESSON_EXT = '.lesson.zip'
 export type Media = Record<string, Blob>
@@ -50,7 +50,7 @@ export async function unpackLesson(file: Blob): Promise<LoadedLesson> {
 
   const media: Media = {}
   const missing: string[] = []
-  for (const block of lesson.blocks) block.attachments ??= []
+  normalizeBlocks(lesson.blocks)
   for (const name of usedMediaNames(lesson.blocks)) {
     const data = entries[`media/${name}`]
     if (data) media[name] = new Blob([data as Uint8Array<ArrayBuffer>], { type: mimeFromName(name) })

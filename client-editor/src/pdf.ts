@@ -15,24 +15,33 @@ export async function pdfPageCount(file: Blob): Promise<number> {
   }
 }
 
-/** Renders page `pageNo` (1-based) to PNG */
-export async function renderPdfPage(file: Blob, pageNo: number): Promise<Blob> {
+/** Renders the given pages (1-based) to PNG, opening the document once */
+export async function renderPdfPages(
+  file: Blob, pages: number[], onProgress?: (done: number) => void,
+): Promise<Blob[]> {
   const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
   try {
     const doc = await task.promise
-    const page = await doc.getPage(pageNo)
-    const base = page.getViewport({ scale: 1 })
-    const viewport = page.getViewport({ scale: TARGET_WIDTH / base.width })
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.ceil(viewport.width)
-    canvas.height = Math.ceil(viewport.height)
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise
-    return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Не удалось отрисовать страницу'))), 'image/png'),
-    )
+    const out: Blob[] = []
+    for (const pageNo of pages) {
+      onProgress?.(out.length + 1)
+      const page = await doc.getPage(pageNo)
+      const base = page.getViewport({ scale: 1 })
+      const viewport = page.getViewport({ scale: TARGET_WIDTH / base.width })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      await page.render({ canvas, canvasContext: ctx, viewport }).promise
+      page.cleanup()
+      out.push(await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error(`Не удалось отрисовать страницу ${pageNo}`))), 'image/png'),
+      ))
+      canvas.width = canvas.height = 0 // free the bitmap early on long PDFs
+    }
+    return out
   } finally {
     await task.destroy()
   }

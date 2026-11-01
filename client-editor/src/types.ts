@@ -12,6 +12,7 @@ export interface Attachment {
  * (`mediaName`, file in media/), never inline data.
  */
 export interface Scene {
+  id: string
   engine: 'fabric'
   width: number
   height: number
@@ -40,7 +41,7 @@ export interface BlockBase {
   title: string
   teacherNote: string
   attachments: Attachment[]
-  scene?: Scene
+  slides?: Scene[]
 }
 
 /** Every media name the lesson references (attachments + slide images) */
@@ -48,9 +49,22 @@ export function usedMediaNames(blocks: LessonBlock[]): Set<string> {
   const names = new Set<string>()
   for (const b of blocks) {
     for (const a of b.attachments) names.add(a.name)
-    for (const o of b.scene?.objects ?? []) if (o.mediaName) names.add(o.mediaName)
+    for (const s of b.slides ?? []) for (const o of s.objects) if (o.mediaName) names.add(o.mediaName)
   }
   return names
+}
+
+/** Bring blocks from older files/drafts to the current shape (in place) */
+export function normalizeBlocks(blocks: LessonBlock[]): LessonBlock[] {
+  for (const b of blocks as (LessonBlock & { scene?: Scene })[]) {
+    b.attachments ??= []
+    if (b.scene) { b.slides = [...(b.slides ?? []), b.scene]; delete b.scene } // single-slide prototype
+    for (const s of b.slides ?? []) {
+      s.id ??= Math.random().toString(36).slice(2, 12)
+      s.objects ??= []
+    }
+  }
+  return blocks
 }
 
 export interface GroupBlock extends BlockBase {
