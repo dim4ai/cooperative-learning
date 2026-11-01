@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonBlock, LessonFile, LessonMeta, BlockType } from './types'
-import { BLOCK_LABELS } from './types'
+import { BLOCK_LABELS, usedMediaNames } from './types'
 import { BlockCard } from './BlockCard'
 import { MetaPanel } from './MetaPanel'
 import { nanoid } from './nanoid'
@@ -53,9 +53,10 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return
     clearTimeout(draftTimer.current)
-    draftTimer.current = window.setTimeout(() => {
-      saveDraft({ meta, blocks, media, fileName, handle, dirty, updatedAt: Date.now() })
-    }, 400)
+    const write = () => saveDraft({ meta, blocks, media, fileName, handle, dirty, updatedAt: Date.now() })
+    // Just saved to file — record that at once, so a quick tab close doesn't resurrect "unsaved"
+    if (!dirty) write()
+    else draftTimer.current = window.setTimeout(write, 400)
   }, [loaded, meta, blocks, media, fileName, handle, dirty])
 
   const noticeTimer = useRef<number | undefined>(undefined)
@@ -142,7 +143,7 @@ export default function App() {
       const res = await saveLessonFile(blob, handle, fileName ?? suggestedFileName(meta.title), saveAs)
       if (!res) return
       // Drop media no longer referenced by any block
-      const used = new Set(blocks.flatMap(b => b.attachments.map(a => a.name)))
+      const used = usedMediaNames(blocks)
       setMedia(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => used.has(k))))
       setHandle(res.handle)
       setFileName(res.name)
@@ -262,7 +263,7 @@ export default function App() {
       {/* Right: editor area */}
       <div style={{ flex: 1, overflow: 'auto', background: '#f5f5f5' }}>
         {selected
-          ? <BlockCard block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onDelete={() => deleteBlock(selected.id)} />
+          ? <BlockCard block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
           : <MetaPanel meta={meta} onChange={m => { setMeta(m); setDirty(true) }} />
         }
       </div>

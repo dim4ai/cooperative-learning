@@ -1,7 +1,9 @@
+import { useRef } from 'react'
 import type { LessonBlock, Attachment } from './types'
 import { BLOCK_LABELS, TECHNIQUES, kindFromName } from './types'
 import { pickMediaFiles } from './fileAccess'
 import { uniqueName, type Media } from './lessonFile'
+import { SceneEditor, emptyScene } from './SceneEditor'
 
 interface Props {
   block: LessonBlock
@@ -9,9 +11,14 @@ interface Props {
   onAddMedia: (name: string, blob: Blob) => void
   onChange: (block: LessonBlock) => void
   onDelete: () => void
+  onError: (text: string) => void
 }
 
-export function BlockCard({ block, media, onAddMedia, onChange, onDelete }: Props) {
+export function BlockCard({ block, media, onAddMedia, onChange, onDelete, onError }: Props) {
+  // SceneEditor emits asynchronously — merge into the latest block, not a stale one
+  const latest = useRef(block)
+  latest.current = block
+
   function attach(files: File[]) {
     if (!files.length) return
     const taken: Media = { ...media }
@@ -45,7 +52,7 @@ export function BlockCard({ block, media, onAddMedia, onChange, onDelete }: Prop
   const hasTechnique = block.type === 'pairs' || block.type === 'fours'
 
   return (
-    <div style={{ padding: 32, maxWidth: 680 }}>
+    <div style={{ padding: 32, maxWidth: 1180 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
         <div style={{
@@ -62,6 +69,27 @@ export function BlockCard({ block, media, onAddMedia, onChange, onDelete }: Prop
         </button>
       </div>
 
+      <Field label="Слайд">
+        {block.scene ? (
+          <SceneEditor
+            key={block.id}
+            scene={block.scene}
+            media={media}
+            onAddMedia={onAddMedia}
+            onChange={scene => onChange({ ...latest.current, scene })}
+            onError={onError}
+          />
+        ) : (
+          <button onClick={() => onChange({ ...block, scene: emptyScene() })} style={{
+            padding: '7px 12px', borderRadius: 4, border: '1px dashed #d1d5db',
+            background: 'transparent', color: '#6b7280', fontSize: 13,
+          }}>
+            + Добавить слайд (текст, картинки, страницы PDF слоями)
+          </button>
+        )}
+      </Field>
+
+      <div style={{ maxWidth: 680 }}>
       <Field label="Название этапа">
         <input
           value={block.title}
@@ -153,6 +181,7 @@ export function BlockCard({ block, media, onAddMedia, onChange, onDelete }: Prop
           </button>
         </div>
       </Field>
+      </div>
     </div>
   )
 }

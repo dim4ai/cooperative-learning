@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/BlockCard.tsx","./src/MetaPanel.tsx","./src/draft.ts","./src/fileAccess.ts","./src/lessonFile.ts","./src/main.tsx","./src/nanoid.ts","./src/types.ts","./src/vite-env.d.ts","./vite.config.ts"],"version":"6.0.3"}
+{"root":["./src/App.tsx","./src/BlockCard.tsx","./src/MetaPanel.tsx","./src/SceneEditor.tsx","./src/draft.ts","./src/fileAccess.ts","./src/lessonFile.ts","./src/main.tsx","./src/nanoid.ts","./src/pdf.ts","./src/types.ts","./src/vite-env.d.ts","./vite.config.ts"],"version":"6.0.3"}
