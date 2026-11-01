@@ -8,21 +8,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 
 const NAME_KEY = 'student_name';
+const CODE_KEY = 'lesson_code';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
+  const [code, setCode] = useState('');
 
   useEffect(() => {
     AsyncStorage.getItem(NAME_KEY).then(saved => {
       if (saved) setName(saved);
     });
+    AsyncStorage.getItem(CODE_KEY).then(saved => {
+      if (saved) setCode(saved);
+    });
   }, []);
 
   async function connect() {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    await AsyncStorage.setItem(NAME_KEY, trimmed);
-    router.replace({ pathname: '/lesson', params: { name: trimmed } });
+    const trimmedName = name.trim();
+    const trimmedCode = code.trim().toLowerCase();
+    if (!trimmedName || !trimmedCode) return;
+    await AsyncStorage.setItem(NAME_KEY, trimmedName);
+    await AsyncStorage.setItem(CODE_KEY, trimmedCode);
+    router.replace({ pathname: '/lesson', params: { name: trimmedName, code: trimmedCode } });
   }
 
   return (
@@ -40,13 +47,22 @@ export default function LoginScreen() {
           placeholder="Имя ученика"
           placeholderTextColor="#aaa"
           autoCapitalize="words"
+          returnKeyType="next"
+        />
+        <TextInput
+          style={styles.input}
+          value={code}
+          onChangeText={setCode}
+          placeholder="Код занятия"
+          placeholderTextColor="#aaa"
+          autoCapitalize="none"
           returnKeyType="go"
           onSubmitEditing={connect}
         />
         <TouchableOpacity
-          style={[styles.button, !name.trim() && styles.buttonDisabled]}
+          style={[styles.button, (!name.trim() || !code.trim()) && styles.buttonDisabled]}
           onPress={connect}
-          disabled={!name.trim()}
+          disabled={!name.trim() || !code.trim()}
         >
           <Text style={styles.buttonText}>Войти на урок</Text>
         </TouchableOpacity>

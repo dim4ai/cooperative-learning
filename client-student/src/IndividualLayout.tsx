@@ -3,6 +3,10 @@ import { useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@liveki
 import { Track } from 'livekit-client';
 import { socket, myName } from './socket';
 
+interface Props {
+  room: string;
+}
+
 function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: string }) {
   if (!track.publication) return null;
   return (
@@ -15,7 +19,7 @@ function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: s
   );
 }
 
-export function IndividualLayout() {
+export function IndividualLayout({ room }: Props) {
   const [calling, setCalling] = useState(false);
   const allTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const subscribedTracks = useTracks([Track.Source.Camera]);
@@ -30,7 +34,7 @@ export function IndividualLayout() {
   function toggleCall() {
     const next = !calling;
     setCalling(next);
-    socket.emit(next ? 'callTeacher' : 'dismissCall', { room: `individual-${myName}` });
+    socket.emit(next ? 'callTeacher' : 'dismissCall', { room });
   }
 
   return (
