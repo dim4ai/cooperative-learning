@@ -16,6 +16,11 @@ export interface Teacher {
   sessionVersion: number;
 }
 
+// Hash of a random string, never matched by any real password — used only so that a login with
+// an unknown email still pays the same bcrypt.compare cost as a known one, closing the timing
+// side-channel that would otherwise let someone enumerate which emails have accounts.
+const DUMMY_HASH = '$2b$10$t68aTUTMHANV92Z0e0/azOwv9vSge84/X1sWGE9ZzSF4JJgXIJYZC';
+
 // Logging in bumps session_version, which invalidates every token issued before this login
 // (so a shared/leaked password can't keep two sessions alive at once — whoever logs in last wins).
 export async function verifyTeacher(email: string, password: string): Promise<Teacher | null> {
@@ -24,9 +29,8 @@ export async function verifyTeacher(email: string, password: string): Promise<Te
     [email]
   );
   const row = rows[0];
-  if (!row) return null;
-  const ok = await bcrypt.compare(password, row.password_hash);
-  if (!ok) return null;
+  const ok = await bcrypt.compare(password, row?.password_hash ?? DUMMY_HASH);
+  if (!row || !ok) return null;
   const { rows: updated } = await pool.query(
     'UPDATE teachers SET session_version = session_version + 1 WHERE id = $1 RETURNING session_version',
     [row.id]

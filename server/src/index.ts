@@ -83,6 +83,11 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 app.post('/login', async (req, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(loginAttempts, ip)) {
+    res.status(429).json({ error: 'too many attempts' });
+    return;
+  }
   const { email, password } = req.body ?? {};
   if (typeof email !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'email and password are required' });
@@ -90,9 +95,11 @@ app.post('/login', async (req, res) => {
   }
   const teacher = await verifyTeacher(email, password).catch(() => null);
   if (!teacher) {
+    recordFailedAttempt(loginAttempts, ip);
     res.status(401).json({ error: 'invalid credentials' });
     return;
   }
+  clearAttempts(loginAttempts, ip);
   const token = signTeacherToken(teacher.id, teacher.sessionVersion);
   res.json({ teacher: { id: teacher.id, email: teacher.email, name: teacher.name }, token });
 });
@@ -357,9 +364,12 @@ async function sendAllToMain(code: string, lesson: LessonRuntime) {
   }
 }
 
-// Brute-force protection on lesson codes: 5 failed attempts from one IP -> locked out for a minute.
+// Brute-force protection, shared by lesson-code guessing (socket) and login (REST):
+// 5 failed attempts from one IP -> locked out for a minute. Separate maps per purpose so a
+// lockout on one doesn't get cleared by unrelated success on the other.
 interface AttemptEntry { failures: number; windowStart: number; lockedUntil: number }
 const codeAttempts = new Map<string, AttemptEntry>();
+const loginAttempts = new Map<string, AttemptEntry>();
 const MAX_FAILURES = 5;
 const ATTEMPT_WINDOW_MS = 60 * 1000;
 const LOCKOUT_MS = 60 * 1000;
@@ -370,14 +380,20 @@ function clientIp(socket: { handshake: { headers: Record<string, unknown>; addre
   return socket.handshake.address;
 }
 
-function isLockedOut(ip: string): boolean {
-  const entry = codeAttempts.get(ip);
+function clientIpFromReq(req: Request): string {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0].trim();
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+function isLockedOut(store: Map<string, AttemptEntry>, key: string): boolean {
+  const entry = store.get(key);
   return !!entry && entry.lockedUntil > Date.now();
 }
 
-function recordFailedAttempt(ip: string) {
+function recordFailedAttempt(store: Map<string, AttemptEntry>, key: string) {
   const now = Date.now();
-  const entry = codeAttempts.get(ip) ?? { failures: 0, windowStart: now, lockedUntil: 0 };
+  const entry = store.get(key) ?? { failures: 0, windowStart: now, lockedUntil: 0 };
   if (now - entry.windowStart > ATTEMPT_WINDOW_MS) {
     entry.failures = 0;
     entry.windowStart = now;
@@ -386,17 +402,17 @@ function recordFailedAttempt(ip: string) {
   if (entry.failures >= MAX_FAILURES) {
     entry.lockedUntil = now + LOCKOUT_MS;
   }
-  codeAttempts.set(ip, entry);
+  store.set(key, entry);
 }
 
-function clearAttempts(ip: string) {
-  codeAttempts.delete(ip);
+function clearAttempts(store: Map<string, AttemptEntry>, key: string) {
+  store.delete(key);
 }
 
-function sweepAttempts() {
+function sweepAttempts(store: Map<string, AttemptEntry>) {
   const now = Date.now();
-  for (const [ip, entry] of codeAttempts) {
-    if (entry.lockedUntil < now && now - entry.windowStart > ATTEMPT_WINDOW_MS) codeAttempts.delete(ip);
+  for (const [key, entry] of store) {
+    if (entry.lockedUntil < now && now - entry.windowStart > ATTEMPT_WINDOW_MS) store.delete(key);
   }
 }
 
@@ -404,14 +420,14 @@ io.on('connection', async (socket) => {
   const { name, role, lessonId, deviceId, token } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; deviceId?: string; token?: string };
   const ip = clientIp(socket);
 
-  if (isLockedOut(ip)) {
+  if (isLockedOut(codeAttempts, ip)) {
     socket.emit('lessonError', { error: 'too many attempts' });
     socket.disconnect(true);
     return;
   }
 
   if (!lessonId) {
-    recordFailedAttempt(ip);
+    recordFailedAttempt(codeAttempts, ip);
     socket.emit('lessonError', { error: 'missing lesson code' });
     socket.disconnect(true);
     return;
@@ -419,12 +435,12 @@ io.on('connection', async (socket) => {
 
   const dbLesson = await getLessonByCode(lessonId).catch(() => null);
   if (!dbLesson) {
-    recordFailedAttempt(ip);
+    recordFailedAttempt(codeAttempts, ip);
     socket.emit('lessonError', { error: 'lesson not found' });
     socket.disconnect(true);
     return;
   }
-  clearAttempts(ip);
+  clearAttempts(codeAttempts, ip);
 
   // Teacher role is only trusted once backed by a verified token — the client can no longer
   // just claim role: 'teacher'. A teacher also can't control someone else's lesson.
@@ -446,9 +462,21 @@ io.on('connection', async (socket) => {
   const lesson = getLessonRuntime(code);
   socket.join(code);
 
-  // Board-only connection: mobile student viewing/drawing the board via WebView
+  // Board-only connection: mobile student viewing/drawing the board via WebView, as a second
+  // socket alongside their normal 'student' connection. The room it may attach to is NOT taken
+  // from the client as-is — it must match a room that participant is actually currently assigned
+  // to server-side (set by sendToRoom), otherwise anyone who knows the lesson code could request
+  // any other group's room name and read/draw on it while staying invisible (no participants entry).
   if (role === 'board') {
-    const boardRoom = (socket.handshake.auth as { boardRoom?: string }).boardRoom ?? '';
+    const requestedRoom = (socket.handshake.auth as { boardRoom?: string }).boardRoom ?? '';
+    const owner = Array.from(lesson.participants.values())
+      .find(p => p.role === 'student' && p.name === name && p.livekitRoom === requestedRoom);
+    if (!owner) {
+      socket.emit('lessonError', { error: 'not your board' });
+      socket.disconnect(true);
+      return;
+    }
+    const boardRoom = requestedRoom;
     lesson.boardConnections.set(socket.id, { room: boardRoom });
     console.log(`+ [${code}] board viewer: ${name} @ ${boardRoom}`);
     const snapshot = lesson.boardSnapshots.get(boardRoom);
@@ -686,7 +714,7 @@ io.on('connection', async (socket) => {
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
 setInterval(() => {
   cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
-  sweepAttempts();
+  sweepAttempts(codeAttempts); sweepAttempts(loginAttempts);
 }, 6 * 60 * 60 * 1000);
 
 const PORT = 13113;
