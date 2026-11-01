@@ -8,6 +8,7 @@ import { DeskLayout } from './DeskLayout';
 import { FoursLayout } from './FoursLayout';
 import { IndividualLayout } from './IndividualLayout';
 import { GroupView } from './GroupView';
+import { useStudentSlides } from './LessonSlides';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
@@ -275,6 +276,7 @@ export default function App() {
   const [waitingForLesson, setWaitingForLesson] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
+  const slides = useStudentSlides(joined);
 
   useEffect(() => {
     setMicOn(lessonState.stage !== 'group');
@@ -311,6 +313,15 @@ export default function App() {
       setPoll(data);
     });
     socket.on('muted', () => setMicOn(false));
+    // Teacher ended the lesson: back to the start screen
+    socket.on('lessonEnded', () => {
+      setJoined(false);
+      setWaitingForLesson(false);
+      setLivekit(null);
+      setMonitor(null);
+      setLessonState({ stage: 'waiting', timerEndsAt: null, participants: [] });
+      setJoinError('Урок завершён');
+    });
     return () => { socket.disconnect(); setConfirmed(false); };
   }, [joined]);
 
@@ -486,7 +497,7 @@ export default function App() {
                   <SeatingMap seats={seats} />
                 </div>
               : showGroup
-                ? <GroupView />
+                ? <GroupView slides={slides} />
                 : showIndividual
                   ? <IndividualLayout room={livekit.room} />
                   : showFours

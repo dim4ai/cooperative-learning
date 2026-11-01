@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'http';
+import crypto from 'crypto';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
@@ -9,6 +10,10 @@ import {
   verifyTeacher, getTeacherSessionVersion, createLesson, getLessonByCode, cleanupExpiredLessons,
   listStudents, createStudent, getStudentsForDevice, linkDevice,
 } from './db';
+import {
+  saveMaterial, getMaterial, deleteMaterial, touchMaterial, sweepMaterials, MaterialError, MAX_UPLOAD_BYTES,
+  emptySlidesState, blockSlides, currentScene, studentScene, studentMediaAllowed, type SlidesState, type Material,
+} from './materials';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -75,8 +80,8 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
 const app = express();
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
 });
@@ -136,6 +141,64 @@ app.post('/students', requireAuth, async (req: AuthedRequest, res) => {
   res.json({ student });
 });
 
+// ---------- lesson materials (uploaded .lesson.zip, kept only for the lesson) ----------
+
+async function ownLesson(req: AuthedRequest, res: Response): Promise<string | null> {
+  const dbLesson = await getLessonByCode(String(req.params.code)).catch(() => null);
+  if (!dbLesson) { res.status(404).json({ error: 'lesson not found' }); return null; }
+  if (dbLesson.teacherId !== null && dbLesson.teacherId !== req.teacherId) { res.status(403).json({ error: 'not your lesson' }); return null; }
+  return dbLesson.code;
+}
+
+function materialSummary(m: Material) {
+  return {
+    title: m.title,
+    blocks: m.blocks.map(b => ({ id: b.id, type: b.type, title: b.title, slides: (b.slides ?? []).length })),
+  };
+}
+
+app.post('/lessons/:code/material', requireAuth, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req: AuthedRequest, res) => {
+  const code = await ownLesson(req, res);
+  if (!code) return;
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) { res.status(400).json({ error: 'empty upload' }); return; }
+  try {
+    const material = await saveMaterial(code, new Uint8Array(req.body));
+    const lesson = getLessonRuntime(code);
+    lesson.slides = emptySlidesState();
+    await broadcastSlides(code, lesson);
+    console.log(`[${code}] material uploaded: "${material.title}", ${material.media.size} media`);
+    res.json({ material: materialSummary(material) });
+  } catch (e) {
+    if (e instanceof MaterialError) { res.status(400).json({ error: e.message }); return; }
+    console.error(`[${code}] material upload failed`, e);
+    res.status(500).json({ error: 'failed to store material' });
+  }
+});
+
+app.delete('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res) => {
+  const code = await ownLesson(req, res);
+  if (!code) return;
+  await removeMaterial(code);
+  res.json({ ok: true });
+});
+
+// Media for the slide player. Images can't send auth headers, so the key handed to each
+// socket on join goes in the query; it dies with the socket. Students only get what is
+// visible to them right now (current + next slide), never hidden objects ahead of time.
+app.get('/lessons/:code/media/:name', async (req, res) => {
+  const key = mediaKeys.get(String(req.query.k ?? ''));
+  const code = String(req.params.code);
+  if (!key || key.code !== code) { res.sendStatus(403); return; }
+  const material = await getMaterial(code).catch(() => null);
+  const name = String(req.params.name);
+  const entry = material?.media.get(name);
+  const lesson = lessons.get(code);
+  if (!entry || !lesson) { res.sendStatus(404); return; }
+  if (key.role !== 'teacher' && !studentMediaAllowed(material, lesson.slides, name)) { res.sendStatus(403); return; }
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.type(entry.type).sendFile(entry.file);
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -180,6 +243,7 @@ interface LessonRuntime {
   boardSnapshots: Map<string, unknown>; // per livekit room name
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
   currentPoll: Poll | null;
+  slides: SlidesState;
 }
 
 const lessons = new Map<string, LessonRuntime>();
@@ -196,6 +260,7 @@ function getLessonRuntime(code: string): LessonRuntime {
       boardSnapshots: new Map(),
       boardConnections: new Map(),
       currentPoll: null,
+      slides: emptySlidesState(),
     };
     lessons.set(code, lesson);
   }
@@ -242,6 +307,63 @@ function broadcastState(code: string, lesson: LessonRuntime) {
       id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, identified: p.studentId !== null,
     })),
   });
+}
+
+// ---------- slides ----------
+
+// Per-socket keys for /lessons/:code/media (see the route)
+const mediaKeys = new Map<string, { code: string; role: Role; socketId: string }>();
+
+function socketsOf(lesson: LessonRuntime, role: Role): string[] {
+  return Array.from(lesson.participants.values()).filter(p => p.role === role).map(p => p.id);
+}
+
+function teacherSlidesState(lesson: LessonRuntime, material: Material | null) {
+  const st = lesson.slides;
+  const scene = currentScene(material, st);
+  return {
+    active: st.active,
+    blockId: st.blockId,
+    index: st.index,
+    revealed: scene ? Array.from(st.revealed.get(scene.id) ?? []) : [],
+    positions: scene ? st.positions.get(scene.id) ?? {} : {},
+  };
+}
+
+function studentSlidesView(lesson: LessonRuntime, material: Material | null) {
+  const st = lesson.slides;
+  const slides = blockSlides(material, st.blockId);
+  const scene = slides[st.index];
+  if (!st.active || !material || !scene) return { active: false };
+  const next = slides[st.index + 1];
+  return {
+    active: true,
+    index: st.index,
+    count: slides.length,
+    scene: studentScene(scene, st),
+    next: next ? studentScene(next, st) : null, // so the client can preload its images
+  };
+}
+
+/** Push slide state to everyone in the lesson; teachers also get the full material */
+async function broadcastSlides(code: string, lesson: LessonRuntime, opts: { material?: boolean } = { material: true }) {
+  const material = await getMaterial(code).catch(() => null);
+  for (const id of socketsOf(lesson, 'teacher')) {
+    const sock = io.sockets.sockets.get(id);
+    if (opts.material) sock?.emit('slides:material', material && { title: material.title, blocks: material.blocks });
+    sock?.emit('slides:state', teacherSlidesState(lesson, material));
+  }
+  const view = studentSlidesView(lesson, material);
+  for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('slides:view', view);
+}
+
+async function removeMaterial(code: string) {
+  await deleteMaterial(code).catch(() => {});
+  const lesson = lessons.get(code);
+  if (lesson) {
+    lesson.slides = emptySlidesState();
+    await broadcastSlides(code, lesson);
+  }
 }
 
 async function makeLivekitToken(identity: string, room: string): Promise<string> {
@@ -511,6 +633,20 @@ io.on('connection', async (socket) => {
     broadcastState(code, lesson);
     socket.emit('seats', lesson.seats);
 
+    const mediaKey = crypto.randomBytes(18).toString('base64url');
+    mediaKeys.set(mediaKey, { code, role, socketId: socket.id });
+    socket.emit('slides:key', mediaKey);
+    {
+      const material = await getMaterial(code).catch(() => null);
+      if (material) touchMaterial(code);
+      if (role === 'teacher') {
+        socket.emit('slides:material', material && { title: material.title, blocks: material.blocks });
+        socket.emit('slides:state', teacherSlidesState(lesson, material));
+      } else {
+        socket.emit('slides:view', studentSlidesView(lesson, material));
+      }
+    }
+
     const mainRoom = roomName(code, 'main-room');
     await livekit.createRoom({ name: mainRoom }).catch(() => {});
     // Monitor token — student stays visible to teacher in main-room even during pair work
@@ -679,7 +815,81 @@ io.on('connection', async (socket) => {
       broadcastState(code, lesson);
     });
 
+    // Teacher presents slides: open/close, navigate, reveal hidden objects, move ✋ objects.
+    socket.on('slides:open', async ({ blockId }: { blockId?: string } = {}) => {
+      if (role !== 'teacher') return;
+      const material = await getMaterial(code).catch(() => null);
+      if (!material) return;
+      const st = lesson.slides;
+      const target = blockId ?? st.blockId ?? material.blocks.find(b => (b.slides ?? []).length)?.id ?? null;
+      if (target !== st.blockId) { st.blockId = target; st.index = 0; }
+      st.active = blockSlides(material, st.blockId).length > 0;
+      touchMaterial(code);
+      await broadcastSlides(code, lesson, { material: false });
+    });
+
+    socket.on('slides:close', async () => {
+      if (role !== 'teacher') return;
+      lesson.slides.active = false;
+      await broadcastSlides(code, lesson, { material: false });
+    });
+
+    socket.on('slides:goto', async ({ blockId, index }: { blockId: string; index: number }) => {
+      if (role !== 'teacher') return;
+      const material = await getMaterial(code).catch(() => null);
+      const count = blockSlides(material, blockId).length;
+      if (!count || !Number.isInteger(index)) return;
+      lesson.slides.blockId = blockId;
+      lesson.slides.index = Math.max(0, Math.min(count - 1, index));
+      touchMaterial(code);
+      await broadcastSlides(code, lesson, { material: false });
+    });
+
+    socket.on('slides:reveal', async ({ uid, on }: { uid: string; on: boolean }) => {
+      if (role !== 'teacher') return;
+      const material = await getMaterial(code).catch(() => null);
+      const scene = currentScene(material, lesson.slides);
+      if (!scene || !scene.objects.some(o => o.uid === uid && o.studentHidden)) return;
+      const set = lesson.slides.revealed.get(scene.id) ?? new Set<string>();
+      if (on) set.add(uid); else set.delete(uid);
+      lesson.slides.revealed.set(scene.id, set);
+      await broadcastSlides(code, lesson, { material: false });
+    });
+
+    socket.on('slides:move', async ({ uid, left, top }: { uid: string; left: number; top: number }) => {
+      if (role !== 'teacher') return; // students get to move objects in pair work later
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+      const material = await getMaterial(code).catch(() => null);
+      const scene = currentScene(material, lesson.slides);
+      const obj = scene?.objects.find(o => o.uid === uid && o.studentDraggable);
+      if (!scene || !obj) return;
+      lesson.slides.positions.set(scene.id, { ...lesson.slides.positions.get(scene.id), [uid]: { left, top } });
+      const msg = { sceneId: scene.id, uid, left, top };
+      const visibleToStudents = !obj.studentHidden || lesson.slides.revealed.get(scene.id)?.has(uid);
+      for (const p of lesson.participants.values()) {
+        if (p.id === socket.id || (p.role === 'student' && !visibleToStudents)) continue;
+        io.sockets.sockets.get(p.id)?.emit('slides:move', msg);
+      }
+    });
+
+    // End of the lesson: lesson materials are deleted from the server, everyone goes back to seating
+    socket.on('endLesson', async (ack?: () => void) => {
+      if (role !== 'teacher') return;
+      await deleteMaterial(code).catch(() => {});
+      lesson.slides = emptySlidesState();
+      lesson.stage = 'waiting';
+      lesson.timerEndsAt = null;
+      lesson.currentPoll = null;
+      await sendAllToMain(code, lesson);
+      broadcastState(code, lesson);
+      await broadcastSlides(code, lesson);
+      for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('lessonEnded');
+      console.log(`[${code}] lesson ended, materials deleted`);
+      if (typeof ack === 'function') ack();
+    });
+
     socket.on('disconnect', () => {
+      mediaKeys.delete(mediaKey);
       lesson.participants.delete(socket.id);
       if (role === 'student') {
         for (const seat of lesson.seats) {
@@ -712,6 +922,21 @@ io.on('connection', async (socket) => {
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
+// Materials of lessons nobody is in, idle past the TTL, are removed from disk
+function sweepIdleMaterials() {
+  sweepMaterials(code => (lessons.get(code)?.participants.size ?? 0) > 0)
+    .then(removed => {
+      for (const code of removed) {
+        const lesson = lessons.get(code);
+        if (lesson) lesson.slides = emptySlidesState();
+        console.log(`[${code}] idle lesson materials removed`);
+      }
+    })
+    .catch(e => console.error('materials sweep failed', e));
+}
+sweepIdleMaterials();
+setInterval(sweepIdleMaterials, 30 * 60 * 1000);
+
 setInterval(() => {
   cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
   sweepAttempts(codeAttempts); sweepAttempts(loginAttempts);

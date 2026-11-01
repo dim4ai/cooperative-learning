@@ -1,17 +1,14 @@
-// Scene <-> Fabric glue shared by the editor, thumbnails and the player.
-// Kept free of editor-only concerns so the player can later move to the
-// teacher/student clients as is.
-import { FabricObject, StaticCanvas, util } from 'fabric'
-import type { Scene, SceneObject } from '../types'
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from '../types'
+// Editor-side scene helpers (blobs, serialization, thumbnails). Rendering itself
+// lives in render.ts, which is shared with the lesson clients.
+import { StaticCanvas, util, type FabricObject } from 'fabric'
+import type { Scene, SceneObject } from './model'
+import { SLIDE_HEIGHT, SLIDE_WIDTH } from './model'
 import type { Media } from '../lessonFile'
 import { nanoid } from '../nanoid'
+import { fitToWidth, hydrate, loadInto, type MediaResolver, type Obj } from './render'
 
-// Our fields travel with Fabric's own JSON
-FabricObject.customProperties = ['uid', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
-
-export type Obj = FabricObject &
-  Partial<Pick<SceneObject, 'uid' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
+export type { Obj } from './render'
+export { fitToWidth } from './render'
 
 export function emptyScene(): Scene {
   return { id: nanoid(), engine: 'fabric', width: SLIDE_WIDTH, height: SLIDE_HEIGHT, background: '#ffffff', objects: [] }
@@ -28,13 +25,8 @@ export function blobUrl(blob: Blob): string {
   return url
 }
 
-// 1×1 grey pixel — stands in for an image missing from the archive
-export const MISSING_IMAGE =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mO8Ww8AAj8BXkQ+xPEAAAAASUVORK5CYII='
-
-/** Scene JSON → JSON Fabric can load: images get a src from media */
-export function hydrate(objects: SceneObject[], media: Media): Record<string, unknown>[] {
-  return objects.map(o => (o.mediaName ? { ...o, src: media[o.mediaName] ? blobUrl(media[o.mediaName]) : MISSING_IMAGE } : o))
+export function mediaResolver(media: Media): MediaResolver {
+  return name => (media[name] ? blobUrl(media[name]) : undefined)
 }
 
 export function toSceneObject(o: FabricObject): SceneObject {
@@ -52,13 +44,8 @@ export function serialize(fc: StaticCanvas, id: string): Scene {
   }
 }
 
-export async function loadInto(fc: StaticCanvas, scene: Scene, media: Media, signal?: AbortSignal): Promise<Obj[]> {
-  await fc.loadFromJSON({ objects: hydrate(scene.objects, media), background: scene.background }, undefined, { signal })
-  return fc.getObjects() as Obj[]
-}
-
 export async function enliven(objects: SceneObject[], media: Media): Promise<Obj[]> {
-  return (await util.enlivenObjects(hydrate(objects, media))) as Obj[]
+  return (await util.enlivenObjects(hydrate(objects, mediaResolver(media)))) as Obj[]
 }
 
 export async function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
@@ -82,12 +69,6 @@ export function imageObject(mediaName: string, size: { width: number; height: nu
   }
 }
 
-/** Fit a Fabric canvas to its host width, keeping logical 1600×900 coordinates */
-export function fitToWidth(fc: StaticCanvas, width: number) {
-  fc.setDimensions({ width, height: (width * SLIDE_HEIGHT) / SLIDE_WIDTH })
-  fc.setZoom(width / SLIDE_WIDTH)
-}
-
 // ---------- thumbnails ----------
 
 const THUMB_W = 192
@@ -101,7 +82,7 @@ export function thumbnail(scene: Scene, media: Media): Promise<string> {
       const fc = new StaticCanvas(undefined, { renderOnAddRemove: false, enableRetinaScaling: false })
       try {
         fitToWidth(fc, THUMB_W)
-        await loadInto(fc, scene, media)
+        await loadInto(fc, scene, mediaResolver(media))
         fc.renderAll()
         return fc.toDataURL({ multiplier: 1, format: 'png' })
       } finally {

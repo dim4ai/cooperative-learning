@@ -1,9 +1,10 @@
 // Full-screen preview of a block's slides as the student / the teacher will see them.
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Scene } from '../types'
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from '../types'
 import type { Media } from '../lessonFile'
-import { SlidePlayer, type PlayerRole } from './SlidePlayer'
+import { SlidePlayer, type PlayerRole, type Positions } from './SlidePlayer'
+import { mediaResolver } from './scene'
 
 interface Props {
   slides: Scene[]
@@ -18,6 +19,9 @@ export function PreviewOverlay({ slides, media, start, onClose }: Props) {
   // Revealed hidden objects, per slide; shared by both views like in a real lesson
   const [revealed, setRevealed] = useState<Record<string, Set<string>>>({})
   const [size, setSize] = useState(() => fit())
+  // Where ✋ objects were dragged to, per slide — like the lesson server will keep it
+  const [positions, setPositions] = useState<Record<string, Positions>>({})
+  const resolve = useMemo(() => mediaResolver(media), [media])
 
   useEffect(() => {
     const onResize = () => setSize(fit())
@@ -75,7 +79,11 @@ export function PreviewOverlay({ slides, media, start, onClose }: Props) {
       </div>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
         <div style={{ boxShadow: '0 10px 40px rgba(0,0,0,.5)' }}>
-          <SlidePlayer key={scene.id} scene={scene} media={media} role={role} revealed={shown} onToggleReveal={toggleReveal} width={size} />
+          <SlidePlayer
+            key={scene.id} scene={scene} resolveMedia={resolve} role={role} revealed={shown}
+            positions={positions[scene.id]} canDrag onToggleReveal={toggleReveal} width={size}
+            onMove={(uid, left, top) => setPositions(prev => ({ ...prev, [scene.id]: { ...prev[scene.id], [uid]: { left, top } } }))}
+          />
         </div>
       </div>
     </div>
