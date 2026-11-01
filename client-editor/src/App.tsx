@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonBlock, LessonFile, LessonMeta, BlockType } from './types'
-import { BLOCK_LABELS, usedMediaNames } from './types'
+import { BLOCK_LABELS, normalizeBlocks, usedMediaNames } from './types'
 import { BlockCard } from './BlockCard'
 import { MetaPanel } from './MetaPanel'
 import { nanoid } from './nanoid'
@@ -37,7 +37,7 @@ export default function App() {
     loadDraft().then(d => {
       if (d) {
         setMeta(d.meta)
-        setBlocks(d.blocks)
+        setBlocks(normalizeBlocks(d.blocks))
         setMedia(d.media ?? {})
         setFileName(d.fileName)
         setHandle(d.handle)
@@ -75,6 +75,11 @@ export default function App() {
 
   function updateBlock(updated: LessonBlock) {
     setBlocks(prev => prev.map(b => b.id === updated.id ? updated : b))
+    setDirty(true)
+  }
+
+  function updateBlockWith(id: string, fn: (b: LessonBlock) => LessonBlock) {
+    setBlocks(prev => prev.map(b => b.id === id ? fn(b) : b))
     setDirty(true)
   }
 
@@ -263,7 +268,7 @@ export default function App() {
       {/* Right: editor area */}
       <div style={{ flex: 1, overflow: 'auto', background: '#f5f5f5' }}>
         {selected
-          ? <BlockCard block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
+          ? <BlockCard key={selected.id} block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onUpdate={fn => updateBlockWith(selected.id, fn)} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
           : <MetaPanel meta={meta} onChange={m => { setMeta(m); setDirty(true) }} />
         }
       </div>

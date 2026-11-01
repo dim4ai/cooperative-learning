@@ -1,24 +1,22 @@
-import { useRef } from 'react'
 import type { LessonBlock, Attachment } from './types'
 import { BLOCK_LABELS, TECHNIQUES, kindFromName } from './types'
 import { pickMediaFiles } from './fileAccess'
 import { uniqueName, type Media } from './lessonFile'
-import { SceneEditor, emptyScene } from './SceneEditor'
+import { SlidesSection } from './slides/SlidesSection'
+import type { Scene } from './types'
 
 interface Props {
   block: LessonBlock
   media: Media
   onAddMedia: (name: string, blob: Blob) => void
   onChange: (block: LessonBlock) => void
+  /** Functional update — for changes that arrive asynchronously (slides) */
+  onUpdate: (fn: (block: LessonBlock) => LessonBlock) => void
   onDelete: () => void
   onError: (text: string) => void
 }
 
-export function BlockCard({ block, media, onAddMedia, onChange, onDelete, onError }: Props) {
-  // SceneEditor emits asynchronously — merge into the latest block, not a stale one
-  const latest = useRef(block)
-  latest.current = block
-
+export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDelete, onError }: Props) {
   function attach(files: File[]) {
     if (!files.length) return
     const taken: Media = { ...media }
@@ -69,24 +67,14 @@ export function BlockCard({ block, media, onAddMedia, onChange, onDelete, onErro
         </button>
       </div>
 
-      <Field label="Слайд">
-        {block.scene ? (
-          <SceneEditor
-            key={block.id}
-            scene={block.scene}
-            media={media}
-            onAddMedia={onAddMedia}
-            onChange={scene => onChange({ ...latest.current, scene })}
-            onError={onError}
-          />
-        ) : (
-          <button onClick={() => onChange({ ...block, scene: emptyScene() })} style={{
-            padding: '7px 12px', borderRadius: 4, border: '1px dashed #d1d5db',
-            background: 'transparent', color: '#6b7280', fontSize: 13,
-          }}>
-            + Добавить слайд (текст, картинки, страницы PDF слоями)
-          </button>
-        )}
+      <Field label="Слайды">
+        <SlidesSection
+          slides={block.slides ?? []}
+          media={media}
+          onAddMedia={onAddMedia}
+          onChange={(fn: (s: Scene[]) => Scene[]) => onUpdate(b => ({ ...b, slides: fn(b.slides ?? []) }))}
+          onError={onError}
+        />
       </Field>
 
       <div style={{ maxWidth: 680 }}>
