@@ -9,8 +9,9 @@ import { uniqueName, type Media } from '../lessonFile'
 import { pickMediaFiles } from '../fileAccess'
 import { nanoid } from '../nanoid'
 import {
-  emptyScene, enliven, fitToWidth, imageObject, imageSize, loadInto, serialize, toSceneObject, type Obj,
+  emptyScene, enliven, fitToWidth, imageObject, imageSize, mediaResolver, serialize, toSceneObject, type Obj,
 } from './scene'
+import { loadInto } from './render'
 import { CLIP_MIME, getClip, setClip } from './clipboard'
 
 interface Props {
@@ -119,7 +120,7 @@ export function SlideEditor(props: Props) {
     muted.current++
     try {
       fc.discardActiveObject()
-      const objs = await loadInto(fc, JSON.parse(snap) as Scene, media.current)
+      const objs = await loadInto(fc, JSON.parse(snap) as Scene, mediaResolver(media.current))
       objs.forEach(applyEditorFlags)
       fc.requestRenderAll()
     } finally {
@@ -160,7 +161,7 @@ export function SlideEditor(props: Props) {
     if (import.meta.env.DEV) (window as unknown as { __fc: Canvas }).__fc = fc // for e2e tests
     const abort = new AbortController()
 
-    loadInto(fc, props.scene, media.current, abort.signal).then(objs => {
+    loadInto(fc, props.scene, mediaResolver(media.current), abort.signal).then(objs => {
       if (abort.signal.aborted) return
       objs.forEach(applyEditorFlags)
       fc.requestRenderAll()

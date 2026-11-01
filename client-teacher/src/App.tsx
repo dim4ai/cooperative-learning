@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
+import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 
 interface LivekitInfo {
   url: string;
@@ -93,7 +94,9 @@ function CapacityInput() {
   );
 }
 
-type GroupMode = 'board' | 'screen';
+type GroupMode = 'board' | 'screen' | 'slides';
+
+const GROUP_MODE_LABELS: Record<GroupMode, string> = { board: 'Доска', screen: 'Экран', slides: 'Слайды' };
 
 function ScreenShareSync({ active }: { active: boolean }) {
   const { localParticipant } = useLocalParticipant();
@@ -103,13 +106,14 @@ function ScreenShareSync({ active }: { active: boolean }) {
   return null;
 }
 
-function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string }) {
+function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode }) {
   if (stage === 'waiting') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} />;
   }
 
   if (stage === 'group') {
     if (groupMode === 'board') return <SharedBoard />;
+    if (groupMode === 'slides') return <>{slidesView}</>;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 15 }}>
         Трансляция экрана запущена
@@ -313,6 +317,26 @@ export default function App() {
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
+  const slides = useTeacherSlides(lessonCode);
+
+  // Slides are being shown to the class (e.g. after a page reload) — show them here too
+  useEffect(() => {
+    if (slides.state.active) setGroupMode('slides');
+  }, [slides.state.active]);
+
+  function chooseGroupMode(m: GroupMode) {
+    if (m === 'slides') socket.emit('slides:open', {});
+    else if (groupMode === 'slides') socket.emit('slides:close');
+    setGroupMode(m);
+  }
+
+  function endLesson() {
+    if (!confirm('Завершить урок? Ученики вернутся на стартовый экран, загруженный урок будет удалён с сервера.')) return;
+    // wait for the server to finish (materials deleted) before leaving; don't hang if it doesn't answer
+    const leave = () => { setGroupMode('board'); setLessonCodeReady(null); };
+    const timer = setTimeout(leave, 3000);
+    socket.emit('endLesson', () => { clearTimeout(timer); leave(); });
+  }
 
   useEffect(() => {
     if (!lessonCode) return;
@@ -387,6 +411,8 @@ export default function App() {
           {lessonCode || '…'}
         </div>
 
+        <MaterialPanel lessonCode={lessonCode} token={token} material={slides.material} onUnauthorized={logout} />
+
         {state.stage === 'waiting' && (
           <>
             <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Мест в классе</div>
@@ -452,6 +478,15 @@ export default function App() {
         <div style={{ marginTop: 'auto', fontSize: 12, color: '#fff' }}>
           {students.length} учеников
         </div>
+        <button
+          onClick={endLesson}
+          style={{
+            marginTop: 6, padding: '6px 6px', borderRadius: 6, border: '1px solid #444',
+            cursor: 'pointer', background: 'transparent', color: '#aaa', fontSize: 11, textAlign: 'center',
+          }}
+        >
+          Завершить урок
+        </button>
       </div>
 
       {/* Main area */}
@@ -460,14 +495,14 @@ export default function App() {
           <span>{currentLabel}</span>
           {state.stage === 'group' && livekit && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
-              {(['board', 'screen'] as GroupMode[]).map(m => (
-                <button key={m} onClick={() => setGroupMode(m)} style={{
+              {(['board', 'slides', 'screen'] as GroupMode[]).map(m => (
+                <button key={m} onClick={() => chooseGroupMode(m)} style={{
                   padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12,
                   background: groupMode === m ? '#4a90e2' : '#e0e0e0',
                   color: groupMode === m ? '#fff' : '#555',
                   fontWeight: groupMode === m ? 'bold' : 'normal',
                 }}>
-                  {m === 'board' ? 'Доска' : 'Экран'}
+                  {GROUP_MODE_LABELS[m]}
                 </button>
               ))}
             </div>
@@ -481,7 +516,8 @@ export default function App() {
             return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
-            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode} />
+            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
+                slidesView={<SlidesPresenter lessonCode={lessonCode} mediaKey={slides.key} material={slides.material} state={slides.state} setState={slides.setState} />} />
           }
         </div>
       </div>

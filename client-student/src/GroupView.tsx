@@ -1,8 +1,9 @@
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { SharedBoard } from './SharedBoard';
+import { SlideStage, type StudentSlides } from './LessonSlides';
 
-export function GroupView() {
+export function GroupView({ slides }: { slides: StudentSlides }) {
   const screenTracks = useTracks([Track.Source.ScreenShare]);
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
@@ -19,6 +20,8 @@ export function GroupView() {
           <div style={{ width: '100%', height: '100%', background: '#111' }}>
             <VideoTrack trackRef={teacherScreen} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
+        ) : slides.view.active ? (
+          <SlideStage slides={slides} />
         ) : (
           <SharedBoard room="main-room" readOnly />
         )}

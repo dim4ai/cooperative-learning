@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check shared slide player copies are in sync
+        run: scripts/sync-slides.sh --check
+
       - name: Build teacher client
         working-directory: client-teacher
         env:

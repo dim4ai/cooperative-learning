@@ -13,6 +13,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@livekit/components-react": "^2.9.21",
     "@livekit/components-styles": "^1.2.0",
+    "fabric": "7.4.0",
     "livekit-client": "^2.19.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
