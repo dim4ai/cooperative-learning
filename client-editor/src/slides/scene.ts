@@ -2,7 +2,7 @@
 // lives in render.ts, which is shared with the lesson clients.
 import { StaticCanvas, util, type FabricObject } from 'fabric'
 import type { Scene, SceneObject } from './model'
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from './model'
+import { SLIDE_HEIGHT, SLIDE_WIDTH, mapObjects } from './model'
 import type { Media } from '../lessonFile'
 import { nanoid } from '../nanoid'
 import { fitToWidth, hydrate, loadInto, type MediaResolver, type Obj } from './render'
@@ -30,9 +30,12 @@ export function mediaResolver(media: Media): MediaResolver {
 }
 
 export function toSceneObject(o: FabricObject): SceneObject {
-  const json = o.toObject() as SceneObject
-  if (json.mediaName) delete json.src // bytes live in media/, not in JSON
-  return json
+  // bytes live in media/, not in JSON (also for images inside groups)
+  return mapObjects([o.toObject() as SceneObject], j => {
+    if (!j.mediaName) return j
+    const { src: _src, ...rest } = j
+    return rest as SceneObject
+  })[0]
 }
 
 export function serialize(fc: StaticCanvas, id: string): Scene {

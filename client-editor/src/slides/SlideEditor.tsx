@@ -12,6 +12,7 @@ import {
   emptyScene, enliven, fitToWidth, imageObject, imageSize, mediaResolver, serialize, toSceneObject, type Obj,
 } from './scene'
 import { loadInto } from './render'
+import { mapObjects } from './model'
 import { CLIP_MIME, getClip, setClip } from './clipboard'
 
 interface Props {
@@ -313,7 +314,7 @@ export function SlideEditor(props: Props) {
       rename[name] = fresh
       addMedia(fresh, blob)
     }
-    const objects = clip.objects.map(o => (o.mediaName && rename[o.mediaName] ? { ...o, mediaName: rename[o.mediaName] } : o))
+    const objects = mapObjects(clip.objects, o => (o.mediaName && rename[o.mediaName] ? { ...o, mediaName: rename[o.mediaName] } : o))
     insertObjects(objects, PASTE_OFFSET)
   }
 
@@ -433,17 +434,12 @@ export function SlideEditor(props: Props) {
     })
   }
 
-  /** Images can't go into a group yet: media references are resolved only for top-level objects */
-  const hasImage = (objs: FabricObject[]): boolean =>
-    objs.some(o => !!(o as Obj).mediaName || (o instanceof Group && hasImage(o.getObjects())))
-
-  /** Selected objects → one layer (Group), at the place of the lowest of them */
+  /** Selected objects → one group, at the place (z-order) of the lowest of them */
   function groupSelection() {
     const fc = fcRef.current!
     const order = fc.getObjects()
     const sel = (fc.getActiveObjects() as Obj[]).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))
     if (sel.length < 2) return
-    if (hasImage(sel)) { live.current.onError('Картинки пока нельзя объединять в слой'); return }
     batch(() => {
       const index = order.indexOf(sel[0])
       fc.discardActiveObject() // children back to canvas coordinates
@@ -459,7 +455,7 @@ export function SlideEditor(props: Props) {
     })
   }
 
-  /** Layer (Group) → its objects, in place; they inherit the layer's flags */
+  /** Group → its objects, in place; they inherit the group's flags */
   function ungroupSelection() {
     const fc = fcRef.current!
     const g = fc.getActiveObject()
@@ -488,13 +484,25 @@ export function SlideEditor(props: Props) {
     refresh()
   }
 
-  /** dir: +1 — up (towards the top), -1 — down */
-  function move(obj: Obj, dir: 1 | -1) {
+  /** Z-order: one step up/down, or to the very top/bottom */
+  function move(obj: Obj, to: 'up' | 'down' | 'top' | 'bottom') {
     const fc = fcRef.current!
-    if (dir > 0) fc.bringObjectForward(obj)
-    else fc.sendObjectBackwards(obj)
+    if (to === 'up') fc.bringObjectForward(obj)
+    else if (to === 'down') fc.sendObjectBackwards(obj)
+    else if (to === 'top') fc.bringObjectToFront(obj)
+    else fc.sendObjectToBack(obj)
     fc.requestRenderAll()
     changed()
+  }
+
+  /** Everything not selected becomes selected (and vice versa); pinned objects stay out */
+  function invertSelection() {
+    const fc = fcRef.current!
+    const sel = new Set(fc.getActiveObjects())
+    fc.discardActiveObject()
+    selectObjects(fc.getObjects().filter(o => !sel.has(o)))
+    fc.requestRenderAll()
+    refresh()
   }
 
   function toggle(obj: Obj, key: 'pinned' | 'studentHidden' | 'studentDraggable') {
@@ -580,29 +588,35 @@ export function SlideEditor(props: Props) {
           {busy && <span style={{ fontSize: 12, color: '#6b7280' }}>{busy}</span>}
           {!busy && !active.length && (
             <span style={{ fontSize: 12, color: '#9ca3af' }}>
-              Выделите объект. Ctrl+C/V — копировать/вставить, Ctrl+D — дублировать, Delete — удалить, стрелки — сдвинуть. Можно вставить картинку из буфера или перетащить файлы на слайд.
+              Выделите объект (Shift+клик — добавить к выделению). Ctrl+C/V — копировать/вставить, Ctrl+D — дублировать, Ctrl+G — сгруппировать, Delete — удалить, стрелки — сдвинуть. Можно вставить картинку из буфера или перетащить файлы на слайд.
             </span>
           )}
           {!busy && active.length > 1 && (
             <>
               <span style={{ fontSize: 12, color: '#6b7280' }}>Выделено: {active.length}</span>
-              <Tool onClick={groupSelection} title="Объединить в один слой (Ctrl+G)">▦ В один слой</Tool>
+              <Tool onClick={groupSelection} title="Сгруппировать: станут одним объектом (Ctrl+G)">▦ Сгруппировать</Tool>
+              <Tool onClick={invertSelection} title="Инвертировать выбор: невыбранные станут выбранными">⇄</Tool>
               <Tool onClick={duplicate} title="Дублировать (Ctrl+D)">⧉ Дублировать</Tool>
               <Tool onClick={() => removeObjects(active)} title="Удалить (Delete)">✕ Удалить</Tool>
             </>
           )}
           {!busy && one && (
-            <input value={one.name ?? ''} placeholder="Название слоя" title="Название слоя (видно в списке слоёв)"
+            <input value={one.name ?? ''} placeholder="Название" title="Название объекта (видно в списке слоёв)"
               onChange={e => { one.name = e.target.value || undefined; changed({ record: false }) }}
               onBlur={() => changed()} style={{ ...numInput, width: 150 }} />
           )}
           {!busy && one && <ObjectProps obj={one} set={patch => setProp(one, patch)} />}
           {!busy && one instanceof Group && (
-            <Tool onClick={ungroupSelection} title="Разделить слой на отдельные объекты (Ctrl+Shift+G)">⊞ Разделить</Tool>
+            <Tool onClick={ungroupSelection} title="Разгруппировать (Ctrl+Shift+G)">⊞ Разгруппировать</Tool>
           )}
           {!busy && one && (
             <>
               <span style={{ flex: 1 }} />
+              <Tool onClick={() => move(one, 'top')} title="На верхний слой (поверх всех)">⤒</Tool>
+              <Tool onClick={() => move(one, 'up')} title="На слой выше">↑</Tool>
+              <Tool onClick={() => move(one, 'down')} title="На слой ниже">↓</Tool>
+              <Tool onClick={() => move(one, 'bottom')} title="На нижний слой (под всеми)">⤓</Tool>
+              <Tool onClick={invertSelection} title="Инвертировать выбор: невыбранные станут выбранными">⇄</Tool>
               <Tool onClick={duplicate} title="Дублировать (Ctrl+D)">⧉</Tool>
               <Tool onClick={() => removeObjects([one])} title="Удалить (Delete)">✕</Tool>
             </>
@@ -640,8 +654,8 @@ export function SlideEditor(props: Props) {
                 <Flag on={!!o.studentHidden} title="Скрыт от ученика, пока учитель не откроет" onClick={() => toggle(o, 'studentHidden')}>🙈</Flag>
                 <Flag on={!!o.studentDraggable} title="Ученик может перетаскивать" onClick={() => toggle(o, 'studentDraggable')}>✋</Flag>
                 <span style={{ flex: 1 }} />
-                <Flag title="Выше" disabled={i === 0} onClick={() => move(o, 1)}>▲</Flag>
-                <Flag title="Ниже" disabled={i === top.length - 1} onClick={() => move(o, -1)}>▼</Flag>
+                <Flag title="Выше" disabled={i === 0} onClick={() => move(o, 'up')}>▲</Flag>
+                <Flag title="Ниже" disabled={i === top.length - 1} onClick={() => move(o, 'down')}>▼</Flag>
                 <Flag title="Удалить" onClick={() => removeObjects([o])}>✕</Flag>
               </div>
             </div>
@@ -714,7 +728,7 @@ function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unkno
 
 function layerLabel(o: Obj): string {
   if (o.name) return `${o instanceof Group ? '▦' : '•'}  ${o.name}`
-  if (o instanceof Group) return `▦  Слой из ${o.size()} объектов`
+  if (o instanceof Group) return `▦  Группа (${o.size()})`
   if (o instanceof Textbox) return `T  ${o.text.replace(/\s+/g, ' ').slice(0, 40) || '(пусто)'}`
   if (o.mediaName) return `🖼  ${o.mediaName}`
   return ({ rect: '▭  Прямоугольник', ellipse: '◯  Круг', circle: '◯  Круг', line: '╱  Линия', polygon: '⬠  Многоугольник', path: '✏  Рисунок' } as Record<string, string>)[o.type] ?? o.type

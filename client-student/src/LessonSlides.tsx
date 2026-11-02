@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from './slides/model';
+import { SLIDE_HEIGHT, SLIDE_WIDTH, sceneMediaNames } from './slides/model';
 import { serveMedia } from './mediaShare';
 
 export interface MediaInfo { hash: string; size: number; type: string }
@@ -34,8 +34,8 @@ function sceneHashes(view: SlidesView, which: 'scene' | 'next'): string[] {
   if (!view.active) return [];
   const s = which === 'scene' ? view.scene : view.next;
   const out: string[] = [];
-  for (const o of s?.objects ?? []) {
-    const h = o.mediaName ? view.media[o.mediaName]?.hash : undefined;
+  for (const name of sceneMediaNames(s?.objects ?? [])) {
+    const h = view.media[name]?.hash;
     if (h && !out.includes(h)) out.push(h);
   }
   return out;

@@ -3,7 +3,7 @@
 // and relays media files to students piece by piece when they need them.
 // The file is also kept in IndexedDB per lesson code, so a page reload doesn't lose it.
 import { unzip, strFromU8, type Unzipped } from 'fflate';
-import type { Scene } from './slides/model';
+import { sceneMediaNames, type Scene } from './slides/model';
 
 export interface MediaInfo { hash: string; size: number; type: string }
 
@@ -51,7 +51,7 @@ export async function readLesson(file: Blob): Promise<LocalLesson> {
   }));
 
   const names = new Set<string>();
-  for (const b of blocks) for (const s of b.slides) for (const o of s.objects) if (o.mediaName) names.add(o.mediaName);
+  for (const b of blocks) for (const s of b.slides) for (const n of sceneMediaNames(s.objects)) names.add(n);
 
   const catalog: Record<string, MediaInfo> = {};
   const urls = new Map<string, string>();

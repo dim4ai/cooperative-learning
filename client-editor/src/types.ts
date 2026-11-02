@@ -7,6 +7,7 @@ export interface Attachment {
 }
 
 import type { Scene } from './slides/model'
+import { sceneMediaNames } from './slides/model'
 export type { Scene, SceneObject } from './slides/model'
 export { SLIDE_WIDTH, SLIDE_HEIGHT } from './slides/model'
 
@@ -25,7 +26,7 @@ export function usedMediaNames(blocks: LessonBlock[]): Set<string> {
   const names = new Set<string>()
   for (const b of blocks) {
     for (const a of b.attachments) names.add(a.name)
-    for (const s of b.slides ?? []) for (const o of s.objects) if (o.mediaName) names.add(o.mediaName)
+    for (const s of b.slides ?? []) for (const n of sceneMediaNames(s.objects)) names.add(n)
   }
   return names
 }
