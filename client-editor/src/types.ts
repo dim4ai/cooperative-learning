@@ -7,7 +7,7 @@ export interface Attachment {
 }
 
 import type { Scene } from './slides/model'
-import { sceneMediaNames } from './slides/model'
+import { normalizeLayers, sceneMediaNames } from './slides/model'
 export type { Scene, SceneObject } from './slides/model'
 export { SLIDE_WIDTH, SLIDE_HEIGHT } from './slides/model'
 
@@ -36,10 +36,11 @@ export function normalizeBlocks(blocks: LessonBlock[]): LessonBlock[] {
   for (const b of blocks as (LessonBlock & { scene?: Scene })[]) {
     b.attachments ??= []
     if (b.scene) { b.slides = [...(b.slides ?? []), b.scene]; delete b.scene } // single-slide prototype
-    for (const s of b.slides ?? []) {
+    b.slides = (b.slides ?? []).map(s => {
       s.id ??= Math.random().toString(36).slice(2, 12)
       s.objects ??= []
-    }
+      return normalizeLayers(s)
+    })
   }
   return blocks
 }

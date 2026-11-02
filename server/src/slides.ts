@@ -15,14 +15,18 @@ export interface SceneObject {
   mediaName?: string;
   studentHidden?: boolean;
   studentDraggable?: boolean;
+  layer?: string;
   left?: number;
   top?: number;
   [key: string]: unknown;
 }
 
+export interface SlideLayer { id: string; name: string; studentHidden?: boolean; studentDraggable?: boolean; [key: string]: unknown }
+
 export interface Scene {
   id: string;
   background?: string;
+  layers?: SlideLayer[];
   objects: SceneObject[];
   [key: string]: unknown;
 }
@@ -50,6 +54,24 @@ export interface Material {
 
 export class MaterialError extends Error {}
 
+/**
+ * Layer flags (🙈 hidden from students, ✋ draggable) copied onto the layer's objects,
+ * so everything below works per object. Same rule as bakeLayers in the shared slide model.
+ */
+function bakeLayers(scene: Scene): Scene {
+  const layers = (Array.isArray(scene.layers) ? scene.layers : []).filter(l => l && typeof l === 'object' && typeof l.id === 'string');
+  const byId = new Map(layers.map(l => [l.id, l]));
+  return {
+    ...scene,
+    layers,
+    objects: scene.objects.map(o => {
+      const l = typeof o?.layer === 'string' ? byId.get(o.layer) : undefined;
+      if (!l || (l.studentHidden !== true && l.studentDraggable !== true)) return o;
+      return { ...o, studentHidden: o.studentHidden || l.studentHidden === true || undefined, studentDraggable: o.studentDraggable || l.studentDraggable === true || undefined };
+    }),
+  };
+}
+
 /** Every object of a scene, including those inside groups */
 function* allObjects(objects: SceneObject[]): Generator<SceneObject> {
   for (const o of objects) {
@@ -76,7 +98,7 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
     if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string') continue;
     const slides = (Array.isArray(raw.slides) ? raw.slides : [])
       .filter((s): s is Scene => !!s && typeof s === 'object' && Array.isArray((s as Scene).objects))
-      .map(s => ({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
+      .map(s => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
     blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), slides });
   }
 
@@ -132,8 +154,9 @@ export function currentScene(material: Material | null, st: SlidesState): Scene 
 export function studentScene(scene: Scene, st: SlidesState): Scene {
   const revealed = st.revealed.get(scene.id) ?? new Set<string>();
   const moved = st.positions.get(scene.id) ?? {};
+  const { layers: _layers, ...rest } = scene; // layer names/flags are the teacher's business
   return {
-    ...scene,
+    ...rest,
     objects: visibleObjects(scene.objects, revealed).map(o => {
       const pos = o.uid ? moved[o.uid] : undefined;
       return pos ? { ...o, left: pos.left, top: pos.top } : o;
