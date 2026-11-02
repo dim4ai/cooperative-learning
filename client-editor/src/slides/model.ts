@@ -12,6 +12,10 @@ export interface Scene {
   width: number
   height: number
   background: string
+  /** Ruling drawn over the background color: 'grid-m', 'lines-s', 'propis'… (see paper.ts) */
+  paper?: string
+  /** Color of the ruling lines */
+  paperColor?: string
   /** Layers bottom → top. Objects are kept sorted by layer (array order = drawing order) */
   layers?: SlideLayer[]
   objects: SceneObject[]
@@ -35,6 +39,8 @@ export interface SlideLayer {
 export interface SceneObject {
   type: string
   uid: string
+  /** Editor-only recipe of a drawn mark (line kinds, word-analysis marks, axes) — lets it be rebuilt on resize */
+  mark?: { kind: string; w: number; h: number }
   layer?: string            // id of the SlideLayer it belongs to
   name?: string             // layer name shown in the editor's layers panel
   mediaName?: string

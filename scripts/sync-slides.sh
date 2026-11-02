@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SRC=client-editor/src/slides
-FILES=(model.ts render.ts SlidePlayer.tsx)
+FILES=(model.ts render.ts paper.ts SlidePlayer.tsx)
 TARGETS=(client-teacher/src/slides client-student/src/slides)
 
 header() { printf '// GENERATED COPY of %s — do not edit here, edit the original and run scripts/sync-slides.sh\n' "$1"; }
