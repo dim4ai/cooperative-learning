@@ -2,7 +2,7 @@
 // lives in render.ts, which is shared with the lesson clients.
 import { StaticCanvas, util, type FabricObject } from 'fabric'
 import type { Scene, SceneObject } from './model'
-import { SLIDE_HEIGHT, SLIDE_WIDTH, mapObjects } from './model'
+import { SLIDE_HEIGHT, SLIDE_WIDTH, defaultLayers, mapObjects, type SlideLayer } from './model'
 import type { Media } from '../lessonFile'
 import { nanoid } from '../nanoid'
 import { fitToWidth, hydrate, loadInto, type MediaResolver, type Obj } from './render'
@@ -11,7 +11,13 @@ export type { Obj } from './render'
 export { fitToWidth } from './render'
 
 export function emptyScene(): Scene {
-  return { id: nanoid(), engine: 'fabric', width: SLIDE_WIDTH, height: SLIDE_HEIGHT, background: '#ffffff', objects: [] }
+  return { id: nanoid(), engine: 'fabric', width: SLIDE_WIDTH, height: SLIDE_HEIGHT, background: '#ffffff', layers: defaultLayers(), objects: [] }
+}
+
+/** New slide with a picture filling it, in the background layer */
+export function backgroundSlide(image: SceneObject): Scene {
+  const s = emptyScene()
+  return { ...s, objects: [{ ...image, pinned: undefined, layer: s.layers![0].id }] }
 }
 
 // One object URL per Blob for the whole session (blobs are immutable)
@@ -31,17 +37,20 @@ export function mediaResolver(media: Media): MediaResolver {
 
 export function toSceneObject(o: FabricObject): SceneObject {
   // bytes live in media/, not in JSON (also for images inside groups)
-  return mapObjects([o.toObject() as SceneObject], j => {
+  const json = o.toObject() as SceneObject
+  json.visible = true // editor-only hiding (layer 👁) is not part of the slide
+  return mapObjects([json], j => {
     if (!j.mediaName) return j
     const { src: _src, ...rest } = j
     return rest as SceneObject
   })[0]
 }
 
-export function serialize(fc: StaticCanvas, id: string): Scene {
+export function serialize(fc: StaticCanvas, id: string, layers: SlideLayer[]): Scene {
   return {
     ...emptyScene(),
     id,
+    layers: layers.map(l => ({ ...l })),
     background: typeof fc.backgroundColor === 'string' && fc.backgroundColor ? fc.backgroundColor : '#ffffff',
     objects: fc.getObjects().map(toSceneObject),
   }

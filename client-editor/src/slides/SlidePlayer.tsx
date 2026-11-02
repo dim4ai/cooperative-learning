@@ -8,7 +8,7 @@
 // State that is shared in a lesson (revealed, positions) is controlled from outside.
 import { useEffect, useRef } from 'react'
 import { Canvas } from 'fabric'
-import type { Scene } from './model'
+import { bakeLayers, type Scene } from './model'
 import { fitToWidth, loadInto, type MediaResolver, type Obj } from './render'
 
 export type PlayerRole = 'teacher' | 'student'
@@ -78,7 +78,7 @@ export function SlidePlayer({
     if (import.meta.env.DEV) (window as unknown as { __player: Canvas }).__player = fc // for e2e tests
     fitToWidth(fc, width)
     const abort = new AbortController()
-    loadInto(fc, scene, resolveMedia, abort.signal).then(objs => {
+    loadInto(fc, bakeLayers(scene), resolveMedia, abort.signal).then(objs => {
       if (abort.signal.aborted) return
       objsRef.current = objs
       baseOpacity.current = new Map(objs.map(o => [o, o.opacity]))

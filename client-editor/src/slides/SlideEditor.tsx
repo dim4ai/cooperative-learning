@@ -9,10 +9,10 @@ import { uniqueName, type Media } from '../lessonFile'
 import { pickMediaFiles } from '../fileAccess'
 import { nanoid } from '../nanoid'
 import {
-  emptyScene, enliven, fitToWidth, imageObject, imageSize, mediaResolver, serialize, toSceneObject, type Obj,
+  backgroundSlide, enliven, fitToWidth, imageObject, imageSize, mediaResolver, serialize, toSceneObject, type Obj,
 } from './scene'
 import { loadInto } from './render'
-import { mapObjects } from './model'
+import { mapObjects, normalizeLayers, type SlideLayer } from './model'
 import { CLIP_MIME, getClip, setClip } from './clipboard'
 
 interface Props {
@@ -31,7 +31,14 @@ const PASTE_OFFSET = 24
 export function SlideEditor(props: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const fcRef = useRef<Canvas | null>(null)
-  const [layers, setLayers] = useState<Obj[]>([])
+  const [objects, setObjects] = useState<Obj[]>([])
+  // Layers of the slide (bottom → top); part of the scene, so changes go through undo too
+  const layersRef = useRef<SlideLayer[]>(normalizeLayers(props.scene).layers!)
+  const [activeLayer, setActiveLayer] = useState<string>(() => topEditable(layersRef.current)?.id ?? layersRef.current[0].id)
+  const activeLayerRef = useRef(activeLayer)
+  activeLayerRef.current = activeLayer
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [renaming, setRenaming] = useState<string | null>(null)
   const [active, setActive] = useState<Obj[]>([])
   const [, force] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
@@ -56,8 +63,10 @@ export function SlideEditor(props: Props) {
   function refresh() {
     const fc = fcRef.current
     if (!fc) return
-    setLayers([...fc.getObjects()] as Obj[])
-    setActive(fc.getActiveObjects() as Obj[])
+    setObjects([...fc.getObjects()] as Obj[])
+    const sel = fc.getActiveObjects() as Obj[]
+    setActive(sel)
+    if (sel[0]?.layer && sel[0].layer !== activeLayerRef.current) setActiveLayer(sel[0].layer)
     force(n => n + 1)
   }
 
@@ -65,7 +74,7 @@ export function SlideEditor(props: Props) {
     clearTimeout(emitTimer.current)
     if (!pendingEmit.current || !fcRef.current) return
     pendingEmit.current = false
-    live.current.onChange(serialize(fcRef.current, sceneId))
+    live.current.onChange(serialize(fcRef.current, sceneId, layersRef.current))
   }
 
   function scheduleEmit() {
@@ -78,7 +87,7 @@ export function SlideEditor(props: Props) {
   function record() {
     const fc = fcRef.current
     if (!fc) return
-    const snap = JSON.stringify(serialize(fc, sceneId))
+    const snap = JSON.stringify(serialize(fc, sceneId, layersRef.current))
     const h = history.current
     if (snap === h.now) return
     h.past.push(h.now)
@@ -121,7 +130,10 @@ export function SlideEditor(props: Props) {
     muted.current++
     try {
       fc.discardActiveObject()
-      const objs = await loadInto(fc, JSON.parse(snap) as Scene, mediaResolver(media.current))
+      const scene = JSON.parse(snap) as Scene
+      layersRef.current = scene.layers!
+      if (!scene.layers!.some(l => l.id === activeLayerRef.current)) setActiveLayer(topEditable(scene.layers!)?.id ?? scene.layers![0].id)
+      const objs = await loadInto(fc, scene, mediaResolver(media.current))
       objs.forEach(applyEditorFlags)
       fc.requestRenderAll()
     } finally {
@@ -162,11 +174,11 @@ export function SlideEditor(props: Props) {
     if (import.meta.env.DEV) (window as unknown as { __fc: Canvas }).__fc = fc // for e2e tests
     const abort = new AbortController()
 
-    loadInto(fc, props.scene, mediaResolver(media.current), abort.signal).then(objs => {
+    loadInto(fc, normalizeLayers(props.scene), mediaResolver(media.current), abort.signal).then(objs => {
       if (abort.signal.aborted) return
       objs.forEach(applyEditorFlags)
       fc.requestRenderAll()
-      history.current = { past: [], now: JSON.stringify(serialize(fc, sceneId)), future: [] }
+      history.current = { past: [], now: JSON.stringify(serialize(fc, sceneId, layersRef.current)), future: [] }
       muted.current = 0
       refresh()
     }).catch(e => {
@@ -181,7 +193,17 @@ export function SlideEditor(props: Props) {
     fc.on('object:modified', onMutate)
     fc.on('text:changed', () => { if (!muted.current) changed({ record: false }) }) // one undo step per edit session…
     fc.on('text:editing:exited', () => { if (!muted.current) changed() })           // …recorded when editing ends
-    fc.on('path:created', e => { (e.path as Obj).uid = nanoid() })
+    fc.on('before:path:created', e => { const p = e.path as Obj; p.uid = nanoid(); p.layer = targetLayer() })
+    fc.on('path:created', e => {
+      // Fabric added the drawing on top of everything; put it on top of its layer instead
+      const p = e.path as Obj
+      muted.current++
+      try { fc.moveObjectTo(p, layerTopIndex(p.layer!, p)) } finally { muted.current-- }
+      const h = history.current
+      h.now = JSON.stringify(serialize(fc, sceneId, layersRef.current)) // same undo step as the drawing
+      refresh()
+      scheduleEmit()
+    })
     fc.on('selection:created', refresh)
     fc.on('selection:updated', refresh)
     fc.on('selection:cleared', refresh)
@@ -291,9 +313,15 @@ export function SlideEditor(props: Props) {
       left: (o.left as number) + offset, top: (o.top as number) + offset,
     }))
     const objs = await enliven(fresh, media.current)
+    const fallback = targetLayer()
     await batch(() => {
       fc.discardActiveObject()
-      for (const o of objs) { applyEditorFlags(o); fc.add(o) }
+      for (const o of objs) {
+        // same layer when duplicating within the slide, otherwise the current one
+        if (!o.layer || !layerOf(o) || layerOf(o)!.locked) o.layer = fallback
+        applyEditorFlags(o)
+        fc.insertAt(layerTopIndex(o.layer!), o)
+      }
       selectObjects(objs)
     })
   }
@@ -342,8 +370,9 @@ export function SlideEditor(props: Props) {
     const fc = fcRef.current!
     setDrawingMode(false)
     obj.uid = nanoid()
+    obj.layer = targetLayer()
     if (name) obj.name = name
-    fc.add(obj) // → object:added → recorded
+    fc.insertAt(layerTopIndex(obj.layer), obj) // → object:added → recorded
     fc.setActiveObject(obj)
     fc.requestRenderAll()
     refresh()
@@ -395,7 +424,7 @@ export function SlideEditor(props: Props) {
             if (i === 0 && (pages.length === 1 || fc.getObjects().length === 0)) {
               await addImageObject(imageObject(name, size, fc.getObjects().length === 0))
             } else {
-              newSlides.push({ ...emptyScene(), objects: [imageObject(name, size, true)] })
+              newSlides.push(backgroundSlide(imageObject(name, size, true)))
             }
           }
         } else if (f.type.startsWith('image/')) {
@@ -416,11 +445,15 @@ export function SlideEditor(props: Props) {
   }
 
   async function addImageObject(json: SceneObject) {
-    const [img] = await enliven([json], media.current)
+    // A picture filling an empty slide is its background: the bottom layer
+    const bottom = layersRef.current[0]
+    const asBackground = !!json.pinned && layersRef.current.length > 1
+    const layer = asBackground ? bottom.id : targetLayer()
+    const [img] = await enliven([{ ...json, layer, pinned: asBackground && bottom.locked ? undefined : json.pinned }], media.current)
     applyEditorFlags(img)
     const fc = fcRef.current!
     setDrawingMode(false)
-    fc.add(img)
+    fc.insertAt(layerTopIndex(layer), img)
     if (img.selectable) fc.setActiveObject(img)
     fc.requestRenderAll()
     refresh()
@@ -448,7 +481,7 @@ export function SlideEditor(props: Props) {
       const flags = { studentHidden: all('studentHidden'), studentDraggable: all('studentDraggable') }
       for (const o of sel) { o.studentHidden = undefined; o.studentDraggable = undefined; o.pinned = undefined; applyEditorFlags(o) }
       const g = new Group(sel) as Obj
-      Object.assign(g, { uid: nanoid() }, flags)
+      Object.assign(g, { uid: nanoid(), layer: sel[0].layer }, flags)
       applyEditorFlags(g)
       fc.insertAt(index, g)
       fc.setActiveObject(g)
@@ -466,6 +499,7 @@ export function SlideEditor(props: Props) {
       const items = g.removeAll() as Obj[] // applies the group's transform: absolute coordinates
       fc.remove(g)
       for (const o of items) {
+        o.layer = (g as Obj).layer
         if ((g as Obj).studentHidden) o.studentHidden = true
         if ((g as Obj).studentDraggable) o.studentDraggable = true
         applyEditorFlags(o)
@@ -477,7 +511,7 @@ export function SlideEditor(props: Props) {
 
   function select(obj: Obj) {
     const fc = fcRef.current!
-    if (obj.pinned) return
+    if (!obj.selectable) return
     setDrawingMode(false)
     fc.setActiveObject(obj)
     fc.requestRenderAll()
@@ -486,13 +520,125 @@ export function SlideEditor(props: Props) {
 
   /** Z-order: one step up/down, or to the very top/bottom */
   function move(obj: Obj, to: 'up' | 'down' | 'top' | 'bottom') {
+    // Within the object's layer: layers decide what is above what
     const fc = fcRef.current!
-    if (to === 'up') fc.bringObjectForward(obj)
-    else if (to === 'down') fc.sendObjectBackwards(obj)
-    else if (to === 'top') fc.bringObjectToFront(obj)
-    else fc.sendObjectToBack(obj)
+    const all = fc.getObjects()
+    const mates = all.filter(o => (o as Obj).layer === obj.layer)
+    const i = mates.indexOf(obj)
+    const j = to === 'up' ? i + 1 : to === 'down' ? i - 1 : to === 'top' ? mates.length - 1 : 0
+    if (j < 0 || j >= mates.length || j === i) return
+    fc.moveObjectTo(obj, all.indexOf(mates[j]))
     fc.requestRenderAll()
     changed()
+  }
+
+  // ---------- layers ----------
+
+  function layerOf(o: Obj): SlideLayer | undefined {
+    return layersRef.current.find(l => l.id === o.layer)
+  }
+
+  /** Canvas index right above the last object of the layer (`except` — an object being moved) */
+  function layerTopIndex(layerId: string, except?: FabricObject): number {
+    const order = new Map(layersRef.current.map((l, i) => [l.id, i]))
+    const k = order.get(layerId) ?? Infinity
+    const all = fcRef.current!.getObjects().filter(o => o !== except)
+    let at = 0
+    all.forEach((o, i) => { if ((order.get((o as Obj).layer ?? '') ?? Infinity) <= k) at = i + 1 })
+    return at
+  }
+
+  /** Layer new objects go to: the active one if it can be edited, otherwise the top editable one (created if none) */
+  function targetLayer(): string {
+    const ls = layersRef.current
+    const act = ls.find(l => l.id === activeLayerRef.current)
+    if (act && !act.locked && !act.editorHidden) return act.id
+    let t = topEditable(ls)
+    if (!t) {
+      t = { id: 'L' + nanoid(), name: nextLayerName(ls) }
+      layersRef.current = [...ls, t]
+    }
+    activeLayerRef.current = t.id
+    setActiveLayer(t.id)
+    return t.id
+  }
+
+  /** Objects sorted by layer again (after layers were reordered) */
+  function resort() {
+    const fc = fcRef.current!
+    const order = new Map(layersRef.current.map((l, i) => [l.id, i]))
+    const sorted = fc.getObjects().map((o, i) => ({ o, i }))
+      .sort((a, b) => (order.get((a.o as Obj).layer ?? '') ?? 0) - (order.get((b.o as Obj).layer ?? '') ?? 0) || a.i - b.i)
+    sorted.forEach(({ o }, i) => fc.moveObjectTo(o, i))
+  }
+
+  function setLayers(next: SlideLayer[]) {
+    layersRef.current = next
+    const fc = fcRef.current!
+    batch(() => {
+      resort()
+      for (const o of fc.getObjects() as Obj[]) applyEditorFlags(o)
+      const sel = fc.getActiveObjects()
+      if (sel.some(o => !o.selectable || !o.visible)) fc.discardActiveObject()
+    })
+  }
+
+  function addLayer() {
+    const ls = layersRef.current
+    const fresh: SlideLayer = { id: 'L' + nanoid(), name: nextLayerName(ls) }
+    const at = Math.max(0, ls.findIndex(l => l.id === activeLayer)) + 1
+    setLayers([...ls.slice(0, at), fresh, ...ls.slice(at)])
+    setActiveLayer(fresh.id)
+    setRenaming(fresh.id)
+  }
+
+  function patchLayer(id: string, patch: Partial<SlideLayer>) {
+    setLayers(layersRef.current.map(l => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  /** dir +1 — up (drawn above), -1 — down */
+  function moveLayer(id: string, dir: 1 | -1) {
+    const ls = [...layersRef.current]
+    const i = ls.findIndex(l => l.id === id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= ls.length) return
+    ;[ls[i], ls[j]] = [ls[j], ls[i]]
+    setLayers(ls)
+  }
+
+  function deleteLayer(id: string) {
+    const ls = layersRef.current
+    if (ls.length < 2) return
+    const l = ls.find(x => x.id === id)!
+    const fc = fcRef.current!
+    const inside = fc.getObjects().filter(o => (o as Obj).layer === id)
+    if (inside.length && !confirm(`Удалить слой «${l.name}» вместе с объектами (${inside.length})?`)) return
+    layersRef.current = ls.filter(x => x.id !== id)
+    if (activeLayer === id) setActiveLayer(topEditable(layersRef.current)?.id ?? layersRef.current[0].id)
+    batch(() => { fc.discardActiveObject(); if (inside.length) fc.remove(...inside) })
+  }
+
+  /** Move objects to another layer (on top of it) */
+  function toLayer(objs: Obj[], id: string) {
+    const fc = fcRef.current!
+    batch(() => {
+      fc.discardActiveObject()
+      for (const o of objs) {
+        o.layer = id
+        fc.moveObjectTo(o, layerTopIndex(id, o))
+        applyEditorFlags(o)
+      }
+      selectObjects(objs)
+    })
+    setActiveLayer(id)
+  }
+
+  /** Editor-side interactivity derived from our flags and the object's layer */
+  function applyEditorFlags(o: Obj) {
+    const l = layerOf(o)
+    const shown = !l?.editorHidden
+    const locked = !!o.pinned || !!l?.locked || !shown
+    o.set({ visible: shown, selectable: !locked, evented: !locked, hoverCursor: locked ? 'default' : 'move' })
   }
 
   /** Everything not selected becomes selected (and vice versa); pinned objects stay out */
@@ -552,7 +698,7 @@ export function SlideEditor(props: Props) {
   // ---------- render ----------
 
   const fc = fcRef.current
-  const top = [...layers].reverse() // panel lists the topmost layer first
+  const layerList = [...layersRef.current].reverse() // panel lists the topmost layer first
   const one = active.length === 1 ? active[0] : null
   const h = history.current
 
@@ -594,6 +740,7 @@ export function SlideEditor(props: Props) {
           {!busy && active.length > 1 && (
             <>
               <span style={{ fontSize: 12, color: '#6b7280' }}>Выделено: {active.length}</span>
+              <LayerSelect layers={layersRef.current} value={active[0].layer} onChange={id => toLayer(active, id)} />
               <Tool onClick={groupSelection} title="Сгруппировать: станут одним объектом (Ctrl+G)">▦ Сгруппировать</Tool>
               <Tool onClick={invertSelection} title="Инвертировать выбор: невыбранные станут выбранными">⇄</Tool>
               <Tool onClick={duplicate} title="Дублировать (Ctrl+D)">⧉ Дублировать</Tool>
@@ -612,10 +759,11 @@ export function SlideEditor(props: Props) {
           {!busy && one && (
             <>
               <span style={{ flex: 1 }} />
-              <Tool onClick={() => move(one, 'top')} title="На верхний слой (поверх всех)">⤒</Tool>
-              <Tool onClick={() => move(one, 'up')} title="На слой выше">↑</Tool>
-              <Tool onClick={() => move(one, 'down')} title="На слой ниже">↓</Tool>
-              <Tool onClick={() => move(one, 'bottom')} title="На нижний слой (под всеми)">⤓</Tool>
+              <LayerSelect layers={layersRef.current} value={one.layer} onChange={id => toLayer([one], id)} />
+              <Tool onClick={() => move(one, 'top')} title="Поверх всех в своём слое">⤒</Tool>
+              <Tool onClick={() => move(one, 'up')} title="Выше (в своём слое)">↑</Tool>
+              <Tool onClick={() => move(one, 'down')} title="Ниже (в своём слое)">↓</Tool>
+              <Tool onClick={() => move(one, 'bottom')} title="Под всеми в своём слое">⤓</Tool>
               <Tool onClick={invertSelection} title="Инвертировать выбор: невыбранные станут выбранными">⇄</Tool>
               <Tool onClick={duplicate} title="Дублировать (Ctrl+D)">⧉</Tool>
               <Tool onClick={() => removeObjects([one])} title="Удалить (Delete)">✕</Tool>
@@ -637,39 +785,92 @@ export function SlideEditor(props: Props) {
       </div>
 
       {/* Layers */}
-      <div style={{ width: 230, flexShrink: 0 }}>
-        <div style={sectionTitle}>Слои</div>
-        {top.length === 0 && <div style={{ fontSize: 12, color: '#9ca3af' }}>Пусто — добавьте текст, картинку, PDF или фигуру</div>}
-        <div data-testid="layers" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 520, overflowY: 'auto' }}>
-          {top.map((o, i) => (
-            <div key={o.uid ?? i} onClick={() => select(o)} style={{
-              padding: '5px 6px', borderRadius: 4, background: '#fff', cursor: o.pinned ? 'default' : 'pointer',
-              border: `1px solid ${active.includes(o) ? '#4a90e2' : '#e5e7eb'}`,
-            }}>
-              <div style={{ fontSize: 12, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>
-                {layerLabel(o)}
+      <div style={{ width: 250, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ ...sectionTitle, marginBottom: 0, flex: 1 }}>Слои</div>
+          <button onClick={addLayer} title="Новый слой над текущим" data-testid="add-layer" style={smallBtn}>+ Слой</button>
+        </div>
+        <div data-testid="layers" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 560, overflowY: 'auto' }}>
+          {layerList.map((l, li) => {
+            const items = objects.filter(o => o.layer === l.id).reverse()
+            const open = expanded.has(l.id)
+            const isActive = l.id === activeLayer
+            return (
+              <div key={l.id} data-testid="layer" data-layer={l.name} style={{
+                borderRadius: 4, background: '#fff', border: `1px solid ${isActive ? '#4a90e2' : '#e5e7eb'}`,
+                boxShadow: isActive ? '0 0 0 1px #4a90e2' : undefined,
+              }}>
+                <div onClick={() => setActiveLayer(l.id)} style={{ padding: '5px 6px', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                    <button onClick={e => { e.stopPropagation(); setExpanded(x => { const n = new Set(x); if (n.has(l.id)) n.delete(l.id); else n.add(l.id); return n }) }}
+                      title={open ? 'Свернуть' : 'Показать объекты слоя'} style={{ ...smallBtn, border: 'none', padding: 0, width: 14 }}>{open ? '▾' : '▸'}</button>
+                    {renaming === l.id ? (
+                      <input autoFocus defaultValue={l.name} onClick={e => e.stopPropagation()}
+                        onBlur={e => { const v = e.target.value.trim(); if (v && v !== l.name) patchLayer(l.id, { name: v }); setRenaming(null) }}
+                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setRenaming(null) }}
+                        style={{ ...numInput, flex: 1, width: 'auto', padding: '1px 4px', fontSize: 12 }} />
+                    ) : (
+                      <span onDoubleClick={e => { e.stopPropagation(); setRenaming(l.id) }} title="Двойной клик — переименовать"
+                        style={{ flex: 1, fontSize: 13, fontWeight: isActive ? 600 : 400, color: l.editorHidden ? '#9ca3af' : '#111827',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {l.name} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({items.length})</span>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    <Flag on={!l.editorHidden} title={l.editorHidden ? 'Слой спрятан в редакторе (ученики его видят)' : 'Спрятать в редакторе, чтобы поработать с тем, что под ним'}
+                      onClick={() => patchLayer(l.id, { editorHidden: !l.editorHidden || undefined })}>👁</Flag>
+                    <Flag on={!!l.locked} title="Закрепить слой: объекты не выделяются и не двигаются" onClick={() => patchLayer(l.id, { locked: !l.locked || undefined })}>🔒</Flag>
+                    <Flag on={!!l.studentHidden} title="Скрыть весь слой от учеников, пока учитель не откроет" onClick={() => patchLayer(l.id, { studentHidden: !l.studentHidden || undefined })}>🙈</Flag>
+                    <Flag on={!!l.studentDraggable} title="Ученики могут двигать объекты этого слоя" onClick={() => patchLayer(l.id, { studentDraggable: !l.studentDraggable || undefined })}>✋</Flag>
+                    <span style={{ flex: 1 }} />
+                    <Flag title="Слой выше" disabled={li === 0} onClick={() => moveLayer(l.id, 1)}>▲</Flag>
+                    <Flag title="Слой ниже" disabled={li === layerList.length - 1} onClick={() => moveLayer(l.id, -1)}>▼</Flag>
+                    <Flag title="Удалить слой" disabled={layerList.length < 2} onClick={() => deleteLayer(l.id)}>✕</Flag>
+                  </div>
+                </div>
+                {open && (
+                  <div style={{ borderTop: '1px solid #f3f4f6', padding: '4px 4px 4px 14px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {items.length === 0 && <div style={{ fontSize: 11, color: '#9ca3af' }}>Пусто</div>}
+                    {items.map((o, i) => (
+                      <div key={o.uid ?? i} data-testid="layer-object" onClick={() => select(o)} style={{
+                        padding: '3px 5px', borderRadius: 3, cursor: o.selectable ? 'pointer' : 'default',
+                        border: `1px solid ${active.includes(o) ? '#4a90e2' : '#f3f4f6'}`, background: '#fafafa',
+                      }}>
+                        <div style={{ fontSize: 12, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
+                          {layerLabel(o)}
+                        </div>
+                        <div style={{ display: 'flex', gap: 2 }}>
+                          <Flag on={!!o.pinned} title="Закрепить объект (не двигается, не выделяется)" onClick={() => toggle(o, 'pinned')}>📌</Flag>
+                          <Flag on={!!o.studentHidden} title="Скрыт от ученика, пока учитель не откроет" onClick={() => toggle(o, 'studentHidden')}>🙈</Flag>
+                          <Flag on={!!o.studentDraggable} title="Ученик может перетаскивать" onClick={() => toggle(o, 'studentDraggable')}>✋</Flag>
+                          <span style={{ flex: 1 }} />
+                          <Flag title="Выше" disabled={i === 0} onClick={() => move(o, 'up')}>▲</Flag>
+                          <Flag title="Ниже" disabled={i === items.length - 1} onClick={() => move(o, 'down')}>▼</Flag>
+                          <Flag title="Удалить" onClick={() => removeObjects([o])}>✕</Flag>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', gap: 2 }}>
-                <Flag on={!!o.pinned} title="Закрепить (фон: не двигается, не выделяется)" onClick={() => toggle(o, 'pinned')}>📌</Flag>
-                <Flag on={!!o.studentHidden} title="Скрыт от ученика, пока учитель не откроет" onClick={() => toggle(o, 'studentHidden')}>🙈</Flag>
-                <Flag on={!!o.studentDraggable} title="Ученик может перетаскивать" onClick={() => toggle(o, 'studentDraggable')}>✋</Flag>
-                <span style={{ flex: 1 }} />
-                <Flag title="Выше" disabled={i === 0} onClick={() => move(o, 'up')}>▲</Flag>
-                <Flag title="Ниже" disabled={i === top.length - 1} onClick={() => move(o, 'down')}>▼</Flag>
-                <Flag title="Удалить" onClick={() => removeObjects([o])}>✕</Flag>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
   )
 }
 
-/** Editor-side interactivity derived from our flags */
-function applyEditorFlags(o: Obj) {
-  const locked = !!o.pinned
-  o.set({ selectable: !locked, evented: !locked, hoverCursor: locked ? 'default' : 'move' })
+/** 'Слой N' with N one above the largest used */
+function nextLayerName(layers: SlideLayer[]): string {
+  const used = layers.map(l => /^Слой (\d+)$/.exec(l.name)?.[1]).filter(Boolean).map(Number)
+  return `Слой ${Math.max(0, ...used) + 1}`
+}
+
+/** Topmost layer new objects can go to */
+function topEditable(layers: SlideLayer[]): SlideLayer | undefined {
+  return [...layers].reverse().find(l => !l.locked && !l.editorHidden)
 }
 
 function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unknown>) => void }) {
@@ -746,6 +947,18 @@ function toHex(c: unknown, fallback: string): string {
   return /^#[0-9a-f]{6}$/i.test(ctx.fillStyle) ? ctx.fillStyle : fallback
 }
 
+/** Which layer the selection is in; changing it moves the objects there */
+function LayerSelect({ layers, value, onChange }: { layers: SlideLayer[]; value?: string; onChange: (id: string) => void }) {
+  return (
+    <label style={propLabel} title="Перенести в другой слой">Слой
+      <select value={value ?? ''} onChange={e => onChange(e.target.value)} data-testid="object-layer"
+        style={{ ...numInput, width: 'auto', maxWidth: 130 }}>
+        {[...layers].reverse().map(l => <option key={l.id} value={l.id}>{l.name}{l.locked ? ' 🔒' : ''}</option>)}
+      </select>
+    </label>
+  )
+}
+
 function Tool({ on, title, disabled, onClick, children }: {
   on?: boolean; title: string; disabled?: boolean; onClick: () => void; children: React.ReactNode
 }) {
@@ -775,6 +988,9 @@ const toolbar: React.CSSProperties = {
 }
 const propLabel: React.CSSProperties = { fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }
 const numInput: React.CSSProperties = { width: 56, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 4 }
+const smallBtn: React.CSSProperties = {
+  fontSize: 12, padding: '2px 8px', borderRadius: 4, border: '1px solid #d1d5db', background: '#fff', color: '#374151', cursor: 'pointer',
+}
 const sectionTitle: React.CSSProperties = {
   fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6,
 }

@@ -5,6 +5,7 @@ import { SLIDE_HEIGHT, SLIDE_WIDTH } from '../types'
 import type { Media } from '../lessonFile'
 import { SlidePlayer, type PlayerRole, type Positions } from './SlidePlayer'
 import { mediaResolver } from './scene'
+import { bakeLayers } from './model'
 
 interface Props {
   slides: Scene[]
@@ -41,7 +42,7 @@ export function PreviewOverlay({ slides, media, start, onClose }: Props) {
     }
   }, [onClose, slides.length])
 
-  const scene = slides[index]
+  const scene = useMemo(() => bakeLayers(slides[index]), [slides, index]) // layer flags → objects
   const shown = revealed[scene.id] ?? EMPTY
   const hiddenCount = scene.objects.filter(o => o.studentHidden).length
 
