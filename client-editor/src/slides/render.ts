@@ -2,7 +2,7 @@
 // Canonical copy lives in client-editor/src/slides; run scripts/sync-slides.sh after changing it.
 import { FabricObject, type StaticCanvas } from 'fabric'
 import type { Scene, SceneObject } from './model'
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from './model'
+import { SLIDE_HEIGHT, SLIDE_WIDTH, mapObjects } from './model'
 
 // Our fields travel with Fabric's own JSON
 FabricObject.customProperties = ['uid', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
@@ -17,9 +17,9 @@ export type MediaResolver = (name: string) => string | undefined
 export const MISSING_IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mO8Ww8AAj8BXkQ+xPEAAAAASUVORK5CYII='
 
-/** Scene JSON → JSON Fabric can load: images get a src */
+/** Scene JSON → JSON Fabric can load: images (also inside groups) get a src */
 export function hydrate(objects: SceneObject[], resolve: MediaResolver): Record<string, unknown>[] {
-  return objects.map(o => {
+  return mapObjects(objects, o => {
     if (!o.mediaName) return o
     const src = resolve(o.mediaName) ?? MISSING_IMAGE
     // Server images are cross-origin: load with CORS so the canvas stays readable

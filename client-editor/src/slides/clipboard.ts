@@ -3,6 +3,7 @@
 // marker so that a later paste knows the last copy was ours, not an old image.
 import type { SceneObject } from '../types'
 import type { Media } from '../lessonFile'
+import { sceneMediaNames } from './model'
 
 export const CLIP_MIME = 'application/x-cooperative-slide'
 
@@ -16,7 +17,7 @@ let clip: Clip | null = null
 
 export function setClip(objects: SceneObject[], media: Media): string {
   const used: Media = {}
-  for (const o of objects) if (o.mediaName && media[o.mediaName]) used[o.mediaName] = media[o.mediaName]
+  for (const name of sceneMediaNames(objects)) if (media[name]) used[name] = media[name]
   clip = { id: Math.random().toString(36).slice(2), objects, media: used }
   return clip.id
 }

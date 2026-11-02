@@ -50,6 +50,15 @@ export interface Material {
 
 export class MaterialError extends Error {}
 
+/** Every object of a scene, including those inside groups */
+function* allObjects(objects: SceneObject[]): Generator<SceneObject> {
+  for (const o of objects) {
+    if (!o || typeof o !== 'object') continue;
+    yield o;
+    if (Array.isArray(o.objects)) yield* allObjects(o.objects as SceneObject[]);
+  }
+}
+
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TYPE_RE = /^(image|video|audio)\/[a-z0-9.+-]{1,60}$/;
 
@@ -72,7 +81,7 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
   }
 
   const used = new Set<string>();
-  for (const bl of blocks) for (const s of bl.slides) for (const o of s.objects) if (typeof o?.mediaName === 'string') used.add(o.mediaName);
+  for (const bl of blocks) for (const s of bl.slides) for (const o of allObjects(s.objects)) if (typeof o.mediaName === 'string') used.add(o.mediaName);
 
   const media = new Map<string, MediaInfo>();
   const rawMedia = (b.media && typeof b.media === 'object' ? b.media : {}) as Record<string, { hash?: unknown; size?: unknown; type?: unknown }>;
@@ -125,14 +134,21 @@ export function studentScene(scene: Scene, st: SlidesState): Scene {
   const moved = st.positions.get(scene.id) ?? {};
   return {
     ...scene,
-    objects: scene.objects
-      .filter(o => !o.studentHidden || (o.uid && revealed.has(o.uid)))
-      .map(o => {
-        const { studentHidden: _h, ...rest } = o; // students don't learn what was hidden
-        const pos = o.uid ? moved[o.uid] : undefined;
-        return pos ? { ...rest, left: pos.left, top: pos.top } : rest;
-      }),
+    objects: visibleObjects(scene.objects, revealed).map(o => {
+      const pos = o.uid ? moved[o.uid] : undefined;
+      return pos ? { ...o, left: pos.left, top: pos.top } : o;
+    }),
   };
+}
+
+/** Hidden objects removed (also inside groups) unless revealed; students don't learn what was hidden */
+function visibleObjects(objects: SceneObject[], revealed: Set<string>): SceneObject[] {
+  return objects
+    .filter(o => !o.studentHidden || (o.uid && revealed.has(o.uid)))
+    .map(o => {
+      const { studentHidden: _h, ...rest } = o;
+      return Array.isArray(o.objects) ? { ...rest, objects: visibleObjects(o.objects as SceneObject[], revealed) } : rest;
+    });
 }
 
 /** The scenes students get right now: the current slide and the next one (for preloading) */
@@ -148,7 +164,7 @@ export function studentScenes(material: Material | null, st: SlidesState): { sce
 /** Media of the given (student) scenes, by name — what students may receive right now */
 export function scenesMedia(material: Material, scenes: Scene[]): Record<string, MediaInfo> {
   const out: Record<string, MediaInfo> = {};
-  for (const s of scenes) for (const o of s.objects) {
+  for (const s of scenes) for (const o of allObjects(s.objects)) {
     const info = typeof o.mediaName === 'string' ? material.media.get(o.mediaName) : undefined;
     if (info) out[o.mediaName as string] = info;
   }

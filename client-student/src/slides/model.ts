@@ -30,3 +30,26 @@ export interface SceneObject {
 
 export const SLIDE_WIDTH = 1600
 export const SLIDE_HEIGHT = 900
+
+/** Every object of a scene, including those inside groups (depth-first) */
+export function* allObjects(objects: SceneObject[]): Generator<SceneObject> {
+  for (const o of objects) {
+    yield o
+    if (Array.isArray(o.objects)) yield* allObjects(o.objects as SceneObject[])
+  }
+}
+
+/** Same tree with each object (at any depth) passed through fn */
+export function mapObjects(objects: SceneObject[], fn: (o: SceneObject) => SceneObject): SceneObject[] {
+  return objects.map(o => {
+    const m = fn(o)
+    return Array.isArray(m.objects) ? { ...m, objects: mapObjects(m.objects as SceneObject[], fn) } : m
+  })
+}
+
+/** Media names a scene's objects use, groups included */
+export function sceneMediaNames(objects: SceneObject[]): string[] {
+  const out = new Set<string>()
+  for (const o of allObjects(objects)) if (o.mediaName) out.add(o.mediaName)
+  return [...out]
+}
