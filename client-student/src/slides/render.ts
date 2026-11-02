@@ -6,10 +6,10 @@ import type { Scene, SceneObject } from './model'
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from './model'
 
 // Our fields travel with Fabric's own JSON
-FabricObject.customProperties = ['uid', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
+FabricObject.customProperties = ['uid', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
 
 export type Obj = FabricObject &
-  Partial<Pick<SceneObject, 'uid' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
+  Partial<Pick<SceneObject, 'uid' | 'name' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
 
 /** media name → URL to load it from (blob: in the editor, server URL in a lesson); undefined if absent */
 export type MediaResolver = (name: string) => string | undefined

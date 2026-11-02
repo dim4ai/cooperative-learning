@@ -2,7 +2,7 @@
 // The scene is loaded once on mount (keyed by slide id) and emitted upward on
 // every change; Fabric owns the live state in between.
 import { useEffect, useRef, useState } from 'react'
-import { ActiveSelection, Canvas, Ellipse, PencilBrush, Polygon, Rect, Textbox, type FabricObject } from 'fabric'
+import { ActiveSelection, Canvas, Ellipse, Group, PencilBrush, Polygon, Rect, Textbox, type FabricObject } from 'fabric'
 import type { Scene, SceneObject } from '../types'
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from '../types'
 import { uniqueName, type Media } from '../lessonFile'
@@ -214,6 +214,8 @@ export function SlideEditor(props: Props) {
       else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) { e.preventDefault(); redo() }
       else if (mod && key === 'd' && sel.length) { e.preventDefault(); duplicate() }
       else if (mod && key === 'a') { e.preventDefault(); selectAll() }
+      else if (mod && key === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection() }
+      else if (mod && key === 'g') { e.preventDefault(); groupSelection() }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length) { e.preventDefault(); removeObjects(sel) }
       else if (e.key === 'Escape') { setDrawingMode(false); fc.discardActiveObject(); fc.requestRenderAll(); refresh() }
       else if (e.key.startsWith('Arrow') && sel.length) {
@@ -335,10 +337,11 @@ export function SlideEditor(props: Props) {
     refresh()
   }
 
-  function add(obj: Obj) {
+  function add(obj: Obj, name?: string) {
     const fc = fcRef.current!
     setDrawingMode(false)
     obj.uid = nanoid()
+    if (name) obj.name = name
     fc.add(obj) // → object:added → recorded
     fc.setActiveObject(obj)
     fc.requestRenderAll()
@@ -358,7 +361,7 @@ export function SlideEditor(props: Props) {
   const addArrow = () => add(new Polygon(
     [{ x: 0, y: 30 }, { x: 220, y: 30 }, { x: 220, y: 0 }, { x: 300, y: 60 }, { x: 220, y: 120 }, { x: 220, y: 90 }, { x: 0, y: 90 }],
     { ...shapeStyle, fill: '#fde68a', stroke: '#b45309' },
-  ) as Obj)
+  ) as Obj, 'Стрелка')
 
   async function addFiles(files: File[]) {
     const fc = fcRef.current!
@@ -427,6 +430,52 @@ export function SlideEditor(props: Props) {
     batch(() => {
       fc.discardActiveObject()
       fc.remove(...objs)
+    })
+  }
+
+  /** Images can't go into a group yet: media references are resolved only for top-level objects */
+  const hasImage = (objs: FabricObject[]): boolean =>
+    objs.some(o => !!(o as Obj).mediaName || (o instanceof Group && hasImage(o.getObjects())))
+
+  /** Selected objects → one layer (Group), at the place of the lowest of them */
+  function groupSelection() {
+    const fc = fcRef.current!
+    const order = fc.getObjects()
+    const sel = (fc.getActiveObjects() as Obj[]).slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    if (sel.length < 2) return
+    if (hasImage(sel)) { live.current.onError('Картинки пока нельзя объединять в слой'); return }
+    batch(() => {
+      const index = order.indexOf(sel[0])
+      fc.discardActiveObject() // children back to canvas coordinates
+      fc.remove(...sel)
+      const all = (f: 'studentHidden' | 'studentDraggable') => sel.every(o => o[f]) || undefined
+      const flags = { studentHidden: all('studentHidden'), studentDraggable: all('studentDraggable') }
+      for (const o of sel) { o.studentHidden = undefined; o.studentDraggable = undefined; o.pinned = undefined; applyEditorFlags(o) }
+      const g = new Group(sel) as Obj
+      Object.assign(g, { uid: nanoid() }, flags)
+      applyEditorFlags(g)
+      fc.insertAt(index, g)
+      fc.setActiveObject(g)
+    })
+  }
+
+  /** Layer (Group) → its objects, in place; they inherit the layer's flags */
+  function ungroupSelection() {
+    const fc = fcRef.current!
+    const g = fc.getActiveObject()
+    if (!(g instanceof Group) || g instanceof ActiveSelection) return
+    batch(() => {
+      const index = fc.getObjects().indexOf(g)
+      fc.discardActiveObject()
+      const items = g.removeAll() as Obj[] // applies the group's transform: absolute coordinates
+      fc.remove(g)
+      for (const o of items) {
+        if ((g as Obj).studentHidden) o.studentHidden = true
+        if ((g as Obj).studentDraggable) o.studentDraggable = true
+        applyEditorFlags(o)
+      }
+      fc.insertAt(index, ...items)
+      selectObjects(items)
     })
   }
 
@@ -537,11 +586,20 @@ export function SlideEditor(props: Props) {
           {!busy && active.length > 1 && (
             <>
               <span style={{ fontSize: 12, color: '#6b7280' }}>Выделено: {active.length}</span>
+              <Tool onClick={groupSelection} title="Объединить в один слой (Ctrl+G)">▦ В один слой</Tool>
               <Tool onClick={duplicate} title="Дублировать (Ctrl+D)">⧉ Дублировать</Tool>
               <Tool onClick={() => removeObjects(active)} title="Удалить (Delete)">✕ Удалить</Tool>
             </>
           )}
+          {!busy && one && (
+            <input value={one.name ?? ''} placeholder="Название слоя" title="Название слоя (видно в списке слоёв)"
+              onChange={e => { one.name = e.target.value || undefined; changed({ record: false }) }}
+              onBlur={() => changed()} style={{ ...numInput, width: 150 }} />
+          )}
           {!busy && one && <ObjectProps obj={one} set={patch => setProp(one, patch)} />}
+          {!busy && one instanceof Group && (
+            <Tool onClick={ungroupSelection} title="Разделить слой на отдельные объекты (Ctrl+Shift+G)">⊞ Разделить</Tool>
+          )}
           {!busy && one && (
             <>
               <span style={{ flex: 1 }} />
@@ -603,7 +661,7 @@ function applyEditorFlags(o: Obj) {
 function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unknown>) => void }) {
   const isText = obj instanceof Textbox
   const isPath = obj.type === 'path'
-  const isShape = !isText && !isPath && obj.type !== 'image'
+  const isShape = !isText && !isPath && obj.type !== 'image' && !(obj instanceof Group)
   return (
     <>
       {isText && (
@@ -655,9 +713,11 @@ function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unkno
 }
 
 function layerLabel(o: Obj): string {
+  if (o.name) return `${o instanceof Group ? '▦' : '•'}  ${o.name}`
+  if (o instanceof Group) return `▦  Слой из ${o.size()} объектов`
   if (o instanceof Textbox) return `T  ${o.text.replace(/\s+/g, ' ').slice(0, 40) || '(пусто)'}`
   if (o.mediaName) return `🖼  ${o.mediaName}`
-  return ({ rect: '▭  Прямоугольник', ellipse: '◯  Круг', polygon: '➜  Стрелка', path: '✏  Рисунок' } as Record<string, string>)[o.type] ?? o.type
+  return ({ rect: '▭  Прямоугольник', ellipse: '◯  Круг', circle: '◯  Круг', line: '╱  Линия', polygon: '⬠  Многоугольник', path: '✏  Рисунок' } as Record<string, string>)[o.type] ?? o.type
 }
 
 /** CSS color (hex/rgb/named-ish) → #rrggbb for <input type=color> */

@@ -20,6 +20,7 @@ export interface Scene {
 export interface SceneObject {
   type: string
   uid: string
+  name?: string             // layer name shown in the editor's layers panel
   mediaName?: string
   pinned?: boolean           // locked in place (background), not selectable in editor
   studentHidden?: boolean    // hidden from students until revealed
