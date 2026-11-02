@@ -46,13 +46,21 @@ export function toSceneObject(o: FabricObject): SceneObject {
   })[0]
 }
 
-export function serialize(fc: StaticCanvas, id: string, layers: SlideLayer[]): Scene {
+/** Slide-wide look kept by the editor next to the canvas (the canvas only has the rendered fill) */
+export interface Page { background: string; paper?: string; paperColor?: string }
+
+export function pageOf(scene: Scene): Page {
+  return { background: scene.background || '#ffffff', paper: scene.paper, paperColor: scene.paperColor }
+}
+
+export function serialize(fc: StaticCanvas, id: string, layers: SlideLayer[], page: Page): Scene {
   return {
     ...emptyScene(),
     id,
     layers: layers.map(l => ({ ...l })),
-    background: typeof fc.backgroundColor === 'string' && fc.backgroundColor ? fc.backgroundColor : '#ffffff',
-    objects: fc.getObjects().map(toSceneObject),
+    background: page.background,
+    ...(page.paper && page.paper !== 'none' ? { paper: page.paper, paperColor: page.paperColor } : {}),
+    objects: fc.getObjects().filter(o => !o.excludeFromExport).map(toSceneObject), // not previews/crop frames
   }
 }
 

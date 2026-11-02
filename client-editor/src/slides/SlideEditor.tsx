@@ -2,15 +2,22 @@
 // The scene is loaded once on mount (keyed by slide id) and emitted upward on
 // every change; Fabric owns the live state in between.
 import { useEffect, useRef, useState } from 'react'
-import { ActiveSelection, Canvas, Ellipse, Group, PencilBrush, Polygon, Rect, Textbox, type FabricObject } from 'fabric'
+import { ActiveSelection, Canvas, Ellipse, FabricImage, Group, PencilBrush, Point, Polygon, Polyline, Rect, Textbox, type FabricObject, type TPointerEventInfo } from 'fabric'
 import type { Scene, SceneObject } from '../types'
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from '../types'
 import { uniqueName, type Media } from '../lessonFile'
 import { pickMediaFiles } from '../fileAccess'
 import { nanoid } from '../nanoid'
 import {
-  backgroundSlide, enliven, fitToWidth, imageObject, imageSize, mediaResolver, serialize, toSceneObject, type Obj,
+  backgroundSlide, enliven, fitToWidth, imageObject, imageSize, mediaResolver, pageOf, serialize, toSceneObject, type Obj, type Page,
 } from './scene'
+import { DEFAULT_PAPER_COLOR, PAPERS, applyPaper } from './paper'
+import {
+  DEFAULT_MARK_STYLE, LINE_MARKS, MARKS, MORPHEME_MARKS, SENTENCE_MARKS, SHAPES, buildMark, buildShape, markHeight,
+  type MarkKind, type MarkStyle, type ShapeKind,
+} from './marks'
+import { ColorField, ToolMenu, screenPipette, type PickColor } from './controls'
+import { applyCrop, cropFrame, isCropped, uncrop } from './crop'
 import { loadInto } from './render'
 import { mapObjects, normalizeLayers, type SlideLayer } from './model'
 import { CLIP_MIME, getClip, setClip } from './clipboard'
@@ -42,8 +49,15 @@ export function SlideEditor(props: Props) {
   const [active, setActive] = useState<Obj[]>([])
   const [, force] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
-  const [drawing, setDrawing] = useState(false)
-  const [brush, setBrush] = useState({ color: '#1d4ed8', width: 6 })
+  // Freehand drawing: pencil or translucent marker (Shift — straight line)
+  const [drawing, setDrawing] = useState<null | 'pencil' | 'marker'>(null)
+  const [brushes, setBrushes] = useState({ pencil: { color: '#1d4ed8', width: 6 }, marker: { color: '#facc15', width: 24 } })
+  // Drawn-by-drag tool (lines, marks, axes), polygon by points, or the slide pipette
+  const [tool, setTool] = useState<null | MarkKind | 'polygon' | 'pipette'>(null)
+  const [markStyle, setMarkStyle] = useState<MarkStyle>(DEFAULT_MARK_STYLE)
+  const pipetteDone = useRef<((c: string | null) => void) | null>(null)
+  const [cropping, setCropping] = useState<{ img: FabricImage; frame: Rect } | null>(null)
+  const pageRef = useRef<Page>(pageOf(props.scene))
   const [dropping, setDropping] = useState(false)
 
   // Latest props for Fabric/window handlers
@@ -63,7 +77,7 @@ export function SlideEditor(props: Props) {
   function refresh() {
     const fc = fcRef.current
     if (!fc) return
-    setObjects([...fc.getObjects()] as Obj[])
+    setObjects(fc.getObjects().filter(o => !o.excludeFromExport) as Obj[])
     const sel = fc.getActiveObjects() as Obj[]
     setActive(sel)
     if (sel[0]?.layer && sel[0].layer !== activeLayerRef.current) setActiveLayer(sel[0].layer)
@@ -74,7 +88,7 @@ export function SlideEditor(props: Props) {
     clearTimeout(emitTimer.current)
     if (!pendingEmit.current || !fcRef.current) return
     pendingEmit.current = false
-    live.current.onChange(serialize(fcRef.current, sceneId, layersRef.current))
+    live.current.onChange(serialize(fcRef.current, sceneId, layersRef.current, pageRef.current))
   }
 
   function scheduleEmit() {
@@ -87,7 +101,7 @@ export function SlideEditor(props: Props) {
   function record() {
     const fc = fcRef.current
     if (!fc) return
-    const snap = JSON.stringify(serialize(fc, sceneId, layersRef.current))
+    const snap = JSON.stringify(serialize(fc, sceneId, layersRef.current, pageRef.current))
     const h = history.current
     if (snap === h.now) return
     h.past.push(h.now)
@@ -132,6 +146,7 @@ export function SlideEditor(props: Props) {
       fc.discardActiveObject()
       const scene = JSON.parse(snap) as Scene
       layersRef.current = scene.layers!
+      pageRef.current = pageOf(scene)
       if (!scene.layers!.some(l => l.id === activeLayerRef.current)) setActiveLayer(topEditable(scene.layers!)?.id ?? scene.layers![0].id)
       const objs = await loadInto(fc, scene, mediaResolver(media.current))
       objs.forEach(applyEditorFlags)
@@ -178,7 +193,7 @@ export function SlideEditor(props: Props) {
       if (abort.signal.aborted) return
       objs.forEach(applyEditorFlags)
       fc.requestRenderAll()
-      history.current = { past: [], now: JSON.stringify(serialize(fc, sceneId, layersRef.current)), future: [] }
+      history.current = { past: [], now: JSON.stringify(serialize(fc, sceneId, layersRef.current, pageRef.current)), future: [] }
       muted.current = 0
       refresh()
     }).catch(e => {
@@ -190,7 +205,12 @@ export function SlideEditor(props: Props) {
     const onMutate = () => { if (!muted.current) changed() }
     fc.on('object:added', onMutate)
     fc.on('object:removed', onMutate)
-    fc.on('object:modified', onMutate)
+    fc.on('object:modified', e => {
+      if (muted.current) return
+      const o = e.target as Obj
+      if (o?.mark && (Math.abs(o.scaleX) !== 1 || Math.abs(o.scaleY) !== 1)) rebuildMark(o)
+      else changed()
+    })
     fc.on('text:changed', () => { if (!muted.current) changed({ record: false }) }) // one undo step per edit session…
     fc.on('text:editing:exited', () => { if (!muted.current) changed() })           // …recorded when editing ends
     fc.on('before:path:created', e => { const p = e.path as Obj; p.uid = nanoid(); p.layer = targetLayer() })
@@ -200,7 +220,7 @@ export function SlideEditor(props: Props) {
       muted.current++
       try { fc.moveObjectTo(p, layerTopIndex(p.layer!, p)) } finally { muted.current-- }
       const h = history.current
-      h.now = JSON.stringify(serialize(fc, sceneId, layersRef.current)) // same undo step as the drawing
+      h.now = JSON.stringify(serialize(fc, sceneId, layersRef.current, pageRef.current)) // same undo step as the drawing
       refresh()
       scheduleEmit()
     })
@@ -240,7 +260,10 @@ export function SlideEditor(props: Props) {
       else if (mod && key === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelection() }
       else if (mod && key === 'g') { e.preventDefault(); groupSelection() }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length) { e.preventDefault(); removeObjects(sel) }
-      else if (e.key === 'Escape') { setDrawingMode(false); fc.discardActiveObject(); fc.requestRenderAll(); refresh() }
+      else if (e.key === 'Escape') {
+        setDrawingMode(null); setTool(null); cancelCrop()
+        fc.discardActiveObject(); fc.requestRenderAll(); refresh()
+      }
       else if (e.key.startsWith('Arrow') && sel.length) {
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
@@ -368,12 +391,25 @@ export function SlideEditor(props: Props) {
 
   function add(obj: Obj, name?: string) {
     const fc = fcRef.current!
-    setDrawingMode(false)
+    setDrawingMode(null)
     obj.uid = nanoid()
     obj.layer = targetLayer()
     if (name) obj.name = name
     fc.insertAt(layerTopIndex(obj.layer), obj) // → object:added → recorded
     fc.setActiveObject(obj)
+    fc.requestRenderAll()
+    refresh()
+  }
+
+  /** A ready object (drawn mark, polygon) into the target layer; select it unless a tool stays active */
+  function addShapeObject(obj: Obj, name?: string, select = true) {
+    const fc = fcRef.current!
+    obj.uid = nanoid()
+    obj.layer = targetLayer()
+    if (name) obj.name = name
+    applyEditorFlags(obj)
+    fc.insertAt(layerTopIndex(obj.layer), obj) // → object:added → recorded
+    if (select) fc.setActiveObject(obj)
     fc.requestRenderAll()
     refresh()
   }
@@ -385,7 +421,8 @@ export function SlideEditor(props: Props) {
     }) as Obj)
   }
 
-  const shapeStyle = { fill: '#bfdbfe', stroke: '#1d4ed8', strokeWidth: 4, strokeUniform: true, left: SLIDE_WIDTH / 2, top: SLIDE_HEIGHT / 2 }
+  const shapeStyle = { ...SHAPE_PAINT, left: SLIDE_WIDTH / 2, top: SLIDE_HEIGHT / 2 }
+  const addShape = (k: ShapeKind) => add(buildShape(k, shapeStyle) as Obj, SHAPES[k].label)
   const addRect = () => add(new Rect({ ...shapeStyle, width: 320, height: 200, rx: 12, ry: 12 }) as Obj)
   const addEllipse = () => add(new Ellipse({ ...shapeStyle, rx: 140, ry: 140 }) as Obj)
   const addArrow = () => add(new Polygon(
@@ -452,7 +489,7 @@ export function SlideEditor(props: Props) {
     const [img] = await enliven([{ ...json, layer, pinned: asBackground && bottom.locked ? undefined : json.pinned }], media.current)
     applyEditorFlags(img)
     const fc = fcRef.current!
-    setDrawingMode(false)
+    setDrawingMode(null)
     fc.insertAt(layerTopIndex(layer), img)
     if (img.selectable) fc.setActiveObject(img)
     fc.requestRenderAll()
@@ -512,7 +549,7 @@ export function SlideEditor(props: Props) {
   function select(obj: Obj) {
     const fc = fcRef.current!
     if (!obj.selectable) return
-    setDrawingMode(false)
+    setDrawingMode(null)
     fc.setActiveObject(obj)
     fc.requestRenderAll()
     refresh()
@@ -668,36 +705,264 @@ export function SlideEditor(props: Props) {
     changed()
   }
 
-  function setBackground(color: string) {
+  /** Background color and ruling of the slide */
+  function setPage(patch: Partial<Page>) {
     const fc = fcRef.current!
-    fc.backgroundColor = color
+    const p = { ...pageRef.current, ...patch }
+    pageRef.current = p
+    applyPaper(fc, p.background, p.paper, p.paperColor)
     fc.requestRenderAll()
     changed()
   }
 
-  function setDrawingMode(on: boolean) {
+  function setDrawingMode(kind: null | 'pencil' | 'marker') {
     const fc = fcRef.current
     if (!fc) return
-    fc.isDrawingMode = on
-    if (on) {
+    fc.isDrawingMode = !!kind
+    if (kind) {
+      setTool(null)
       fc.discardActiveObject()
       const b = new PencilBrush(fc)
-      b.color = brushRef.current.color
-      b.width = brushRef.current.width
+      b.straightLineKey = 'shiftKey'
       fc.freeDrawingBrush = b
+      applyBrush(kind, brushesRef.current[kind])
     }
-    setDrawing(on)
+    setDrawing(kind)
   }
-  const brushRef = useRef(brush)
-  brushRef.current = brush
-  useEffect(() => {
+  function applyBrush(kind: 'pencil' | 'marker', st: { color: string; width: number }) {
     const b = fcRef.current?.freeDrawingBrush
-    if (b) { b.color = brush.color; b.width = brush.width }
-  }, [brush])
+    if (!b) return
+    b.color = kind === 'marker' ? withAlpha(st.color, 0.4) : st.color
+    b.width = st.width
+    ;(b as PencilBrush & { strokeLineCap: CanvasLineCap }).strokeLineCap = kind === 'marker' ? 'butt' : 'round'
+  }
+  const brushesRef = useRef(brushes)
+  brushesRef.current = brushes
+  useEffect(() => { if (drawing) applyBrush(drawing, brushes[drawing]) }, [brushes, drawing])
+
+  // ---------- pipette ----------
+
+  /** Screen pipette where the browser has one, otherwise a click on the slide */
+  const pick: PickColor = async () => {
+    const c = await screenPipette()
+    if (c !== undefined) return c
+    setDrawingMode(null)
+    return new Promise(resolve => {
+      pipetteDone.current?.(null)
+      pipetteDone.current = resolve
+      setTool('pipette')
+    })
+  }
+
+  // ---------- drawn-by-drag tools ----------
+
+  function startTool(t: MarkKind | 'polygon') {
+    setDrawingMode(null)
+    cancelCrop()
+    fcRef.current?.discardActiveObject()
+    setTool(cur => (cur === t ? null : t))
+  }
+
+  // Mouse handling while a tool is active: Fabric's own selection is off meanwhile
+  useEffect(() => {
+    const fc = fcRef.current
+    if (!fc || !tool) return
+    fc.selection = false
+    fc.skipTargetFind = true
+    fc.defaultCursor = 'crosshair'
+    fc.discardActiveObject()
+    fc.requestRenderAll()
+
+    let start: Point | null = null
+    let preview: FabricObject | null = null
+    const points: Point[] = []
+
+    const showPreview = (o: FabricObject | null) => {
+      muted.current++
+      try {
+        if (preview) fc.remove(preview)
+        preview = o
+        if (o) { o.set({ excludeFromExport: true, evented: false, selectable: false, opacity: 0.6 }); fc.add(o) }
+      } finally { muted.current-- }
+      fc.requestRenderAll()
+    }
+
+    const pickPixel = (e: TPointerEventInfo) => {
+      const r = fc.getRetinaScaling()
+      const px = fc.getContext().getImageData(Math.round(e.viewportPoint.x * r), Math.round(e.viewportPoint.y * r), 1, 1).data
+      const hex = '#' + [px[0], px[1], px[2]].map(n => n.toString(16).padStart(2, '0')).join('')
+      pipetteDone.current?.(hex)
+      pipetteDone.current = null
+      setTool(null)
+    }
+
+    const finishPolygon = () => {
+      showPreview(null)
+      // a double click adds its point twice: drop vertices that repeat the previous one
+      const vs = points.filter((p, i) => i === 0 || Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y) > 4)
+      if (vs.length >= 3) addShapeObject(new Polygon(vs.map(p => ({ x: p.x, y: p.y })), SHAPE_PAINT) as Obj, 'Многоугольник')
+      points.length = 0
+      setTool(null)
+    }
+
+    const down = (e: TPointerEventInfo) => {
+      if (tool === 'pipette') { pickPixel(e); return }
+      const p = e.scenePoint
+      if (tool === 'polygon') {
+        if (points.length >= 3 && Math.hypot(p.x - points[0].x, p.y - points[0].y) < 14) { finishPolygon(); return }
+        points.push(p)
+        showPreview(new Polyline([...points, p].map(q => ({ x: q.x, y: q.y })), { ...SHAPE_PAINT, fill: 'transparent' }))
+        return
+      }
+      start = p
+    }
+    const move = (e: TPointerEventInfo) => {
+      if (tool === 'polygon' && points.length) {
+        showPreview(new Polyline([...points, e.scenePoint].map(q => ({ x: q.x, y: q.y })), { ...SHAPE_PAINT, fill: 'transparent' }))
+        return
+      }
+      if (!start || tool === 'pipette' || tool === 'polygon') return
+      showPreview(dragMark(tool, start, e.scenePoint, (e.e as MouseEvent).shiftKey))
+    }
+    const up = (e: TPointerEventInfo) => {
+      if (!start || tool === 'pipette' || tool === 'polygon') return
+      const end = e.scenePoint
+      const s0 = start
+      start = null
+      showPreview(null)
+      if (Math.hypot(end.x - s0.x, end.y - s0.y) < 6) return // a click, not a drag
+      const o = dragMark(tool, s0, end, (e.e as MouseEvent).shiftKey) as Obj
+      addShapeObject(o, MARKS[tool].label, false)
+    }
+    const dbl = () => { if (tool === 'polygon') finishPolygon() }
+    const key = (e: KeyboardEvent) => { if (tool === 'polygon' && e.key === 'Enter') finishPolygon() }
+
+    fc.on('mouse:down', down)
+    fc.on('mouse:move', move)
+    fc.on('mouse:up', up)
+    fc.on('mouse:dblclick', dbl)
+    window.addEventListener('keydown', key)
+    return () => {
+      fc.off('mouse:down', down)
+      fc.off('mouse:move', move)
+      fc.off('mouse:up', up)
+      fc.off('mouse:dblclick', dbl)
+      window.removeEventListener('keydown', key)
+      showPreview(null)
+      fc.selection = true
+      fc.skipTargetFind = false
+      fc.defaultCursor = 'default'
+      if (tool === 'pipette') { pipetteDone.current?.(null); pipetteDone.current = null }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool])
+
+  /** The mark for a drag from a to b */
+  function dragMark(kind: MarkKind, a: Point, b: Point, shift: boolean): FabricObject {
+    const info = MARKS[kind]
+    const st = markStyleRef.current
+    if (info.drag === 'line') {
+      let ang = Math.atan2(b.y - a.y, b.x - a.x)
+      if (shift) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12)
+      const len = Math.hypot(b.x - a.x, b.y - a.y)
+      const o = buildMark(kind, len, 0, st)
+      o.set({ left: a.x + Math.cos(ang) * len / 2, top: a.y + Math.sin(ang) * len / 2, angle: ang * 180 / Math.PI })
+      return o
+    }
+    if (info.drag === 'box') {
+      const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y)
+      const o = buildMark(kind, w, h, st)
+      o.set({ left: (a.x + b.x) / 2, top: (a.y + b.y) / 2 })
+      return o
+    }
+    const w = Math.abs(b.x - a.x)
+    const h = markHeight(kind, w)
+    const o = buildMark(kind, w, h, st)
+    const sw = st.strokeWidth
+    const dy = info.place === 'above' ? -(h + sw) / 2 : info.place === 'below' ? (h + sw) / 2 : 0
+    o.set({ left: (a.x + b.x) / 2, top: a.y + dy })
+    return o
+  }
+  const markStyleRef = useRef(markStyle)
+  markStyleRef.current = markStyle
+
+  /** A resized mark is redrawn at its new size (a wavy line stays wavy instead of stretching) */
+  function rebuildMark(o: Obj, style?: Partial<MarkStyle>) {
+    const fc = fcRef.current!
+    const m = o.mark!
+    const kind = m.kind as MarkKind
+    const w = m.w * Math.abs(o.scaleX)
+    const h = m.h * Math.abs(o.scaleY)
+    const st: MarkStyle = {
+      stroke: typeof o.stroke === 'string' ? o.stroke : markStyleRef.current.stroke,
+      strokeWidth: o instanceof Group ? markStyleRef.current.strokeWidth : o.strokeWidth,
+      ...style,
+    }
+    if (o instanceof Group) {
+      const axes = o.getObjects()[0]
+      if (typeof axes?.stroke === 'string') st.stroke = style?.stroke ?? axes.stroke
+    }
+    const fresh = buildMark(kind, w, MARKS[kind].drag === 'line' ? m.h : h, st) as Obj
+    const c = o.getCenterPoint()
+    fresh.set({ left: c.x, top: c.y, angle: o.angle, opacity: o.opacity })
+    Object.assign(fresh, { uid: o.uid, layer: o.layer, name: o.name, pinned: o.pinned, studentHidden: o.studentHidden, studentDraggable: o.studentDraggable })
+    batch(() => {
+      const i = fc.getObjects().indexOf(o)
+      fc.discardActiveObject()
+      fc.remove(o)
+      applyEditorFlags(fresh)
+      fc.insertAt(i, fresh)
+      fc.setActiveObject(fresh)
+    })
+  }
+
+  // ---------- crop ----------
+
+  function startCrop(img: FabricImage) {
+    const fc = fcRef.current!
+    setTool(null)
+    const frame = cropFrame(img)
+    muted.current++
+    try {
+      for (const o of fc.getObjects()) o.set({ evented: false })
+      fc.add(frame)
+      fc.setActiveObject(frame)
+    } finally { muted.current-- }
+    fc.requestRenderAll()
+    setCropping({ img, frame })
+  }
+
+  function finishCrop(apply: boolean) {
+    const fc = fcRef.current!
+    const c = croppingRef.current
+    if (!c) return
+    setCropping(null)
+    muted.current++
+    try {
+      fc.discardActiveObject()
+      fc.remove(c.frame)
+      if (apply) applyCrop(c.img, c.frame)
+      for (const o of fc.getObjects() as Obj[]) applyEditorFlags(o)
+      fc.setActiveObject(c.img)
+    } finally { muted.current-- }
+    fc.requestRenderAll()
+    if (apply) changed()
+    else refresh()
+  }
+  const croppingRef = useRef(cropping)
+  croppingRef.current = cropping
+  function cancelCrop() { if (croppingRef.current) finishCrop(false) }
+
+  function resetCrop(img: FabricImage) {
+    uncrop(img)
+    fcRef.current!.requestRenderAll()
+    changed()
+  }
+
+  const markItem = (k: MarkKind) => ({ key: k, icon: MARKS[k].icon, label: MARKS[k].label, title: MARKS[k].title, on: tool === k, onClick: () => startTool(k) })
 
   // ---------- render ----------
 
-  const fc = fcRef.current
   const layerList = [...layersRef.current].reverse() // panel lists the topmost layer first
   const one = active.length === 1 ? active[0] : null
   const h = history.current
@@ -711,27 +976,71 @@ export function SlideEditor(props: Props) {
           <Tool onClick={async () => addFiles(await pickMediaFiles('image/*,application/pdf'))} disabled={!!busy} title="Картинка или страницы PDF">
             🖼&nbsp;Картинка / PDF
           </Tool>
-          <Tool onClick={addRect} title="Прямоугольник">▭</Tool>
-          <Tool onClick={addEllipse} title="Круг">◯</Tool>
-          <Tool onClick={addArrow} title="Стрелка">➜</Tool>
-          <Tool on={drawing} onClick={() => setDrawingMode(!drawing)} title="Карандаш (Esc — выйти)">✏&nbsp;Карандаш</Tool>
-          {drawing && (
-            <>
-              <input type="color" value={brush.color} onChange={e => setBrush(b => ({ ...b, color: e.target.value }))} title="Цвет карандаша" />
-              <input type="range" min={1} max={40} value={brush.width} onChange={e => setBrush(b => ({ ...b, width: Number(e.target.value) }))} title="Толщина" />
-            </>
-          )}
+          <ToolMenu label="◇ Фигуры" title="Фигуры" testId="menu-shapes" on={tool === 'polygon'} sections={[{
+            items: [
+              { key: 'rect', icon: '▭', label: 'Прямоугольник', onClick: addRect },
+              { key: 'ellipse', icon: '◯', label: 'Круг', onClick: addEllipse },
+              ...(Object.keys(SHAPES) as ShapeKind[]).map(k => ({ key: k, icon: SHAPES[k].icon, label: SHAPES[k].label, onClick: () => addShape(k) })),
+              { key: 'arrow', icon: '➜', label: 'Стрелка', onClick: addArrow },
+              { key: 'polygon', icon: '⬠', label: 'Многоугольник по точкам', title: 'Кликайте вершины; закончить — двойной клик, Enter или клик в первую точку', on: tool === 'polygon', onClick: () => startTool('polygon') },
+            ],
+          }]} />
+          <ToolMenu label="╱ Линии" title="Линии, вектор, оси координат" testId="menu-lines" on={!!tool && LINE_MARKS.includes(tool as MarkKind)}
+            sections={[{ items: LINE_MARKS.map(k => markItem(k)) }]} />
+          <ToolMenu label="⌒ Разбор" title="Разбор предложения и слова" testId="menu-analysis"
+            on={!!tool && (SENTENCE_MARKS.includes(tool as MarkKind) || MORPHEME_MARKS.includes(tool as MarkKind))}
+            sections={[
+              { title: 'Члены предложения — проведите под словом', items: SENTENCE_MARKS.map(k => markItem(k)) },
+              { title: 'Состав слова', items: MORPHEME_MARKS.map(k => markItem(k)) },
+            ]} />
+          <Tool on={drawing === 'pencil'} onClick={() => setDrawingMode(drawing === 'pencil' ? null : 'pencil')} title="Карандаш (Shift — прямая, Esc — выйти)">✏&nbsp;Карандаш</Tool>
+          <Tool on={drawing === 'marker'} onClick={() => setDrawingMode(drawing === 'marker' ? null : 'marker')} title="Маркер: полупрозрачный, для выделения (Shift — прямая, Esc — выйти)">🖍&nbsp;Маркер</Tool>
           <span style={{ flex: 1 }} />
           <Tool onClick={undo} disabled={!h.past.length} title="Отменить (Ctrl+Z)">↶</Tool>
           <Tool onClick={redo} disabled={!h.future.length} title="Повторить (Ctrl+Shift+Z)">↷</Tool>
           <label style={propLabel} title="Фон слайда">
-            Фон <input type="color" value={toHex(fc?.backgroundColor, '#ffffff')} onChange={e => setBackground(e.target.value)} />
+            Фон <ColorField value={toHex(pageRef.current.background, '#ffffff')} onChange={c => setPage({ background: c })} title="Цвет фона слайда" pick={pick} />
           </label>
+          <select value={pageRef.current.paper ?? 'none'} onChange={e => setPage({ paper: e.target.value === 'none' ? undefined : e.target.value })}
+            title="Разметка слайда: клетка, линейка, пропись" data-testid="paper" style={{ ...numInput, width: 'auto' }}>
+            {PAPERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+          {pageRef.current.paper && pageRef.current.paper !== 'none' && (
+            <ColorField value={toHex(pageRef.current.paperColor, DEFAULT_PAPER_COLOR)} onChange={c => setPage({ paperColor: c })} title="Цвет линий разметки" pick={pick} />
+          )}
         </div>
 
         {/* Properties of the selection */}
-        <div style={{ ...toolbar, minHeight: 34, background: '#fafafa' }} data-testid="props">
+        <div style={{ ...toolbar, minHeight: 34, background: drawing || tool ? '#eff6ff' : '#fafafa' }} data-testid="props">
           {busy && <span style={{ fontSize: 12, color: '#6b7280' }}>{busy}</span>}
+          {/* Settings of the active tool (in place of the selection's properties: the slide doesn't jump) */}
+          {(drawing || (tool && tool !== 'pipette')) && (
+            <span style={{ display: 'contents' }} data-testid="tool-settings">
+            {drawing && (
+              <>
+                <span style={{ fontSize: 12, color: '#1e40af' }}>{drawing === 'pencil' ? 'Карандаш' : 'Маркер'} — рисуйте на слайде; Shift — прямая; Esc — выйти</span>
+                <ColorField value={brushes[drawing].color} title="Цвет" pick={pick}
+                  onChange={c => setBrushes(b => ({ ...b, [drawing]: { ...b[drawing], color: c } }))} />
+                <input type="range" min={1} max={drawing === 'marker' ? 60 : 40} value={brushes[drawing].width} title="Толщина"
+                  onChange={e => setBrushes(b => ({ ...b, [drawing]: { ...b[drawing], width: Number(e.target.value) } }))} />
+              </>
+            )}
+            {tool && tool !== 'pipette' && tool !== 'polygon' && (
+              <>
+                <span style={{ fontSize: 12, color: '#1e40af' }}>{MARKS[tool].label}: {MARKS[tool].title.replace(/^[^—]*— ?/, '') || 'проведите мышкой'} · Esc — выйти</span>
+                <ColorField value={markStyle.stroke} title="Цвет линии" pick={pick} onChange={c => setMarkStyle(m => ({ ...m, stroke: c }))} />
+                <label style={propLabel}>Толщина
+                  <input type="number" min={1} max={20} value={markStyle.strokeWidth} style={numInput}
+                    onChange={e => setMarkStyle(m => ({ ...m, strokeWidth: Math.max(1, Math.min(20, Number(e.target.value) || 1)) }))} />
+                </label>
+              </>
+            )}
+            {tool === 'polygon' && <span style={{ fontSize: 12, color: '#1e40af' }}>Кликайте вершины; закончить — двойной клик, Enter или клик в первую точку; Esc — отмена</span>}
+            </span>
+          )}
+          {tool === 'pipette' && <span style={{ fontSize: 12, color: '#92400e' }}>💧 Кликните на слайде, чтобы взять цвет (Esc — отмена)</span>}
+
+          {!drawing && !tool && (<>
           {!busy && !active.length && (
             <span style={{ fontSize: 12, color: '#9ca3af' }}>
               Выделите объект (Shift+клик — добавить к выделению). Ctrl+C/V — копировать/вставить, Ctrl+D — дублировать, Ctrl+G — сгруппировать, Delete — удалить, стрелки — сдвинуть. Можно вставить картинку из буфера или перетащить файлы на слайд.
@@ -747,12 +1056,25 @@ export function SlideEditor(props: Props) {
               <Tool onClick={() => removeObjects(active)} title="Удалить (Delete)">✕ Удалить</Tool>
             </>
           )}
-          {!busy && one && (
+          {!busy && !cropping && one && (
             <input value={one.name ?? ''} placeholder="Название" title="Название объекта (видно в списке слоёв)"
               onChange={e => { one.name = e.target.value || undefined; changed({ record: false }) }}
               onBlur={() => changed()} style={{ ...numInput, width: 150 }} />
           )}
-          {!busy && one && <ObjectProps obj={one} set={patch => setProp(one, patch)} />}
+          {!busy && cropping && (
+            <>
+              <span style={{ fontSize: 12, color: '#92400e' }}>✂ Подвиньте и растяните рамку — останется то, что внутри</span>
+              <Tool onClick={() => finishCrop(true)} title="Обрезать по рамке">✓ Обрезать</Tool>
+              <Tool onClick={() => finishCrop(false)} title="Отмена (Esc)">✕ Отмена</Tool>
+            </>
+          )}
+          {!busy && !cropping && one && <ObjectProps obj={one} pick={pick} set={patch => (one.mark && ('strokeWidth' in patch || 'stroke' in patch) ? rebuildMark(one, patch as Partial<MarkStyle>) : setProp(one, patch))} />}
+          {!busy && !cropping && one instanceof FabricImage && (
+            <>
+              <Tool onClick={() => startCrop(one)} title="Обрезать картинку рамкой">✂ Обрезать</Tool>
+              {isCropped(one) && <Tool onClick={() => resetCrop(one)} title="Вернуть картинку целиком">⤢ Целиком</Tool>}
+            </>
+          )}
           {!busy && one instanceof Group && (
             <Tool onClick={ungroupSelection} title="Разгруппировать (Ctrl+Shift+G)">⊞ Разгруппировать</Tool>
           )}
@@ -769,6 +1091,7 @@ export function SlideEditor(props: Props) {
               <Tool onClick={() => removeObjects([one])} title="Удалить (Delete)">✕</Tool>
             </>
           )}
+          </>)}
         </div>
 
         <div
@@ -862,6 +1185,14 @@ export function SlideEditor(props: Props) {
   )
 }
 
+const SHAPE_PAINT = { fill: '#bfdbfe', stroke: '#1d4ed8', strokeWidth: 4, strokeUniform: true }
+
+/** #rrggbb → rgba() with the given opacity (marker) */
+function withAlpha(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`
+}
+
 /** 'Слой N' with N one above the largest used */
 function nextLayerName(layers: SlideLayer[]): string {
   const used = layers.map(l => /^Слой (\d+)$/.exec(l.name)?.[1]).filter(Boolean).map(Number)
@@ -873,7 +1204,7 @@ function topEditable(layers: SlideLayer[]): SlideLayer | undefined {
   return [...layers].reverse().find(l => !l.locked && !l.editorHidden)
 }
 
-function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unknown>) => void }) {
+function ObjectProps({ obj, set, pick }: { obj: Obj; set: (patch: Record<string, unknown>) => void; pick: PickColor }) {
   const isText = obj instanceof Textbox
   const isPath = obj.type === 'path'
   const isShape = !isText && !isPath && obj.type !== 'image' && !(obj instanceof Group)
@@ -885,7 +1216,7 @@ function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unkno
             <input type="number" min={8} max={400} value={Math.round((obj as Textbox).fontSize)}
               onChange={e => set({ fontSize: Number(e.target.value) || 8 })} style={numInput} />
           </label>
-          <label style={propLabel}>Цвет <input type="color" value={toHex(obj.fill, '#000000')} onChange={e => set({ fill: e.target.value })} /></label>
+          <label style={propLabel}>Цвет <ColorField value={toHex(obj.fill, '#000000')} onChange={c => set({ fill: c })} title="Цвет текста" pick={pick} /></label>
           <Tool on={(obj as Textbox).fontWeight === 'bold'} title="Жирный"
             onClick={() => set({ fontWeight: (obj as Textbox).fontWeight === 'bold' ? 'normal' : 'bold' })}><b>Ж</b></Tool>
           {(['left', 'center', 'right'] as const).map(a => (
@@ -896,7 +1227,7 @@ function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unkno
             <input type="checkbox" checked={!!(obj as Textbox).backgroundColor}
               onChange={e => set({ backgroundColor: e.target.checked ? '#fef9c3' : '' })} />
             {!!(obj as Textbox).backgroundColor && (
-              <input type="color" value={toHex((obj as Textbox).backgroundColor, '#fef9c3')} onChange={e => set({ backgroundColor: e.target.value })} />
+              <ColorField value={toHex((obj as Textbox).backgroundColor, '#fef9c3')} onChange={c => set({ backgroundColor: c })} title="Цвет подложки" pick={pick} />
             )}
           </label>
         </>
@@ -907,14 +1238,14 @@ function ObjectProps({ obj, set }: { obj: Obj; set: (patch: Record<string, unkno
             <input type="checkbox" checked={!!obj.fill && obj.fill !== 'transparent'}
               onChange={e => set({ fill: e.target.checked ? '#bfdbfe' : 'transparent' })} />
             {!!obj.fill && obj.fill !== 'transparent' && (
-              <input type="color" value={toHex(obj.fill, '#bfdbfe')} onChange={e => set({ fill: e.target.value })} />
+              <ColorField value={toHex(obj.fill, '#bfdbfe')} onChange={c => set({ fill: c })} title="Цвет заливки" pick={pick} />
             )}
           </label>
         </>
       )}
       {(isShape || isPath) && (
         <>
-          <label style={propLabel}>Линия <input type="color" value={toHex(obj.stroke, '#000000')} onChange={e => set({ stroke: e.target.value })} /></label>
+          <label style={propLabel}>Линия <ColorField value={toHex(obj.stroke, '#000000')} onChange={c => set({ stroke: c })} title="Цвет линии" pick={pick} /></label>
           <label style={propLabel}>Толщина
             <input type="number" min={0} max={60} value={obj.strokeWidth} onChange={e => set({ strokeWidth: Math.max(0, Number(e.target.value) || 0) })} style={numInput} />
           </label>

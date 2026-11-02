@@ -3,12 +3,13 @@
 import { FabricObject, type StaticCanvas } from 'fabric'
 import type { Scene, SceneObject } from './model'
 import { SLIDE_HEIGHT, SLIDE_WIDTH, mapObjects } from './model'
+import { applyPaper } from './paper'
 
 // Our fields travel with Fabric's own JSON
-FabricObject.customProperties = ['uid', 'layer', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
+FabricObject.customProperties = ['uid', 'mark', 'layer', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
 
 export type Obj = FabricObject &
-  Partial<Pick<SceneObject, 'uid' | 'layer' | 'name' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
+  Partial<Pick<SceneObject, 'uid' | 'mark' | 'layer' | 'name' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
 
 /** media name → URL to load it from (blob: in the editor, server URL in a lesson); undefined if absent */
 export type MediaResolver = (name: string) => string | undefined
@@ -29,6 +30,7 @@ export function hydrate(objects: SceneObject[], resolve: MediaResolver): Record<
 
 export async function loadInto(fc: StaticCanvas, scene: Scene, resolve: MediaResolver, signal?: AbortSignal): Promise<Obj[]> {
   await fc.loadFromJSON({ objects: hydrate(scene.objects, resolve), background: scene.background }, undefined, { signal })
+  applyPaper(fc, scene.background, scene.paper, scene.paperColor)
   return fc.getObjects() as Obj[]
 }
 
