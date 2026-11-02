@@ -317,7 +317,7 @@ export default function App() {
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
-  const slides = useTeacherSlides(lessonCode);
+  const slides = useTeacherSlides(lessonCode, token, logout);
 
   // Slides are being shown to the class (e.g. after a page reload) — show them here too
   useEffect(() => {
@@ -331,8 +331,9 @@ export default function App() {
   }
 
   function endLesson() {
-    if (!confirm('Завершить урок? Ученики вернутся на стартовый экран, загруженный урок будет удалён с сервера.')) return;
-    // wait for the server to finish (materials deleted) before leaving; don't hang if it doesn't answer
+    if (!confirm('Завершить урок? Ученики вернутся на стартовый экран.')) return;
+    slides.forget();
+    // wait for the server to finish before leaving; don't hang if it doesn't answer
     const leave = () => { setGroupMode('board'); setLessonCodeReady(null); };
     const timer = setTimeout(leave, 3000);
     socket.emit('endLesson', () => { clearTimeout(timer); leave(); });
@@ -411,7 +412,7 @@ export default function App() {
           {lessonCode || '…'}
         </div>
 
-        <MaterialPanel lessonCode={lessonCode} token={token} material={slides.material} onUnauthorized={logout} />
+        <MaterialPanel slides={slides} />
 
         {state.stage === 'waiting' && (
           <>
@@ -517,7 +518,7 @@ export default function App() {
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
-                slidesView={<SlidesPresenter lessonCode={lessonCode} mediaKey={slides.key} material={slides.material} state={slides.state} setState={slides.setState} />} />
+                slidesView={<SlidesPresenter slides={slides} />} />
           }
         </div>
       </div>
