@@ -112,6 +112,9 @@ export default function LessonScreen() {
       } else if (error === 'too many attempts') {
         Alert.alert('Слишком много попыток', 'Подождите минуту и попробуйте снова');
         router.replace('/');
+      } else if (error === 'too many open lessons') {
+        Alert.alert('Занятие сейчас не открыть', 'У учителя слишком много занятий одновременно');
+        router.replace('/');
       } else {
         router.replace('/');
       }

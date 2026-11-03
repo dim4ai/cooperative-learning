@@ -213,6 +213,9 @@ export default function App() {
       } else if (error === 'too many attempts') {
         setJoined(false);
         setJoinError('Слишком много попыток — подождите минуту и попробуйте снова');
+      } else if (error === 'too many open lessons') {
+        setJoined(false);
+        setJoinError('Занятие сейчас не открыть: у учителя слишком много занятий одновременно');
       } else {
         setJoined(false);
         setJoinError('Не удалось подключиться');

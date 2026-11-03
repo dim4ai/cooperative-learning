@@ -19,6 +19,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
   const [prefs, setPrefs] = useState<MediaPrefs>(initial);
   const [codeInput, setCodeInput] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   function join(code: string) {
     saveMediaPrefs(prefs);
@@ -27,14 +28,23 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
 
   async function createNew() {
     setCreating(true);
+    setCreateError('');
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/lessons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) { onUnauthorized(); return; }
-      const { lesson } = await res.json();
-      join(lesson.code);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.lesson) {
+        setCreateError(res.status === 429
+          ? 'Достигнут предел — 1000 занятий. Старые коды освобождаются через 30 дней без входа'
+          : 'Не удалось создать занятие, попробуйте ещё раз');
+        return;
+      }
+      join(body.lesson.code);
+    } catch {
+      setCreateError('Нет связи с сервером');
     } finally {
       setCreating(false);
     }
@@ -70,7 +80,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
             Войти
           </button>
         </div>
-        {lessonError && <div style={{ color: '#e74c3c', fontSize: 13, textAlign: 'center' }}>{lessonError}</div>}
+        {(createError || lessonError) && <div style={{ color: '#e74c3c', fontSize: 13, textAlign: 'center' }}>{createError || lessonError}</div>}
       </div>
     </div>
   );

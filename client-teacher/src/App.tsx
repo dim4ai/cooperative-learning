@@ -316,6 +316,7 @@ export default function App() {
       setLessonErrorState(
         error === 'too many attempts' ? 'Слишком много попыток — подождите минуту и попробуйте снова'
         : error === 'not your lesson' ? 'Это занятие ведёт другой учитель'
+        : error === 'too many open lessons' ? 'У вас уже 5 занятий, в которых сейчас есть участники. Завершите одно из них и выйдите из него'
         : 'Занятие не найдено — возможно, код устарел'
       );
       setLessonCodeReady(null);
