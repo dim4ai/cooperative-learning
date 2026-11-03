@@ -3,6 +3,7 @@ import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { SharedBoard } from './SharedBoard';
 import { socket } from './socket';
+import { NameCard, SpeakingRing } from './speaking';
 import type { Seat } from './SeatingMap';
 
 interface Props {
@@ -23,8 +24,11 @@ function CamTile({ identity, label }: { identity: string | null; label: string }
     }}>
       {track
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 12 }}>—</div>
+        : identity
+          ? <NameCard name={label} />
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 12 }}>—</div>
       }
+      <SpeakingRing identity={identity} />
       <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
         {label}
       </div>

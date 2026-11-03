@@ -3,6 +3,23 @@ import type { CSSProperties } from 'react';
 import { MediaCheck, saveMediaPrefs } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
+export type VideoMode = 'all' | 'teacher' | 'none';
+export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
+  all: 'С видео',
+  teacher: 'Видео только у учителя',
+  none: 'Без видео',
+};
+const VIDEO_MODE_KEY = 'videoMode';
+
+function loadVideoMode(): VideoMode {
+  try {
+    const v = localStorage.getItem(VIDEO_MODE_KEY);
+    return v === 'teacher' || v === 'none' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
 const mainButton: CSSProperties = {
   width: '100%', fontSize: 16, padding: '10px 0', borderRadius: 6, border: 'none',
   background: '#4a90e2', color: '#fff', cursor: 'pointer',
@@ -20,6 +37,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
   const [codeInput, setCodeInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [videoMode, setVideoMode] = useState<VideoMode>(loadVideoMode);
 
   function join(code: string) {
     saveMediaPrefs(prefs);
@@ -33,6 +51,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
       const res = await fetch(`${import.meta.env.VITE_API_URL}/lessons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ videoMode }),
       });
       if (res.status === 401) { onUnauthorized(); return; }
       const body = await res.json().catch(() => ({}));
@@ -42,6 +61,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
           : 'Не удалось создать занятие, попробуйте ещё раз');
         return;
       }
+      try { localStorage.setItem(VIDEO_MODE_KEY, videoMode); } catch { /* private mode */ }
       join(body.lesson.code);
     } catch {
       setCreateError('Нет связи с сервером');
@@ -63,7 +83,16 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
       <MediaCheck prefs={prefs} onChange={setPrefs} />
 
       <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button onClick={createNew} disabled={creating} style={{ ...mainButton, marginTop: 8 }}>
+        <div role="radiogroup" aria-label="Видео на занятии" style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+          {(Object.keys(VIDEO_MODE_LABELS) as VideoMode[]).map(m => (
+            <button key={m} role="radio" aria-checked={videoMode === m} onClick={() => setVideoMode(m)} style={{
+              flex: 1, padding: '6px 4px', fontSize: 12, borderRadius: 6, cursor: 'pointer', lineHeight: 1.2,
+              border: videoMode === m ? '1px solid #4a90e2' : '1px solid #ccc',
+              background: videoMode === m ? '#e7f1fc' : '#fff', color: '#222',
+            }}>{VIDEO_MODE_LABELS[m]}</button>
+          ))}
+        </div>
+        <button onClick={createNew} disabled={creating} style={mainButton}>
           {creating ? 'Создаём…' : 'Новое занятие'}
         </button>
         <div style={{ color: '#888', fontSize: 13, textAlign: 'center' }}>или присоединиться к начатому</div>
@@ -91,13 +120,13 @@ const sideToggle = (on: boolean): CSSProperties => ({
   fontSize: 15, color: '#fff', background: on ? '#27ae60' : '#e74c3c',
 });
 
-export function SidebarMediaToggles({ prefs, onChange }: { prefs: MediaPrefs; onChange: (p: MediaPrefs) => void }) {
+export function SidebarMediaToggles({ prefs, onChange, camAllowed = true }: { prefs: MediaPrefs; onChange: (p: MediaPrefs) => void; camAllowed?: boolean }) {
   return (
     <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-      <button title={prefs.camOn ? 'Выключить камеру' : 'Включить камеру'}
+      {camAllowed && <button title={prefs.camOn ? 'Выключить камеру' : 'Включить камеру'}
         onClick={() => onChange({ ...prefs, camOn: !prefs.camOn })} style={sideToggle(prefs.camOn)}>
         📷
-      </button>
+      </button>}
       <button title={prefs.micOn ? 'Выключить микрофон' : 'Включить микрофон'}
         onClick={() => onChange({ ...prefs, micOn: !prefs.micOn })} style={sideToggle(prefs.micOn)}>
         {prefs.micOn ? '🎤' : '🔇'}

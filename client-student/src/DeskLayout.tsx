@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useTracks } from '@livekit/components-react';
+import { useTracks, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { SharedBoard } from './SharedBoard';
+import { NameCard, SpeakingRing } from './speaking';
 import { socket } from './socket';
 
-function VideoTile({ track }: { track: ReturnType<typeof useTracks>[0] }) {
+function VideoTile({ track }: { track: TrackReferenceOrPlaceholder }) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -15,20 +16,25 @@ function VideoTile({ track }: { track: ReturnType<typeof useTracks>[0] }) {
     }
   }, [track.publication?.track]);
 
+  const name = track.participant.name || track.participant.identity;
+  const hasVideo = !!track.publication?.track && !track.publication.isMuted;
   return (
     <div style={{ position: 'relative', background: '#222', borderRadius: 8, overflow: 'hidden', aspectRatio: '4/3', width: '100%' }}>
       <video ref={ref} autoPlay muted={track.participant.isLocal} playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      <div style={{ position: 'absolute', bottom: 4, left: 8, color: '#fff', fontSize: 12,
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: hasVideo ? 'block' : 'none' }} />
+      {!hasVideo && <NameCard name={name} />}
+      {hasVideo && <div style={{ position: 'absolute', bottom: 4, left: 8, color: '#fff', fontSize: 12,
         background: 'rgba(0,0,0,0.4)', padding: '1px 4px', borderRadius: 3 }}>
-        {track.participant.name || track.participant.identity}
-      </div>
+        {name}
+      </div>}
+      <SpeakingRing identity={track.participant.identity} />
     </div>
   );
 }
 
 export function DeskLayout({ room }: { room: string }) {
-  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  // with placeholders: someone without video (lesson without video, camera off) still gets a tile
+  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
   const self = tracks.filter(t => t.participant.isLocal);
   const teacher = tracks.find(t => t.participant.identity === 'Teacher');
   const partners = tracks.filter(t => !t.participant.isLocal && t.participant.identity !== 'Teacher');

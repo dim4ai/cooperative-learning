@@ -2,17 +2,18 @@ import { useState } from 'react';
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket } from './socket';
+import { SpeakingRing } from './speaking';
 
 function SeatVideo({ identity }: { identity: string }) {
   const tracks = useTracks([Track.Source.Camera]);
   const trackRef = tracks.find(t => t.participant.identity === identity);
-  if (!trackRef) return null;
-  return (
-    <VideoTrack trackRef={trackRef} style={{
+  return (<>
+    {trackRef && <VideoTrack trackRef={trackRef} style={{
       position: 'absolute', inset: 0, width: '100%', height: '100%',
       objectFit: 'cover', borderRadius: 5,
-    }} />
-  );
+    }} />}
+    <SpeakingRing identity={identity} />
+  </>);
 }
 
 function SelfPreview() {

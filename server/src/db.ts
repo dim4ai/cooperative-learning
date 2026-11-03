@@ -52,10 +52,33 @@ export async function createTeacher(email: string, password: string, name: strin
   return rows[0];
 }
 
+/** Who may show video in a lesson — chosen when it's created, fixed for its whole life */
+export type VideoMode = 'all' | 'teacher' | 'none';
+export const VIDEO_MODES: readonly VideoMode[] = ['all', 'teacher', 'none'];
+
 export interface Lesson {
   id: number;
   code: string;
   teacherId: number | null;
+  videoMode: VideoMode;
+}
+
+// Whether lessons.video_mode exists. If adding it failed (no rights on that DB), lessons keep
+// working as before — all with video — instead of failing to be created or found.
+let hasVideoMode = false;
+
+/** Schema changes the code relies on; idempotent, run on every start */
+export async function migrate(): Promise<void> {
+  try {
+    await pool.query(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS video_mode text NOT NULL DEFAULT 'all'
+      CHECK (video_mode IN ('all', 'teacher', 'none'))`);
+  } catch (e) {
+    // not the table's owner — fine if someone already added the column
+    const { rowCount } = await pool.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'lessons' AND column_name = 'video_mode'`);
+    if (!rowCount) throw e;
+  }
+  hasVideoMode = true;
 }
 
 export interface Student {
@@ -77,18 +100,18 @@ export class LessonLimitError extends Error {}
 // Lessons a teacher can have in the database at once (codes still valid, i.e. used within 30 days)
 export const MAX_LESSONS_PER_TEACHER = Number(process.env.MAX_LESSONS_PER_TEACHER) || 1000;
 
-export async function createLesson(teacherId: number | null = null): Promise<Lesson> {
+export async function createLesson(teacherId: number | null = null, videoMode: VideoMode = 'all'): Promise<Lesson> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateLessonCode();
     try {
       // the count check and the insert are one statement, so a burst of requests can't slip past it
       const { rows } = await pool.query(
-        `INSERT INTO lessons (code, teacher_id)
-         SELECT $1, $2
+        `INSERT INTO lessons (code, teacher_id${hasVideoMode ? ', video_mode' : ''})
+         SELECT $1, $2${hasVideoMode ? ', $4' : ''}
          WHERE $2::int IS NULL OR (SELECT count(*) FROM lessons
            WHERE teacher_id = $2 AND last_active_at > now() - interval '30 days') < $3
-         RETURNING id, code, teacher_id AS "teacherId"`,
-        [code, teacherId, MAX_LESSONS_PER_TEACHER]
+         RETURNING id, code, teacher_id AS "teacherId", ${hasVideoMode ? 'video_mode' : "'all'"} AS "videoMode"`,
+        hasVideoMode ? [code, teacherId, MAX_LESSONS_PER_TEACHER, videoMode] : [code, teacherId, MAX_LESSONS_PER_TEACHER]
       );
       if (!rows[0]) throw new LessonLimitError(`teacher ${teacherId} has ${MAX_LESSONS_PER_TEACHER} lessons`);
       return rows[0];
@@ -103,7 +126,7 @@ export async function createLesson(teacherId: number | null = null): Promise<Les
 // Codes are valid for 30 days of inactivity; older ones are treated as not found.
 export async function getLessonByCode(code: string): Promise<Lesson | null> {
   const { rows } = await pool.query(
-    `SELECT id, code, teacher_id AS "teacherId" FROM lessons WHERE code = $1 AND last_active_at > now() - interval '30 days'`,
+    `SELECT id, code, teacher_id AS "teacherId", ${hasVideoMode ? 'video_mode' : "'all'"} AS "videoMode" FROM lessons WHERE code = $1 AND last_active_at > now() - interval '30 days'`,
     [code]
   );
   const row = rows[0];

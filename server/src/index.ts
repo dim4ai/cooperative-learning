@@ -5,9 +5,9 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { Server } from 'socket.io';
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import {
-  verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, getLessonByCode, cleanupExpiredLessons,
+  verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
   listStudents, createStudent, getStudentsForDevice, linkDevice,
 } from './db';
 import {
@@ -114,7 +114,9 @@ app.post('/login', async (req, res) => {
 });
 
 app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
-  const lesson = await createLesson(req.teacherId!).catch(e => e as Error);
+  const requested = (req.body as { videoMode?: unknown } | undefined)?.videoMode;
+  const videoMode: VideoMode = VIDEO_MODES.includes(requested as VideoMode) ? requested as VideoMode : 'all';
+  const lesson = await createLesson(req.teacherId!, videoMode).catch(e => e as Error);
   if (lesson instanceof LessonLimitError) {
     res.status(429).json({ error: 'too many lessons' });
     return;
@@ -229,6 +231,7 @@ interface Poll {
 
 // Everything scoped to one lesson (one teacher + their students). Keyed by lesson code.
 interface LessonRuntime {
+  videoMode: VideoMode; // from the DB, fixed for the lesson
   teacherId: number | null; // owner, for the per-teacher limit
   stage: Stage;
   timerEndsAt: number | null;
@@ -283,6 +286,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     }
   }
   lesson = {
+    videoMode: 'all',
     teacherId,
     stage: 'waiting',
     timerEndsAt: null,
@@ -340,6 +344,7 @@ function pollResults(lesson: LessonRuntime) {
 function broadcastState(code: string, lesson: LessonRuntime) {
   io.to(code).emit('state', {
     stage: lesson.stage,
+    videoMode: lesson.videoMode,
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
     participants: Array.from(lesson.participants.values()).map(p => ({
@@ -501,9 +506,18 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
   }
 }
 
-async function makeLivekitToken(identity: string, room: string): Promise<string> {
+/** May this participant show their camera in this lesson? */
+function canVideo(lesson: LessonRuntime, role: Role): boolean {
+  return lesson.videoMode === 'all' || (lesson.videoMode === 'teacher' && role === 'teacher');
+}
+
+/** Without video the token itself forbids the camera, so no client can switch it on anyway */
+async function makeLivekitToken(identity: string, room: string, video = true): Promise<string> {
   const token = new AccessToken(API_KEY, API_SECRET, { identity });
-  token.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
+  token.addGrant(video
+    ? { roomJoin: true, room, canPublish: true, canSubscribe: true }
+    : { roomJoin: true, room, canPublish: true, canSubscribe: true,
+        canPublishSources: [TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO] });
   return await token.toJwt();
 }
 
@@ -512,7 +526,7 @@ async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string,
   if (!socket) return;
   const participant = lesson.participants.get(socketId);
   if (!participant) return;
-  const token = await makeLivekitToken(participant.name, room);
+  const token = await makeLivekitToken(participant.name, room, canVideo(lesson, participant.role));
   socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room });
   participant.livekitRoom = room;
   socket.emit('sharedText', { room, text: lesson.sharedTexts.get(room) ?? '' });
@@ -731,6 +745,7 @@ io.on('connection', async (socket) => {
     return;
   }
   const lesson: LessonRuntime = runtime;
+  lesson.videoMode = dbLesson.videoMode;
   socket.join(code);
 
   // Board-only connection: mobile student viewing/drawing the board via WebView, as a second
@@ -812,9 +827,12 @@ io.on('connection', async (socket) => {
 
     const mainRoom = roomName(code, 'main-room');
     await livekit.createRoom({ name: mainRoom }).catch(() => {});
-    // Monitor token — student stays visible to teacher in main-room even during pair work
-    const monToken = await makeLivekitToken(effectiveName, mainRoom);
-    socket.emit('monitor', { url: LIVEKIT_WS_URL, token: monToken, room: mainRoom });
+    // Monitor token — student stays visible to teacher in main-room even during pair work.
+    // It only carries the camera, so without video there is nothing to monitor.
+    if (canVideo(lesson, role)) {
+      const monToken = await makeLivekitToken(effectiveName, mainRoom);
+      socket.emit('monitor', { url: LIVEKIT_WS_URL, token: monToken, room: mainRoom });
+    }
     await sendToRoom(code, lesson, socket.id, mainRoom);
 
     socket.on('setCapacity', (n: number) => {
@@ -1076,4 +1094,6 @@ setInterval(() => {
 }, 6 * 60 * 60 * 1000);
 
 const PORT = Number(process.env.PORT) || 13113;
-httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+migrate()
+  .catch(e => console.error('!!! DB migration failed — lessons work, but only with video (no lessons.video_mode):', e))
+  .finally(() => httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`)));

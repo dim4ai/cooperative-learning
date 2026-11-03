@@ -55,6 +55,8 @@ type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
 
 interface LessonState {
   stage: Stage;
+  /** Who may show video in this lesson; students only when 'all' */
+  videoMode?: 'all' | 'teacher' | 'none';
   timerEndsAt: number | null;
   /** After-lesson chat in fours: the teacher has left, the lesson ends at this time */
   afterUntil?: number | null;
@@ -198,6 +200,7 @@ export default function App() {
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
   const afterLeft = useTimer(lessonState.afterUntil ?? null);
+  const camAllowed = (lessonState.videoMode ?? 'all') === 'all';
   const slides = useStudentSlides(joined);
 
   useEffect(() => {
@@ -343,7 +346,7 @@ export default function App() {
         <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
           {students.length} уч.
         </span>
-        {livekit && (
+        {livekit && camAllowed && (
           <button
             onClick={() => setMedia({ ...media, camOn: !media.camOn })}
             title={media.camOn ? 'Выключить камеру' : 'Включить камеру'}
@@ -429,12 +432,12 @@ export default function App() {
             serverUrl={monitor.url}
             token={monitor.token}
             connect={true}
-            video={media.camOn}
+            video={media.camOn && camAllowed}
             audio={false}
             options={roomOptions}
             style={{ display: 'none' }}
           >
-            <LocalMediaSync camOn={media.camOn} />
+            <LocalMediaSync camOn={media.camOn && camAllowed} />
           </LiveKitRoom>
         )}
         {livekit ? (
@@ -443,14 +446,14 @@ export default function App() {
             serverUrl={livekit.url}
             token={livekit.token}
             connect={true}
-            video={media.camOn}
+            video={media.camOn && camAllowed}
             audio={false}
             options={roomOptions}
             style={{ height: '100%' }}
           >
             <RoomAudioRenderer />
             <MicControl enabled={micOn} />
-            <LocalMediaSync camOn={media.camOn} />
+            <LocalMediaSync camOn={media.camOn && camAllowed} />
             {lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />

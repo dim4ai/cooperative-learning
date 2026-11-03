@@ -1,5 +1,6 @@
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
+import { SpeakingRing } from './speaking';
 import { socket, myName } from './socket';
 
 export interface Seat {
@@ -16,13 +17,13 @@ const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 function SeatVideo({ identity }: { identity: string; color?: string; isMe?: boolean }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const trackRef = tracks.find(t => t.participant.identity === identity);
-  if (!trackRef) return null;
-  return (
-    <VideoTrack trackRef={trackRef} style={{
+  return (<>
+    {trackRef && <VideoTrack trackRef={trackRef} style={{
       position: 'absolute', inset: 0, width: '100%', height: '100%',
       objectFit: 'cover', borderRadius: 8,
-    }} />
-  );
+    }} />}
+    <SpeakingRing identity={identity} />
+  </>);
 }
 
 export function SeatingMap({ seats }: { seats: Seat[] }) {
