@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LiveKitRoom, RoomAudioRenderer, useTracks, VideoTrack, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 import { Track, RoomEvent } from 'livekit-client';
 import { Excalidraw } from '@excalidraw/excalidraw';
@@ -13,6 +13,8 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
+import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
+import type { MediaPrefs } from './mediaCheck';
 
 function MicControl({ enabled }: { enabled: boolean }) {
   const { localParticipant } = useLocalParticipant();
@@ -40,9 +42,9 @@ function SelfPreview() {
       boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
       background: '#222',
     }}>
-      {localTrackRef && (
-        <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
-      )}
+      {localTrackRef && !localTrackRef.publication?.isMuted
+        ? <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+        : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>Камера выключена</div>}
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         {myName}
       </div>
@@ -131,93 +133,7 @@ function NameScreen({ onNext }: { onNext: (name: string) => void }) {
   );
 }
 
-function useMicLevel(stream: MediaStream | null, enabled: boolean) {
-  const [level, setLevel] = useState(0);
-
-  useEffect(() => {
-    if (!stream || !enabled) { setLevel(0); return; }
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    let raf = 0;
-    const tick = () => {
-      analyser.getByteFrequencyData(data);
-      const avg = data.reduce((a, b) => a + b, 0) / data.length;
-      setLevel(Math.min(1, (avg / 255) * 2.5));
-      raf = requestAnimationFrame(tick);
-    };
-    tick();
-    return () => {
-      cancelAnimationFrame(raf);
-      source.disconnect();
-      audioCtx.close();
-    };
-  }, [stream, enabled]);
-
-  return level;
-}
-
-function CameraPreview() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [camOn, setCamOn] = useState(true);
-  const [micOn, setMicOn] = useState(true);
-  const [error, setError] = useState('');
-  const micLevel = useMicLevel(stream, micOn);
-
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(s => {
-        streamRef.current = s;
-        setStream(s);
-        if (videoRef.current) videoRef.current.srcObject = s;
-      })
-      .catch(() => setError('Нет доступа к камере/микрофону'));
-    return () => { streamRef.current?.getTracks().forEach(t => t.stop()); };
-  }, []);
-
-  useEffect(() => { stream?.getVideoTracks().forEach(t => { t.enabled = camOn; }); }, [camOn, stream]);
-  useEffect(() => { stream?.getAudioTracks().forEach(t => { t.enabled = micOn; }); }, [micOn, stream]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-      <div style={{ width: 220, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {error
-          ? <span style={{ color: '#e74c3c', fontSize: 12, padding: 8, textAlign: 'center' }}>{error}</span>
-          : <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        }
-      </div>
-      {!error && (
-        <div style={{ width: 220 }}>
-          <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
-            {micOn ? 'Скажите что-нибудь — полоска должна двигаться' : 'Микрофон выключен'}
-          </div>
-          <div style={{ width: '100%', height: 8, borderRadius: 4, background: '#eee', overflow: 'hidden' }}>
-            <div style={{
-              width: `${micLevel * 100}%`, height: '100%', borderRadius: 4,
-              background: micLevel > 0.1 ? '#2ecc71' : '#ccc',
-              transition: 'width 60ms linear',
-            }} />
-          </div>
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => setCamOn(v => !v)} style={{ fontSize: 13, padding: '6px 12px', borderRadius: 6, border: '1px solid #ccc', background: camOn ? '#fff' : '#eee', cursor: 'pointer' }}>
-          {camOn ? '📷 вкл' : '📷 выкл'}
-        </button>
-        <button onClick={() => setMicOn(v => !v)} style={{ fontSize: 13, padding: '6px 12px', borderRadius: 6, border: '1px solid #ccc', background: micOn ? '#fff' : '#eee', cursor: 'pointer' }}>
-          {micOn ? '🎤 вкл' : '🎤 выкл'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function PracticeArea({ error, onJoin }: { error: string; onJoin: (code: string) => void }) {
+function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState('');
 
   return (
@@ -225,8 +141,9 @@ function PracticeArea({ error, onJoin }: { error: string; onJoin: (code: string)
       height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
       gap: 12, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
     }}>
-      <h3 style={{ margin: '8px 0 0' }}>Потренируйтесь перед уроком</h3>
-      <CameraPreview />
+      <h3 style={{ margin: '8px 0 0' }}>Настройка камеры и микрофона</h3>
+      <MediaCheck prefs={media} onChange={onMedia} />
+      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
       <div style={{ width: '100%', maxWidth: 520, height: 280, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Excalidraw />
       </div>
@@ -273,6 +190,10 @@ export default function App() {
   const [seats, setSeats] = useState<Seat[]>([]);
   const [poll, setPoll] = useState<{ question: string; options: string[]; myVote: number | null } | null>(null);
   const [micOn, setMicOn] = useState(false);
+  const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
+  function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const roomOptions = useMemo(() => captureOptions(media), [media.camId, media.micId]);
   const [waitingForLesson, setWaitingForLesson] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
@@ -347,7 +268,9 @@ export default function App() {
     return (
       <PracticeArea
         error={joinError}
-        onJoin={code => { setLessonId(code); setJoinError(''); setJoined(true); }}
+        media={media}
+        onMedia={setMedia}
+        onJoin={code => { setLessonId(code); setJoinError(''); setMicOn(media.micOn); setJoined(true); }}
       />
     );
   }
@@ -409,6 +332,27 @@ export default function App() {
         <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
           {students.length} уч.
         </span>
+        {livekit && (
+          <button
+            onClick={() => setMedia({ ...media, camOn: !media.camOn })}
+            title={media.camOn ? 'Выключить камеру' : 'Включить камеру'}
+            style={{
+              background: media.camOn ? '#27ae60' : '#e74c3c',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 20,
+              width: 36,
+              height: 36,
+              fontSize: 18,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            📷
+          </button>
+        )}
         {livekit && (
           <button
             onClick={() => setMicOn(v => !v)}
@@ -474,10 +418,13 @@ export default function App() {
             serverUrl={monitor.url}
             token={monitor.token}
             connect={true}
-            video={true}
+            video={media.camOn}
             audio={false}
+            options={roomOptions}
             style={{ display: 'none' }}
-          />
+          >
+            <LocalMediaSync camOn={media.camOn} />
+          </LiveKitRoom>
         )}
         {livekit ? (
           <LiveKitRoom
@@ -485,12 +432,14 @@ export default function App() {
             serverUrl={livekit.url}
             token={livekit.token}
             connect={true}
-            video={true}
+            video={media.camOn}
             audio={false}
+            options={roomOptions}
             style={{ height: '100%' }}
           >
             <RoomAudioRenderer />
             <MicControl enabled={micOn} />
+            <LocalMediaSync camOn={media.camOn} />
             {lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />
