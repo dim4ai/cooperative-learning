@@ -8,6 +8,7 @@ import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 import { MediaSetup, SidebarMediaToggles } from './MediaSetup';
+import { EndLessonDialog } from './EndLessonDialog';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
@@ -292,13 +293,15 @@ export default function App() {
     setGroupMode(m);
   }
 
-  function endLesson() {
-    if (!confirm('Завершить урок? Ученики вернутся на стартовый экран.')) return;
+  const [endDialog, setEndDialog] = useState(false);
+
+  function endLesson(chatMinutes: number) {
+    setEndDialog(false);
     slides.forget();
     // wait for the server to finish before leaving; don't hang if it doesn't answer
     const leave = () => { setGroupMode('board'); setLessonCodeReady(null); };
     const timer = setTimeout(leave, 3000);
-    socket.emit('endLesson', () => { clearTimeout(timer); leave(); });
+    socket.emit('endLesson', { chatMinutes }, () => { clearTimeout(timer); leave(); });
   }
 
   useEffect(() => {
@@ -308,7 +311,7 @@ export default function App() {
     socket.connect();
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    socket.on('lessonError', ({ error }: { error: string }) => {
+    socket.on('lessonError', ({ error, minutesLeft }: { error: string; minutesLeft?: number }) => {
       if (error === 'unauthorized') {
         logout();
         return;
@@ -316,6 +319,7 @@ export default function App() {
       setLessonErrorState(
         error === 'too many attempts' ? 'Слишком много попыток — подождите минуту и попробуйте снова'
         : error === 'not your lesson' ? 'Это занятие ведёт другой учитель'
+        : error === 'after lesson' ? `Урок окончен, ученики ещё общаются без вас — занятие закроется через ${minutesLeft ?? 'несколько'} мин`
         : error === 'too many open lessons' ? 'У вас уже 5 занятий, в которых сейчас есть участники. Завершите одно из них и выйдите из него'
         : 'Занятие не найдено — возможно, код устарел'
       );
@@ -446,7 +450,7 @@ export default function App() {
           {students.length} учеников
         </div>
         <button
-          onClick={endLesson}
+          onClick={() => setEndDialog(true)}
           style={{
             marginTop: 6, padding: '6px 6px', borderRadius: 6, border: '1px solid #444',
             cursor: 'pointer', background: 'transparent', color: '#aaa', fontSize: 11, textAlign: 'center',
@@ -454,6 +458,7 @@ export default function App() {
         >
           Завершить урок
         </button>
+        {endDialog && <EndLessonDialog onEnd={endLesson} onCancel={() => setEndDialog(false)} />}
       </div>
 
       {/* Main area */}
