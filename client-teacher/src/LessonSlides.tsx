@@ -1,4 +1,4 @@
-// Lesson material (the .lesson.zip made in the editor) and presenting its slides to the class.
+// Lesson material (the .colesson file made in the editor) and presenting its slides to the class.
 // The file is opened here, in the teacher's browser; the server gets only its structure and
 // relays pictures to students when they need them (see lessonLocal.ts, mediaShare.ts).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -184,7 +184,7 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
-      <input ref={inputRef} type="file" accept=".zip,application/zip" style={{ display: 'none' }}
+      <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
       <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
         marginTop: 4, width: '100%', padding: '5px 6px', borderRadius: 4, border: '1px dashed #555',
