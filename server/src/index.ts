@@ -244,6 +244,8 @@ interface LessonRuntime {
   emptySince: number | null;
   noTeacherSince: number | null; // since when no teacher is in (left, or never came yet); null while one is in
   ended: boolean;                  // the lesson was ended — dropped from memory as soon as nobody is left
+  afterUntil: number | null;       // after-lesson chat in fours (teacher gone) lasts until; then the lesson ends
+  afterTimer: NodeJS.Timeout | null;
 }
 
 const lessons = new Map<string, LessonRuntime>();
@@ -262,6 +264,7 @@ function dropLesson(code: string, why: string) {
   const lesson = lessons.get(code);
   if (!lesson) return;
   lesson.relay.dispose();
+  if (lesson.afterTimer) clearTimeout(lesson.afterTimer);
   lessons.delete(code);
   console.log(`[${code}] dropped from memory (${why})`);
 }
@@ -295,6 +298,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     emptySince: Date.now(),
     noTeacherSince: Date.now(),
     ended: false,
+    afterUntil: null,
+    afterTimer: null,
   };
   lessons.set(code, lesson);
   return lesson;
@@ -336,6 +341,7 @@ function broadcastState(code: string, lesson: LessonRuntime) {
   io.to(code).emit('state', {
     stage: lesson.stage,
     timerEndsAt: lesson.timerEndsAt,
+    afterUntil: lesson.afterUntil,
     participants: Array.from(lesson.participants.values()).map(p => ({
       id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, identified: p.studentId !== null,
     })),
@@ -350,13 +356,14 @@ function socketsOf(lesson: LessonRuntime, role: Role): string[] {
 
 /** End of the lesson (teacher's button, or the teacher has been gone too long): material is
  *  forgotten, students are told and sent away; once nobody is left the lesson leaves memory. */
-async function endLesson(code: string, lesson: LessonRuntime, why: string) {
+function endLesson(code: string, lesson: LessonRuntime, why: string) {
   lesson.ended = true;
   lesson.stage = 'waiting';
   lesson.timerEndsAt = null;
   lesson.currentPoll = null;
+  lesson.afterUntil = null;
+  if (lesson.afterTimer) { clearTimeout(lesson.afterTimer); lesson.afterTimer = null; }
   setMaterial(code, lesson, null);
-  await sendAllToMain(code, lesson);
   broadcastState(code, lesson);
   for (const id of socketsOf(lesson, 'student')) {
     const s = io.sockets.sockets.get(id);
@@ -368,12 +375,30 @@ async function endLesson(code: string, lesson: LessonRuntime, why: string) {
   dropIfEnded(code);
 }
 
-/** An ended lesson nobody is in any more — nothing to keep */
+/** An ended lesson (or one in its after-lesson chat) nobody is in any more — nothing to keep */
 function dropIfEnded(code: string) {
   setImmediate(() => {
     const lesson = lessons.get(code);
-    if (lesson?.ended && isEmpty(code, lesson)) dropLesson(code, 'ended');
+    if (lesson && (lesson.ended || lesson.afterUntil) && isEmpty(code, lesson)) dropLesson(code, 'ended');
   });
+}
+
+const MAX_AFTER_LESSON_MINUTES = 15;
+
+/** The teacher ends the lesson but lets students talk in their fours for a few minutes.
+ *  Fresh LiveKit rooms (no token the teacher ever got opens them) and the teacher is sent away
+ *  and can't rejoin until it's over — «Учитель покинул занятие» must be true. */
+async function startAfterLesson(code: string, lesson: LessonRuntime, minutes: number) {
+  lesson.afterUntil = Date.now() + minutes * 60 * 1000;
+  lesson.stage = 'fours';
+  lesson.timerEndsAt = null;
+  lesson.currentPoll = null;
+  setMaterial(code, lesson, null);
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.disconnect(true);
+  await assignFours(code, lesson, 'after-fours');
+  broadcastState(code, lesson);
+  lesson.afterTimer = setTimeout(() => endLesson(code, lesson, 'after-lesson chat over'), minutes * 60 * 1000);
+  console.log(`[${code}] lesson ended, ${minutes} min after-lesson chat`);
 }
 
 function teacherMaterial(lesson: LessonRuntime) {
@@ -538,7 +563,7 @@ async function assignPairs(code: string, lesson: LessonRuntime) {
   }
 }
 
-async function assignFours(code: string, lesson: LessonRuntime) {
+async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours') {
   const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
   const studentByName = new Map(students.map(s => [s.name, s]));
 
@@ -550,7 +575,7 @@ async function assignFours(code: string, lesson: LessonRuntime) {
       groupMap.get(seat.groupIndex)!.push(seat);
     }
     for (const [groupIndex, groupSeats] of groupMap) {
-      const room = roomName(code, `fours-${groupIndex + 1}`);
+      const room = roomName(code, `${prefix}-${groupIndex + 1}`);
       await livekit.createRoom({ name: room }).catch(() => {});
       for (const seat of groupSeats) {
         const s = studentByName.get(seat.occupant!);
@@ -560,7 +585,7 @@ async function assignFours(code: string, lesson: LessonRuntime) {
     const seated = new Set(lesson.seats.map(s => s.occupant).filter(Boolean));
     const unseated = students.filter(s => !seated.has(s.name));
     for (let i = 0; i < unseated.length; i += 4) {
-      const room = roomName(code, `fours-unseated-${Math.floor(i / 4) + 1}`);
+      const room = roomName(code, `${prefix}-unseated-${Math.floor(i / 4) + 1}`);
       await livekit.createRoom({ name: room }).catch(() => {});
       for (let j = i; j < Math.min(i + 4, unseated.length); j++) {
         await sendToRoom(code, lesson, unseated[j].id, room);
@@ -568,7 +593,7 @@ async function assignFours(code: string, lesson: LessonRuntime) {
     }
   } else {
     for (let i = 0; i < students.length; i += 4) {
-      const room = roomName(code, `fours-${Math.floor(i / 4) + 1}`);
+      const room = roomName(code, `${prefix}-${Math.floor(i / 4) + 1}`);
       await livekit.createRoom({ name: room }).catch(() => {});
       for (let j = i; j < Math.min(i + 4, students.length); j++) {
         await sendToRoom(code, lesson, students[j].id, room);
@@ -690,6 +715,15 @@ io.on('connection', async (socket) => {
   }
 
   const code = dbLesson.code;
+  // After-lesson chat: the teacher stays out (students were told so); students who drop out don't come back
+  const after = lessons.get(code)?.afterUntil;
+  if (after) {
+    socket.emit('lessonError', role === 'teacher'
+      ? { error: 'after lesson', minutesLeft: Math.max(1, Math.ceil((after - Date.now()) / 60000)) }
+      : { error: 'lesson ended' });
+    socket.disconnect(true);
+    return;
+  }
   const runtime = getLessonRuntime(code, dbLesson.teacherId);
   if (!runtime) {
     socket.emit('lessonError', { error: 'too many open lessons' });
@@ -989,10 +1023,15 @@ io.on('connection', async (socket) => {
     });
 
     // End of the lesson: the lesson material is forgotten, everyone goes back to seating
-    socket.on('endLesson', async (ack?: () => void) => {
+    // { chatMinutes }: 0 — end now; 1..15 — students talk in their fours that long first
+    socket.on('endLesson', async (opts?: unknown, ack?: unknown) => {
+      if (typeof opts === 'function') { ack = opts; opts = undefined; }
       if (role !== 'teacher') return;
-      await endLesson(code, lesson, 'by the teacher');
-      if (typeof ack === 'function') ack();
+      const m = Math.round(Number((opts as { chatMinutes?: unknown } | undefined)?.chatMinutes) || 0);
+      const minutes = Math.min(MAX_AFTER_LESSON_MINUTES, Math.max(0, m));
+      if (typeof ack === 'function') ack(); // the teacher leaves the lesson either way
+      if (minutes > 0 && socketsOf(lesson, 'student').length > 0) await startAfterLesson(code, lesson, minutes);
+      else endLesson(code, lesson, 'by the teacher');
     });
 
   }
@@ -1025,9 +1064,9 @@ const TEACHER_ABSENT_MS = (Number(process.env.TEACHER_ABSENT_MINUTES) || 15) * 6
 setInterval(() => {
   const now = Date.now();
   for (const [code, lesson] of lessons) {
-    if (lesson.ended || !lesson.noTeacherSince || now - lesson.noTeacherSince <= TEACHER_ABSENT_MS) continue;
+    if (lesson.ended || lesson.afterUntil || !lesson.noTeacherSince || now - lesson.noTeacherSince <= TEACHER_ABSENT_MS) continue;
     if (isEmpty(code, lesson)) dropLesson(code, 'no teacher');
-    else endLesson(code, lesson, 'no teacher').catch(e => console.error(`[${code}] auto end failed`, e));
+    else endLesson(code, lesson, 'no teacher');
   }
 }, Math.min(30_000, TEACHER_ABSENT_MS / 3));
 

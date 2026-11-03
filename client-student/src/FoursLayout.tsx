@@ -8,6 +8,8 @@ import type { Seat } from './SeatingMap';
 interface Props {
   room: string;
   groupSeats: Seat[]; // 4 seats of this group, sorted by row/col
+  /** After-lesson chat: no teacher to call */
+  noTeacher?: boolean;
 }
 
 function CamTile({ identity, label }: { identity: string | null; label: string }) {
@@ -30,7 +32,7 @@ function CamTile({ identity, label }: { identity: string | null; label: string }
   );
 }
 
-export function FoursLayout({ room, groupSeats }: Props) {
+export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
   const subscribedTracks = useTracks([Track.Source.Camera]);
   const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher');
   const [calling, setCalling] = useState(false);
@@ -57,7 +59,7 @@ export function FoursLayout({ room, groupSeats }: Props) {
       <div style={{ width: 160, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <CamTile identity={seat(0, 0)?.occupant ?? null} label={seat(0, 0)?.occupant ?? '—'} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <button
+          {!noTeacher && <button
             ref={callBtnRef}
             onClick={toggleCall}
             title={calling ? 'Отменить вызов' : 'Позвать учителя'}
@@ -67,7 +69,7 @@ export function FoursLayout({ room, groupSeats }: Props) {
               animation: calling ? 'callPulse 1.2s infinite' : 'none',
               transition: 'background 0.2s',
             }}
-          >🔔</button>
+          >🔔</button>}
           <style>{`@keyframes callPulse { 0%,100% { box-shadow: 0 0 0 4px #f39c1255 } 50% { box-shadow: 0 0 0 10px #f39c1200 } }`}</style>
         </div>
         <CamTile identity={seat(1, 0)?.occupant ?? null} label={seat(1, 0)?.occupant ?? '—'} />

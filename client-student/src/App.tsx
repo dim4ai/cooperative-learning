@@ -56,6 +56,8 @@ type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
 interface LessonState {
   stage: Stage;
   timerEndsAt: number | null;
+  /** After-lesson chat in fours: the teacher has left, the lesson ends at this time */
+  afterUntil?: number | null;
   participants: { id: string; name: string; role: string }[];
 }
 
@@ -195,6 +197,7 @@ export default function App() {
   const [waitingForLesson, setWaitingForLesson] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
+  const afterLeft = useTimer(lessonState.afterUntil ?? null);
   const slides = useStudentSlides(joined);
 
   useEffect(() => {
@@ -213,6 +216,9 @@ export default function App() {
       } else if (error === 'too many attempts') {
         setJoined(false);
         setJoinError('Слишком много попыток — подождите минуту и попробуйте снова');
+      } else if (error === 'lesson ended') {
+        setJoined(false);
+        setJoinError('Урок завершён');
       } else if (error === 'too many open lessons') {
         setJoined(false);
         setJoinError('Занятие сейчас не открыть: у учителя слишком много занятий одновременно');
@@ -324,7 +330,11 @@ export default function App() {
         <span style={{ color: connected ? 'green' : 'red', fontWeight: 'bold' }}>
           {connected ? '●' : '○'}
         </span>
-        <strong>{STAGE_LABELS[lessonState.stage]}</strong>
+        {afterLeft !== null
+          ? <strong data-testid="after-lesson">
+              Урок окончен. Учитель покинул занятие. Можно поболтать ещё {Math.floor(afterLeft / 60)}:{String(afterLeft % 60).padStart(2, '0')}
+            </strong>
+          : <strong>{STAGE_LABELS[lessonState.stage]}</strong>}
         {secondsLeft !== null && (
           <span style={{ fontSize: 20, fontWeight: 'bold', marginLeft: 'auto' }}>
             {secondsLeft}s
@@ -451,7 +461,7 @@ export default function App() {
                 : showIndividual
                   ? <IndividualLayout room={livekit.room} />
                   : showFours
-                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} />
+                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} noTeacher={afterLeft !== null} />
                   : showDesk
                     ? <DeskLayout room={livekit.room} />
                     : <VideoRoom />
