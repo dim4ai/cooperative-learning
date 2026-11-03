@@ -1042,8 +1042,9 @@ export function SlideEditor(props: Props) {
 
           {!drawing && !tool && (<>
           {!busy && !active.length && (
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>
-              Выделите объект (Shift+клик — добавить к выделению). Ctrl+C/V — копировать/вставить, Ctrl+D — дублировать, Ctrl+G — сгруппировать, Delete — удалить, стрелки — сдвинуть. Можно вставить картинку из буфера или перетащить файлы на слайд.
+            <span data-testid="shortcuts-hint" style={{ fontSize: 13, color: '#9ca3af', cursor: 'help' }}
+              title={'Shift+клик — добавить к выделению\nCtrl+C/V — копировать/вставить, Ctrl+D — дублировать\nCtrl+G — сгруппировать, Delete — удалить, стрелки — сдвинуть\nКартинку можно вставить из буфера или перетащить файлы на слайд'}>
+              ⌨
             </span>
           )}
           {!busy && active.length > 1 && (
