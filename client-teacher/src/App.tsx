@@ -228,51 +228,6 @@ function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string) => 
   );
 }
 
-function LessonGate({ token, error, onReady, onUnauthorized }: { token: string; error: string; onReady: (code: string) => void; onUnauthorized: () => void }) {
-  const [codeInput, setCodeInput] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  async function createNew() {
-    setCreating(true);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/lessons`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) { onUnauthorized(); return; }
-      const { lesson } = await res.json();
-      onReady(lesson.code);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  return (
-    <div style={formScreenStyle}>
-      <h2 style={{ margin: 0 }}>Занятие</h2>
-      <button onClick={createNew} disabled={creating} style={formButtonStyle}>
-        {creating ? 'Создаём…' : 'Новое занятие'}
-      </button>
-      <div style={{ color: '#888', fontSize: 13 }}>или продолжить начатое</div>
-      <input
-        value={codeInput}
-        onChange={e => setCodeInput(e.target.value)}
-        placeholder="Код занятия"
-        style={{ ...formInputStyle, letterSpacing: 1 }}
-        onKeyDown={e => { if (e.key === 'Enter' && codeInput.trim()) onReady(codeInput.trim().toLowerCase()); }}
-      />
-      <button
-        onClick={() => codeInput.trim() && onReady(codeInput.trim().toLowerCase())}
-        disabled={!codeInput.trim()}
-        style={formButtonStyle}
-      >
-        Войти по коду
-      </button>
-      {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
-    </div>
-  );
-}
-
 function StudentTile({ name, color }: { name: string; color?: string }) {
   return (
     <div style={{
@@ -304,8 +259,6 @@ export default function App() {
   const [lessonCode, setLessonCodeReady] = useState<string | null>(null);
   const [lessonError, setLessonErrorState] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  // code chosen in LessonGate, waiting for the camera/mic setup screen before connecting
-  const [pendingCode, setPendingCode] = useState<string | null>(null);
   const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
   function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
   const roomOptions = useMemo(() => ({
@@ -390,14 +343,9 @@ export default function App() {
     }} />;
   }
 
-  if (!lessonCode && pendingCode) {
-    return <MediaSetup code={pendingCode} initial={media}
-      onJoin={p => { setMedia(p); setLessonCodeReady(pendingCode); setPendingCode(null); }}
-      onBack={() => setPendingCode(null)} />;
-  }
-
   if (!lessonCode) {
-    return <LessonGate token={token} error={lessonError} onReady={code => { setLessonErrorState(''); setPendingCode(code); }} onUnauthorized={logout} />;
+    return <MediaSetup token={token} initial={media} error={lessonError} onUnauthorized={logout}
+      onJoin={(code, p) => { setMedia(p); setLessonErrorState(''); setLessonCodeReady(code); }} />;
   }
 
   if (!confirmed) {
