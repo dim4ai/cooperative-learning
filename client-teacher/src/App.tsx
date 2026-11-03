@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
@@ -7,6 +7,8 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
+import { MediaSetup, LocalMediaSync, SidebarMediaToggles, loadMediaPrefs, saveMediaPrefs, deviceConstraint } from './MediaSetup';
+import type { MediaPrefs } from './MediaSetup';
 
 interface LivekitInfo {
   url: string;
@@ -302,6 +304,14 @@ export default function App() {
   const [lessonCode, setLessonCodeReady] = useState<string | null>(null);
   const [lessonError, setLessonErrorState] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  // code chosen in LessonGate, waiting for the camera/mic setup screen before connecting
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
+  const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
+  function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
+  const roomOptions = useMemo(() => ({
+    videoCaptureDefaults: { deviceId: deviceConstraint(media.camId) },
+    audioCaptureDefaults: { deviceId: deviceConstraint(media.micId) },
+  }), [media.camId, media.micId]);
 
   function logout() {
     localStorage.removeItem(TEACHER_KEY);
@@ -380,8 +390,14 @@ export default function App() {
     }} />;
   }
 
+  if (!lessonCode && pendingCode) {
+    return <MediaSetup code={pendingCode} initial={media}
+      onJoin={p => { setMedia(p); setLessonCodeReady(pendingCode); setPendingCode(null); }}
+      onBack={() => setPendingCode(null)} />;
+  }
+
   if (!lessonCode) {
-    return <LessonGate token={token} error={lessonError} onReady={code => { setLessonErrorState(''); setLessonCodeReady(code); }} onUnauthorized={logout} />;
+    return <LessonGate token={token} error={lessonError} onReady={code => { setLessonErrorState(''); setPendingCode(code); }} onUnauthorized={logout} />;
   }
 
   if (!confirmed) {
@@ -463,6 +479,8 @@ export default function App() {
           </>
         )}
 
+        {livekit && <SidebarMediaToggles prefs={media} onChange={setMedia} />}
+
         {livekit && (
           <button
             onClick={() => socket.emit('mute', { target: 'all' })}
@@ -534,11 +552,13 @@ export default function App() {
       serverUrl={livekit.url}
       token={livekit.token}
       connect={true}
-      video={true}
-      audio={true}
+      video={media.camOn}
+      audio={media.micOn}
+      options={roomOptions}
       style={{ display: 'contents' }}
     >
       <RoomAudioRenderer />
+      <LocalMediaSync camOn={media.camOn} micOn={media.micOn} />
       {inner}
     </LiveKitRoom>
   );
