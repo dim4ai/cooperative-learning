@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copies the shared slide player and live board from client-editor (canonical) into the lesson clients.
+# Copies the shared slide player and live board from client-editor (canonical) into the lesson clients,
+# and the student avatars from client-student into client-teacher.
 #   scripts/sync-slides.sh          — copy
 #   scripts/sync-slides.sh --check  — fail if any copy differs (used in CI)
 set -euo pipefail
@@ -26,4 +27,22 @@ for dir in "${TARGETS[@]}"; do
     fi
   done
 done
+
+# Student avatars: canonical in client-student (the student picks one), the teacher shows them too
+AV_SRC=client-student/src
+AV_DST=client-teacher/src
+expected="$( header "$AV_SRC/avatars.tsx"; cat "$AV_SRC/avatars.tsx" )"
+if [[ "${1:-}" == "--check" ]]; then
+  if [[ ! -f "$AV_DST/avatars.tsx" ]] || [[ "$(cat "$AV_DST/avatars.tsx")" != "$expected" ]]; then
+    echo "out of sync: $AV_DST/avatars.tsx (run scripts/sync-slides.sh)" >&2
+    status=1
+  fi
+  if ! diff -rq "$AV_SRC/avatars" "$AV_DST/avatars" >/dev/null 2>&1; then
+    echo "out of sync: $AV_DST/avatars/ (run scripts/sync-slides.sh)" >&2
+    status=1
+  fi
+else
+  printf '%s\n' "$expected" > "$AV_DST/avatars.tsx"
+  rm -rf "$AV_DST/avatars" && cp -r "$AV_SRC/avatars" "$AV_DST/avatars"
+fi
 exit $status

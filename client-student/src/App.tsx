@@ -11,6 +11,7 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
+import { AvatarPicker, AvatarProvider, loadAvatar, saveAvatar } from './avatars';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -60,7 +61,7 @@ interface LessonState {
   timerEndsAt: number | null;
   /** After-lesson chat in fours: the teacher has left, the lesson ends at this time */
   afterUntil?: number | null;
-  participants: { id: string; name: string; role: string }[];
+  participants: { id: string; name: string; role: string; avatar?: string | null }[];
 }
 
 interface LivekitInfo {
@@ -138,6 +139,7 @@ function NameScreen({ onNext }: { onNext: (name: string) => void }) {
 
 function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(loadAvatar);
   return (
     <div style={{
       height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -145,6 +147,10 @@ function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media:
     }}>
       <h3 style={{ margin: '8px 0 0' }}>Настройка камеры и микрофона</h3>
       <MediaCheck prefs={media} onChange={onMedia} />
+      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
+      <div style={{ maxWidth: 520 }}>
+        <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); }} />
+      </div>
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
       <div style={{ width: '100%', maxWidth: 640, height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Board />
@@ -327,7 +333,7 @@ export default function App() {
     setJoinError('');
   }
 
-  return (
+  return (<AvatarProvider participants={lessonState.participants}>
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '8px 16px', background: '#f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
         <span style={{ color: connected ? 'green' : 'red', fontWeight: 'bold' }}>
@@ -477,5 +483,5 @@ export default function App() {
         )}
       </div>
     </div>
-  );
+  </AvatarProvider>);
 }

@@ -22,7 +22,7 @@ function VideoTile({ track }: { track: TrackReferenceOrPlaceholder }) {
     <div style={{ position: 'relative', background: '#222', borderRadius: 8, overflow: 'hidden', aspectRatio: '4/3', width: '100%' }}>
       <video ref={ref} autoPlay muted={track.participant.isLocal} playsInline
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: hasVideo ? 'block' : 'none' }} />
-      {!hasVideo && <NameCard name={name} />}
+      {!hasVideo && <NameCard name={name} identity={track.participant.identity} />}
       {hasVideo && <div style={{ position: 'absolute', bottom: 4, left: 8, color: '#fff', fontSize: 12,
         background: 'rgba(0,0,0,0.4)', padding: '1px 4px', borderRadius: 3 }}>
         {name}
