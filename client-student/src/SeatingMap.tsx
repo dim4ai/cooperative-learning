@@ -1,6 +1,7 @@
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { SpeakingRing } from './speaking';
+import { useAvatarUrl } from './avatars';
 import { socket, myName } from './socket';
 
 export interface Seat {
@@ -17,13 +18,28 @@ const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 function SeatVideo({ identity }: { identity: string; color?: string; isMe?: boolean }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const trackRef = tracks.find(t => t.participant.identity === identity);
+  const avatar = useAvatarUrl(identity);
   return (<>
+    {/* in the tile's centered column, above the name */}
+    {!trackRef && avatar && <img src={avatar} alt="" data-testid="avatar" style={{
+      position: 'relative', zIndex: 1, height: 52, marginBottom: 2, pointerEvents: 'none',
+    }} />}
     {trackRef && <VideoTrack trackRef={trackRef} style={{
       position: 'absolute', inset: 0, width: '100%', height: '100%',
       objectFit: 'cover', borderRadius: 8,
     }} />}
     <SpeakingRing identity={identity} />
   </>);
+}
+
+/** Big first letter of the name — only when there's no avatar to show instead */
+function SeatInitial({ name }: { name: string }) {
+  if (useAvatarUrl(name)) return null;
+  return (
+    <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 20, textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
+      {name[0]?.toUpperCase()}
+    </div>
+  );
 }
 
 export function SeatingMap({ seats }: { seats: Seat[] }) {
@@ -99,9 +115,7 @@ export function SeatingMap({ seats }: { seats: Seat[] }) {
                     {seat.occupant ? (
                       <>
                         <SeatVideo identity={seat.occupant} color={color} isMe={isMe} />
-                        <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 20, textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-                          {seat.occupant[0]?.toUpperCase()}
-                        </div>
+                        <SeatInitial name={seat.occupant} />
                         <div style={{ position: 'relative', zIndex: 1, fontSize: 11, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
                           {isMe ? 'Вы' : seat.occupant}
                         </div>

@@ -212,6 +212,7 @@ interface Participant {
   livekitRoom: string | null;
   deviceId: string | null;
   studentId: number | null;
+  avatar: string | null; // id of a picture from the clients' built-in set (avatars/<id>.svg)
 }
 
 // Seating
@@ -348,7 +349,7 @@ function broadcastState(code: string, lesson: LessonRuntime) {
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
     participants: Array.from(lesson.participants.values()).map(p => ({
-      id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, identified: p.studentId !== null,
+      id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, identified: p.studentId !== null, avatar: p.avatar,
     })),
   });
 }
@@ -687,7 +688,9 @@ function sweepAttempts(store: Map<string, AttemptEntry>) {
 }
 
 io.on('connection', async (socket) => {
-  const { name, role, lessonId, deviceId, token } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; deviceId?: string; token?: string };
+  const { name, role, lessonId, deviceId, token, avatar: rawAvatar } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; deviceId?: string; token?: string; avatar?: unknown };
+  // only an id from the built-in set travels — never a picture; clients ignore ids they don't know
+  const avatar = typeof rawAvatar === 'string' && /^[a-z]{1,20}$/.test(rawAvatar) ? rawAvatar : null;
   const ip = clientIp(socket);
 
   if (isLockedOut(codeAttempts, ip)) {
@@ -781,7 +784,7 @@ io.on('connection', async (socket) => {
   // which case the client is asked to pick which one before the join completes.
   async function finishJoin(effectiveName: string, studentId: number | null, resolvedDeviceId: string | null) {
     if (socket.disconnected) return; // left while we were looking things up — nothing to add
-    lesson.participants.set(socket.id, { id: socket.id, name: effectiveName, role, livekitRoom: null, deviceId: resolvedDeviceId, studentId });
+    lesson.participants.set(socket.id, { id: socket.id, name: effectiveName, role, livekitRoom: null, deviceId: resolvedDeviceId, studentId, avatar });
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
     socket.on('disconnect', () => {

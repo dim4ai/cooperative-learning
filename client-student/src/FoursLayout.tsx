@@ -25,7 +25,7 @@ function CamTile({ identity, label }: { identity: string | null; label: string }
       {track
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : identity
-          ? <NameCard name={label} />
+          ? <NameCard name={label} identity={identity} />
           : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 12 }}>—</div>
       }
       <SpeakingRing identity={identity} />

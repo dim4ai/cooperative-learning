@@ -14,7 +14,7 @@ function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: s
     <div style={{ width: 200, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', position: 'relative', flexShrink: 0 }}>
       {hasVideo && isTrackReference(track)
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : <NameCard name={label} />}
+        : <NameCard name={label} identity={track.participant.identity} />}
       <SpeakingRing identity={track.participant.identity} />
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         {label}

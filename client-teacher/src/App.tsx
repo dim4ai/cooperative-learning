@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { NameCard, SpeakingRing } from './speaking';
+import { AvatarProvider } from './avatars';
 import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
@@ -26,6 +27,7 @@ interface Participant {
   name: string;
   role: 'teacher' | 'student';
   livekitRoom: string | null;
+  avatar?: string | null;
 }
 
 interface LessonState {
@@ -59,7 +61,7 @@ function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
           <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
             {isTrackReference(t) && !t.publication.isMuted
               ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <NameCard name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
+              : <NameCard name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} identity={t.participant.identity} />}
             <SpeakingRing identity={t.participant.identity} />
             <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
               {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
@@ -508,9 +510,9 @@ export default function App() {
     </div>
   );
 
-  if (!livekit) return inner;
+  if (!livekit) return <AvatarProvider participants={state.participants}>{inner}</AvatarProvider>;
 
-  return (
+  return (<AvatarProvider participants={state.participants}>
     <LiveKitRoom
       key={livekit.room}
       serverUrl={livekit.url}
@@ -525,5 +527,5 @@ export default function App() {
       <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn} />
       {inner}
     </LiveKitRoom>
-  );
+  </AvatarProvider>);
 }
