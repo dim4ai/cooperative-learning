@@ -242,7 +242,7 @@ interface LessonRuntime {
   slides: SlidesState;
   relay: MediaRelay;
   emptySince: number | null;
-  teacherGoneSince: number | null; // the last teacher socket left at; null while a teacher is in or before one ever came
+  noTeacherSince: number | null; // since when no teacher is in (left, or never came yet); null while one is in
   ended: boolean;                  // the lesson was ended — dropped from memory as soon as nobody is left
 }
 
@@ -293,7 +293,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     slides: emptySlidesState(),
     relay: new MediaRelay(io, code),
     emptySince: Date.now(),
-    teacherGoneSince: null,
+    noTeacherSince: Date.now(),
     ended: false,
   };
   lessons.set(code, lesson);
@@ -739,7 +739,7 @@ io.on('connection', async (socket) => {
       lesson.relay.removePeer(socket.id);
       lesson.participants.delete(socket.id);
       if (lesson.participants.size === 0) lesson.emptySince = Date.now();
-      if (role === 'teacher' && socketsOf(lesson, 'teacher').length === 0) lesson.teacherGoneSince = Date.now();
+      if (role === 'teacher' && socketsOf(lesson, 'teacher').length === 0) lesson.noTeacherSince = Date.now();
       dropIfEnded(code);
       if (role === 'student') {
         for (const seat of lesson.seats) {
@@ -755,7 +755,7 @@ io.on('connection', async (socket) => {
 
     lesson.emptySince = null;
     lesson.ended = false; // someone came (back) — it's a live lesson again
-    if (role === 'teacher') lesson.teacherGoneSince = null;
+    if (role === 'teacher') lesson.noTeacherSince = null;
     if (role === 'teacher') {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
@@ -1017,20 +1017,17 @@ io.on('connection', async (socket) => {
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
-// The teacher left (closed the tab, lost the network…) and hasn't come back for this long —
-// the lesson is over, as if they had pressed «Завершить урок». Long enough to reboot a router.
+// One rule for the lesson's life in memory: no teacher for this long (they left — closed the tab,
+// lost the network — or never came) and the lesson is over, as if «Завершить урок» was pressed:
+// whoever is still in is sent away and the lesson leaves memory. Long enough to reboot a router.
+// The code stays valid in the DB; coming back starts from an empty seating.
 const TEACHER_ABSENT_MS = (Number(process.env.TEACHER_ABSENT_MINUTES) || 15) * 60 * 1000;
-// A lesson nobody has been in for this long is dropped from memory (covers lessons the teacher
-// never came to). The code stays valid in the DB; coming back starts from an empty seating.
-const IDLE_LESSON_MS = (Number(process.env.IDLE_LESSON_MINUTES ?? process.env.IDLE_MATERIAL_MINUTES) || 60) * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
   for (const [code, lesson] of lessons) {
-    if (lesson.teacherGoneSince && now - lesson.teacherGoneSince > TEACHER_ABSENT_MS && !lesson.ended) {
-      endLesson(code, lesson, 'no teacher').catch(e => console.error(`[${code}] auto end failed`, e));
-    } else if (isEmpty(code, lesson) && lesson.emptySince && now - lesson.emptySince > IDLE_LESSON_MS) {
-      dropLesson(code, 'idle');
-    }
+    if (lesson.ended || !lesson.noTeacherSince || now - lesson.noTeacherSince <= TEACHER_ABSENT_MS) continue;
+    if (isEmpty(code, lesson)) dropLesson(code, 'no teacher');
+    else endLesson(code, lesson, 'no teacher').catch(e => console.error(`[${code}] auto end failed`, e));
   }
 }, Math.min(30_000, TEACHER_ABSENT_MS / 3));
 
