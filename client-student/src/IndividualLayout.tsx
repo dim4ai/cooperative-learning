@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
+import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
+import { NameCard, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
 import { socket, myName } from './socket';
 
@@ -8,10 +9,13 @@ interface Props {
 }
 
 function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: string }) {
-  if (!track.publication) return null;
+  const hasVideo = !!track.publication && !track.publication.isMuted;
   return (
     <div style={{ width: 200, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', position: 'relative', flexShrink: 0 }}>
-      <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      {hasVideo && isTrackReference(track)
+        ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <NameCard name={label} />}
+      <SpeakingRing identity={track.participant.identity} />
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         {label}
       </div>
@@ -21,8 +25,8 @@ function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: s
 
 export function IndividualLayout({ room }: Props) {
   const [calling, setCalling] = useState(false);
-  const allTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const subscribedTracks = useTracks([Track.Source.Camera]);
+  const allTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
+  const subscribedTracks = allTracks;
   const localTrack = allTracks.find(t => t.participant.isLocal);
   const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher');
 

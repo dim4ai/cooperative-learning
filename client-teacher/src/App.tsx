@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
+import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
+import { NameCard, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
-import { MediaSetup, SidebarMediaToggles } from './MediaSetup';
+import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type VideoMode } from './MediaSetup';
 import { EndLessonDialog } from './EndLessonDialog';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -29,6 +30,7 @@ interface Participant {
 
 interface LessonState {
   stage: Stage;
+  videoMode?: VideoMode;
   timerEndsAt: number | null;
   participants: Participant[];
 }
@@ -41,7 +43,8 @@ const LESSON_STAGES: { value: Stage; label: string }[] = [
 ];
 
 function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
-  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  // with placeholders: without video everyone still gets a tile with their name
+  const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
 
   return (
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden', position: 'relative' }}>
@@ -54,7 +57,10 @@ function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
       <div style={{ width: 180, display: 'flex', flexDirection: 'column', gap: 8, padding: 8, background: '#1a1a1a', justifyContent: 'center' }}>
         {cameraTracks.map(t => (
           <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
-            <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            {isTrackReference(t) && !t.publication.isMuted
+              ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <NameCard name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
+            <SpeakingRing identity={t.participant.identity} />
             <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
               {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
             </div>
@@ -275,6 +281,8 @@ export default function App() {
   }
 
   const [state, setState] = useState<LessonState>({ stage: 'waiting', timerEndsAt: null, participants: [] });
+  // The teacher shows video unless the lesson is without video for everyone
+  const camAllowed = state.videoMode !== 'none';
   const [connected, setConnected] = useState(false);
   const [seats, setSeats] = useState<Seat[]>([]);
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
@@ -379,6 +387,9 @@ export default function App() {
         <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#fff' }}>
           {lessonCode || '…'}
         </div>
+        {state.videoMode && state.videoMode !== 'all' && (
+          <div data-testid="video-mode" style={{ fontSize: 11, color: '#f0c36d', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
+        )}
 
         <MaterialPanel slides={slides} />
 
@@ -431,7 +442,7 @@ export default function App() {
           </>
         )}
 
-        {livekit && <SidebarMediaToggles prefs={media} onChange={setMedia} />}
+        {livekit && <SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} />}
 
         {livekit && (
           <button
@@ -505,13 +516,13 @@ export default function App() {
       serverUrl={livekit.url}
       token={livekit.token}
       connect={true}
-      video={media.camOn}
+      video={media.camOn && camAllowed}
       audio={media.micOn}
       options={roomOptions}
       style={{ display: 'contents' }}
     >
       <RoomAudioRenderer />
-      <LocalMediaSync camOn={media.camOn} micOn={media.micOn} />
+      <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn} />
       {inner}
     </LiveKitRoom>
   );
