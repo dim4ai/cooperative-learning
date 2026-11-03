@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.18.1",
     "@livekit/components-react": "^2.9.21",
     "fabric": "7.4.0",
     "fflate": "0.8.2",

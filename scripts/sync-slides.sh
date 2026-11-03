@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Copies the shared slide player from client-editor (canonical) into the lesson clients.
+# Copies the shared slide player and live board from client-editor (canonical) into the lesson clients.
 #   scripts/sync-slides.sh          — copy
 #   scripts/sync-slides.sh --check  — fail if any copy differs (used in CI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SRC=client-editor/src/slides
-FILES=(model.ts render.ts paper.ts SlidePlayer.tsx)
+FILES=(model.ts render.ts paper.ts SlidePlayer.tsx Board.tsx)
 TARGETS=(client-teacher/src/slides client-student/src/slides)
 
 header() { printf '// GENERATED COPY of %s — do not edit here, edit the original and run scripts/sync-slides.sh\n' "$1"; }

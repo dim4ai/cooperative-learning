@@ -226,7 +226,7 @@ export function SlidesPresenter({ slides: teacherSlides }: { slides: TeacherSlid
   // ←/→ (PageUp/PageDown — presentation clickers) switch slides
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!deck || (e.target as HTMLElement).closest('input, textarea, select, .excalidraw')) return;
+      if (!deck || (e.target as HTMLElement).closest('input, textarea, select, .live-board')) return;
       if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); if (index < slides.length - 1) goto(deck.id, index + 1); }
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); if (index > 0) goto(deck.id, index - 1); }
     };
