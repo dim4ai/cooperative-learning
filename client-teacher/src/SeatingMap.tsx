@@ -27,9 +27,9 @@ function SelfPreview() {
       boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
       background: '#222',
     }}>
-      {localTrackRef && (
-        <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
-      )}
+      {localTrackRef && !localTrackRef.publication?.isMuted
+        ? <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+        : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>Камера выключена</div>}
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         Учитель
       </div>
