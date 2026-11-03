@@ -1,9 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LiveKitRoom, RoomAudioRenderer, useTracks, VideoTrack, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 import { Track, RoomEvent } from 'livekit-client';
-import { Excalidraw } from '@excalidraw/excalidraw';
-import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import '@excalidraw/excalidraw/index.css';
 import { VideoRoom } from './VideoRoom';
 import { DeskLayout } from './DeskLayout';
 import { FoursLayout } from './FoursLayout';
@@ -13,6 +10,7 @@ import { useStudentSlides } from './LessonSlides';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
+import { Board } from './slides/Board';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -136,33 +134,16 @@ function NameScreen({ onNext }: { onNext: (name: string) => void }) {
 
 function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const boardApi = useRef<ExcalidrawImperativeAPI | null>(null);
-
-  // Excalidraw remembers where its canvas is on the page; when the content above it changes
-  // height (camera/device list loading) or the screen scrolls, it must re-measure — otherwise
-  // drawing lands away from the cursor.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const refresh = () => boardApi.current?.refresh();
-    const ro = new ResizeObserver(refresh);
-    Array.from(el.children).forEach(c => ro.observe(c));
-    el.addEventListener('scroll', refresh, { passive: true });
-    window.addEventListener('resize', refresh);
-    return () => { ro.disconnect(); el.removeEventListener('scroll', refresh); window.removeEventListener('resize', refresh); };
-  }, []);
-
   return (
-    <div ref={scrollRef} style={{
+    <div style={{
       height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
       gap: 12, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
     }}>
       <h3 style={{ margin: '8px 0 0' }}>Настройка камеры и микрофона</h3>
       <MediaCheck prefs={media} onChange={onMedia} />
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
-      <div style={{ width: '100%', maxWidth: 520, height: 280, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
-        <Excalidraw excalidrawAPI={api => { boardApi.current = api; }} />
+      <div style={{ width: '100%', maxWidth: 640, height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
+        <Board />
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
         <input

@@ -229,7 +229,7 @@ interface LessonRuntime {
   participants: Map<string, Participant>;
   seats: Seat[];
   sharedTexts: Map<string, string>; // per livekit room name
-  boardSnapshots: Map<string, unknown>; // per livekit room name
+  boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
   currentPoll: Poll | null;
   material: Material | null;
@@ -249,7 +249,7 @@ function getLessonRuntime(code: string): LessonRuntime {
       participants: new Map(),
       seats: [],
       sharedTexts: new Map(),
-      boardSnapshots: new Map(),
+      boards: new Map(),
       boardConnections: new Map(),
       currentPoll: null,
       material: null,
@@ -361,6 +361,55 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
   broadcastSlides(lesson, { material: true });
 }
 
+// ---------- shared board ----------
+// One Fabric board per LiveKit room. Clients send per-object operations; the server keeps the
+// current objects (for latecomers and room switches) and relays each operation to the room.
+type BoardObject = Record<string, unknown> & { uid: string; type: string };
+const BOARD_MAX_OBJECTS = 3000;
+const BOARD_MAX_OP_BYTES = 256 * 1024;
+
+function boardState(lesson: LessonRuntime, room: string): BoardObject[] {
+  return Array.from(lesson.boards.get(room)?.values() ?? []);
+}
+
+function isBoardObject(o: unknown): o is BoardObject {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  const { uid, type } = o as Record<string, unknown>;
+  return typeof uid === 'string' && uid.length > 0 && uid.length <= 64 && typeof type === 'string' && type.length <= 32;
+}
+
+function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author: string, isTeacher: boolean, fromSocket: string) {
+  if (!raw || typeof raw !== 'object') return;
+  const op = raw as { t?: unknown; obj?: unknown; uid?: unknown };
+  let board = lesson.boards.get(room);
+  if (!board) { board = new Map(); lesson.boards.set(room, board); }
+
+  let out: unknown;
+  if (op.t === 'add' || op.t === 'mod') {
+    if (!isBoardObject(op.obj) || JSON.stringify(op.obj).length > BOARD_MAX_OP_BYTES) return;
+    const prev = board.get(op.obj.uid);
+    if (!prev && board.size >= BOARD_MAX_OBJECTS) return;
+    // the author is whoever created the object, as the server saw it
+    const obj = { ...op.obj, author: (prev?.author as string | undefined) ?? author };
+    board.set(obj.uid, obj);
+    out = { t: op.t, obj };
+  } else if (op.t === 'del') {
+    if (typeof op.uid !== 'string' || !board.delete(op.uid)) return;
+    out = { t: 'del', uid: op.uid };
+  } else if (op.t === 'clear') {
+    if (!isTeacher) return;
+    board.clear();
+    out = { t: 'clear' };
+  } else return;
+
+  for (const [id, p] of lesson.participants) {
+    if (p.livekitRoom === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('boardOp', out);
+  }
+  for (const [id, bc] of lesson.boardConnections) {
+    if (bc.room === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('boardOp', out);
+  }
+}
+
 async function makeLivekitToken(identity: string, room: string): Promise<string> {
   const token = new AccessToken(API_KEY, API_SECRET, { identity });
   token.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
@@ -376,8 +425,7 @@ async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string,
   socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room });
   participant.livekitRoom = room;
   socket.emit('sharedText', { room, text: lesson.sharedTexts.get(room) ?? '' });
-  const snapshot = lesson.boardSnapshots.get(room);
-  if (snapshot) socket.emit('boardElements', snapshot);
+  socket.emit('boardState', boardState(lesson, room));
   console.log(`  [${code}] ${participant.name} -> ${room}`);
 }
 
@@ -596,21 +644,8 @@ io.on('connection', async (socket) => {
     const boardRoom = requestedRoom;
     lesson.boardConnections.set(socket.id, { room: boardRoom });
     console.log(`+ [${code}] board viewer: ${name} @ ${boardRoom}`);
-    const snapshot = lesson.boardSnapshots.get(boardRoom);
-    if (snapshot) socket.emit('boardElements', snapshot);
-    socket.on('boardElements', (elements: unknown) => {
-      lesson.boardSnapshots.set(boardRoom, elements);
-      for (const [id, p] of lesson.participants) {
-        if (p.livekitRoom === boardRoom) {
-          io.sockets.sockets.get(id)?.emit('boardElements', elements);
-        }
-      }
-      for (const [id, bc] of lesson.boardConnections) {
-        if (bc.room === boardRoom && id !== socket.id) {
-          io.sockets.sockets.get(id)?.emit('boardElements', elements);
-        }
-      }
-    });
+    socket.on('boardSync', () => socket.emit('boardState', boardState(lesson, boardRoom)));
+    socket.on('boardOp', (op: unknown) => applyBoardOp(lesson, boardRoom, op, name, false, socket.id));
     socket.on('disconnect', () => {
       lesson.boardConnections.delete(socket.id);
       console.log(`- [${code}] board viewer: ${name} @ ${boardRoom}`);
@@ -724,21 +759,15 @@ io.on('connection', async (socket) => {
       }
     });
 
-    socket.on('boardElements', (elements: unknown) => {
+    socket.on('boardSync', () => {
+      const room = lesson.participants.get(socket.id)?.livekitRoom;
+      if (room) socket.emit('boardState', boardState(lesson, room));
+    });
+
+    socket.on('boardOp', (op: unknown) => {
       const participant = lesson.participants.get(socket.id);
       if (!participant?.livekitRoom) return;
-      const room = participant.livekitRoom;
-      lesson.boardSnapshots.set(room, elements);
-      for (const [id, p] of lesson.participants) {
-        if (p.livekitRoom === room && id !== socket.id) {
-          io.sockets.sockets.get(id)?.emit('boardElements', elements);
-        }
-      }
-      for (const [id, bc] of lesson.boardConnections) {
-        if (bc.room === room) {
-          io.sockets.sockets.get(id)?.emit('boardElements', elements);
-        }
-      }
+      applyBoardOp(lesson, participant.livekitRoom, op, participant.name, role === 'teacher', socket.id);
     });
 
     socket.on('startPoll', ({ question, options }: { question: string; options: string[] }) => {

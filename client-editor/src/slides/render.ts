@@ -6,7 +6,7 @@ import { SLIDE_HEIGHT, SLIDE_WIDTH, mapObjects } from './model'
 import { applyPaper } from './paper'
 
 // Our fields travel with Fabric's own JSON
-FabricObject.customProperties = ['uid', 'mark', 'layer', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
+FabricObject.customProperties = ['uid', 'author', 'mark', 'layer', 'name', 'mediaName', 'pinned', 'studentHidden', 'studentDraggable']
 
 export type Obj = FabricObject &
   Partial<Pick<SceneObject, 'uid' | 'mark' | 'layer' | 'name' | 'mediaName' | 'pinned' | 'studentHidden' | 'studentDraggable'>>
