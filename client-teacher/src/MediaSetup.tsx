@@ -59,17 +59,25 @@ const toggleStyle = (on: boolean): CSSProperties => ({
   flex: 1, fontSize: 14, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
   border: 'none', color: '#fff', background: on ? '#27ae60' : '#e74c3c',
 });
+const mainButton: CSSProperties = {
+  width: '100%', fontSize: 16, padding: '10px 0', borderRadius: 6, border: 'none',
+  background: '#4a90e2', color: '#fff', cursor: 'pointer',
+};
 const selectStyle: CSSProperties = {
   width: '100%', fontSize: 13, padding: 6, borderRadius: 6, border: '1px solid #ccc', background: '#fff',
 };
 
-export function MediaSetup({ code, initial, onJoin, onBack }: {
-  code: string;
+// The teacher's start screen after login: check camera/mic, then start a new lesson or join one by code.
+export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnauthorized }: {
+  token: string;
   initial: MediaPrefs;
-  onJoin: (p: MediaPrefs) => void;
-  onBack: () => void;
+  error: string;
+  onJoin: (code: string, p: MediaPrefs) => void;
+  onUnauthorized: () => void;
 }) {
   const [prefs, setPrefs] = useState<MediaPrefs>(initial);
+  const [codeInput, setCodeInput] = useState('');
+  const [creating, setCreating] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState('');
   const [cams, setCams] = useState<MediaDeviceInfo[]>([]);
@@ -108,10 +116,27 @@ export function MediaSetup({ code, initial, onJoin, onBack }: {
   const activeCamId = stream?.getVideoTracks()[0]?.getSettings().deviceId ?? prefs.camId;
   const activeMicId = stream?.getAudioTracks()[0]?.getSettings().deviceId ?? prefs.micId;
 
-  function join() {
+  function join(code: string) {
     saveMediaPrefs(prefs);
-    onJoin(prefs);
+    onJoin(code, prefs);
   }
+
+  async function createNew() {
+    setCreating(true);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/lessons`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) { onUnauthorized(); return; }
+      const { lesson } = await res.json();
+      join(lesson.code);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const code = codeInput.trim().toLowerCase();
 
   return (
     <div style={{
@@ -119,9 +144,7 @@ export function MediaSetup({ code, initial, onJoin, onBack }: {
       justifyContent: 'center', gap: 14, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
     }}>
       <h2 style={{ margin: 0 }}>Камера и микрофон</h2>
-      <div style={{ color: '#888', fontSize: 13 }}>
-        Занятие <b style={{ letterSpacing: 1, color: '#333' }}>{code}</b> — проверьте себя перед входом
-      </div>
+      <div style={{ color: '#888', fontSize: 13 }}>Проверьте себя перед занятием</div>
 
       <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{
@@ -175,18 +198,24 @@ export function MediaSetup({ code, initial, onJoin, onBack }: {
           </label>
         )}
 
-        <button onClick={join} style={{
-          fontSize: 16, padding: '10px 0', borderRadius: 6, border: 'none',
-          background: '#4a90e2', color: '#fff', cursor: 'pointer', marginTop: 4,
-        }}>
-          Войти в урок
+        <button onClick={createNew} disabled={creating} style={{ ...mainButton, marginTop: 8 }}>
+          {creating ? 'Создаём…' : 'Новое занятие'}
         </button>
-        <button onClick={onBack} style={{
-          fontSize: 13, padding: '6px 0', borderRadius: 6, border: 'none',
-          background: 'transparent', color: '#888', cursor: 'pointer',
-        }}>
-          ← Другое занятие
-        </button>
+        <div style={{ color: '#888', fontSize: 13, textAlign: 'center' }}>или присоединиться к начатому</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={codeInput}
+            onChange={e => setCodeInput(e.target.value)}
+            placeholder="Код занятия"
+            onKeyDown={e => { if (e.key === 'Enter' && code) join(code); }}
+            style={{ flex: 1, minWidth: 0, fontSize: 15, padding: 8, borderRadius: 6, border: '1px solid #ccc', letterSpacing: 1 }}
+          />
+          <button onClick={() => code && join(code)} disabled={!code}
+            style={{ ...mainButton, width: 'auto', padding: '8px 14px', fontSize: 14, opacity: code ? 1 : 0.5 }}>
+            Войти
+          </button>
+        </div>
+        {lessonError && <div style={{ color: '#e74c3c', fontSize: 13, textAlign: 'center' }}>{lessonError}</div>}
       </div>
     </div>
   );
