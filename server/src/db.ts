@@ -75,7 +75,7 @@ function generateLessonCode(): string {
 export class LessonLimitError extends Error {}
 
 // Lessons a teacher can have in the database at once (codes still valid, i.e. used within 30 days)
-export const MAX_LESSONS_PER_TEACHER = 1000;
+export const MAX_LESSONS_PER_TEACHER = Number(process.env.MAX_LESSONS_PER_TEACHER) || 1000;
 
 export async function createLesson(teacherId: number | null = null): Promise<Lesson> {
   for (let attempt = 0; attempt < 5; attempt++) {

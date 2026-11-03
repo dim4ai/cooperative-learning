@@ -242,6 +242,8 @@ interface LessonRuntime {
   slides: SlidesState;
   relay: MediaRelay;
   emptySince: number | null;
+  teacherGoneSince: number | null; // the last teacher socket left at; null while a teacher is in or before one ever came
+  ended: boolean;                  // the lesson was ended — dropped from memory as soon as nobody is left
 }
 
 const lessons = new Map<string, LessonRuntime>();
@@ -249,7 +251,7 @@ const lessons = new Map<string, LessonRuntime>();
 // Lessons of one teacher held in memory at once. Lessons nobody is in are dropped first
 // (they come back empty — seating, boards and material start over); only lessons that
 // actually have people in them count against the limit.
-const MAX_OPEN_LESSONS_PER_TEACHER = 5;
+const MAX_OPEN_LESSONS_PER_TEACHER = Number(process.env.MAX_OPEN_LESSONS_PER_TEACHER) || 5;
 
 /** Nobody connected, including sockets still in the middle of joining */
 function isEmpty(code: string, lesson: LessonRuntime): boolean {
@@ -291,6 +293,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     slides: emptySlidesState(),
     relay: new MediaRelay(io, code),
     emptySince: Date.now(),
+    teacherGoneSince: null,
+    ended: false,
   };
   lessons.set(code, lesson);
   return lesson;
@@ -342,6 +346,34 @@ function broadcastState(code: string, lesson: LessonRuntime) {
 
 function socketsOf(lesson: LessonRuntime, role: Role): string[] {
   return Array.from(lesson.participants.values()).filter(p => p.role === role).map(p => p.id);
+}
+
+/** End of the lesson (teacher's button, or the teacher has been gone too long): material is
+ *  forgotten, students are told and sent away; once nobody is left the lesson leaves memory. */
+async function endLesson(code: string, lesson: LessonRuntime, why: string) {
+  lesson.ended = true;
+  lesson.stage = 'waiting';
+  lesson.timerEndsAt = null;
+  lesson.currentPoll = null;
+  setMaterial(code, lesson, null);
+  await sendAllToMain(code, lesson);
+  broadcastState(code, lesson);
+  for (const id of socketsOf(lesson, 'student')) {
+    const s = io.sockets.sockets.get(id);
+    s?.emit('lessonEnded');
+    s?.disconnect(true); // don't rely on the client leaving by itself
+  }
+  for (const id of lesson.boardConnections.keys()) io.sockets.sockets.get(id)?.disconnect(true);
+  console.log(`[${code}] lesson ended (${why})`);
+  dropIfEnded(code);
+}
+
+/** An ended lesson nobody is in any more — nothing to keep */
+function dropIfEnded(code: string) {
+  setImmediate(() => {
+    const lesson = lessons.get(code);
+    if (lesson?.ended && isEmpty(code, lesson)) dropLesson(code, 'ended');
+  });
 }
 
 function teacherMaterial(lesson: LessonRuntime) {
@@ -689,6 +721,7 @@ io.on('connection', async (socket) => {
     socket.on('disconnect', () => {
       lesson.boardConnections.delete(socket.id);
       console.log(`- [${code}] board viewer: ${name} @ ${boardRoom}`);
+      dropIfEnded(code);
     });
     return;
   }
@@ -706,6 +739,8 @@ io.on('connection', async (socket) => {
       lesson.relay.removePeer(socket.id);
       lesson.participants.delete(socket.id);
       if (lesson.participants.size === 0) lesson.emptySince = Date.now();
+      if (role === 'teacher' && socketsOf(lesson, 'teacher').length === 0) lesson.teacherGoneSince = Date.now();
+      dropIfEnded(code);
       if (role === 'student') {
         for (const seat of lesson.seats) {
           if (seat.occupant === effectiveName) seat.occupant = null;
@@ -719,6 +754,8 @@ io.on('connection', async (socket) => {
     socket.emit('seats', lesson.seats);
 
     lesson.emptySince = null;
+    lesson.ended = false; // someone came (back) — it's a live lesson again
+    if (role === 'teacher') lesson.teacherGoneSince = null;
     if (role === 'teacher') {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
@@ -954,14 +991,7 @@ io.on('connection', async (socket) => {
     // End of the lesson: the lesson material is forgotten, everyone goes back to seating
     socket.on('endLesson', async (ack?: () => void) => {
       if (role !== 'teacher') return;
-      lesson.stage = 'waiting';
-      lesson.timerEndsAt = null;
-      lesson.currentPoll = null;
-      setMaterial(code, lesson, null);
-      await sendAllToMain(code, lesson);
-      broadcastState(code, lesson);
-      for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('lessonEnded');
-      console.log(`[${code}] lesson ended`);
+      await endLesson(code, lesson, 'by the teacher');
       if (typeof ack === 'function') ack();
     });
 
@@ -987,19 +1017,27 @@ io.on('connection', async (socket) => {
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
-// A lesson nobody has been in for a while is dropped from memory (the code stays valid in the DB;
-// coming back starts from an empty seating)
+// The teacher left (closed the tab, lost the network…) and hasn't come back for this long —
+// the lesson is over, as if they had pressed «Завершить урок». Long enough to reboot a router.
+const TEACHER_ABSENT_MS = (Number(process.env.TEACHER_ABSENT_MINUTES) || 15) * 60 * 1000;
+// A lesson nobody has been in for this long is dropped from memory (covers lessons the teacher
+// never came to). The code stays valid in the DB; coming back starts from an empty seating.
 const IDLE_LESSON_MS = (Number(process.env.IDLE_LESSON_MINUTES ?? process.env.IDLE_MATERIAL_MINUTES) || 60) * 60 * 1000;
 setInterval(() => {
+  const now = Date.now();
   for (const [code, lesson] of lessons) {
-    if (isEmpty(code, lesson) && lesson.emptySince && Date.now() - lesson.emptySince > IDLE_LESSON_MS) dropLesson(code, 'idle');
+    if (lesson.teacherGoneSince && now - lesson.teacherGoneSince > TEACHER_ABSENT_MS && !lesson.ended) {
+      endLesson(code, lesson, 'no teacher').catch(e => console.error(`[${code}] auto end failed`, e));
+    } else if (isEmpty(code, lesson) && lesson.emptySince && now - lesson.emptySince > IDLE_LESSON_MS) {
+      dropLesson(code, 'idle');
+    }
   }
-}, 5 * 60 * 1000);
+}, Math.min(30_000, TEACHER_ABSENT_MS / 3));
 
 setInterval(() => {
   cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
   sweepAttempts(codeAttempts); sweepAttempts(loginAttempts);
 }, 6 * 60 * 60 * 1000);
 
-const PORT = 13113;
+const PORT = Number(process.env.PORT) || 13113;
 httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
