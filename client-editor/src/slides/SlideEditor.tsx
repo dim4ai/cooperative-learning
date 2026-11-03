@@ -228,12 +228,25 @@ export function SlideEditor(props: Props) {
     fc.on('selection:updated', refresh)
     fc.on('selection:cleared', refresh)
 
-    const ro = new ResizeObserver(() => fitToWidth(fc, hostRef.current?.clientWidth || SLIDE_WIDTH))
-    ro.observe(hostRef.current!)
+    // As wide as the column, but no taller than the window: the slide with its toolbars fits the screen
+    const host = hostRef.current!
+    const column = host.parentElement!
+    const fit = () => {
+      const above = host.offsetTop - column.offsetTop // toolbars over the slide
+      const maxH = Math.max(320, window.innerHeight - above - 24)
+      const w = Math.floor(Math.min(column.clientWidth, (maxH * SLIDE_WIDTH) / SLIDE_HEIGHT))
+      host.style.width = w + 'px'
+      fitToWidth(fc, w - 2) // minus the host's border
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(column)
+    window.addEventListener('resize', fit)
 
     return () => {
       abort.abort()
       ro.disconnect()
+      window.removeEventListener('resize', fit)
       emitNow()
       fcRef.current = null
       fc.dispose().finally(() => { fc.elements?.container?.remove(); el.remove() })
@@ -1102,7 +1115,7 @@ export function SlideEditor(props: Props) {
           onDragLeave={() => setDropping(false)}
           onDrop={e => { e.preventDefault(); setDropping(false); addFiles(Array.from(e.dataTransfer.files)) }}
           style={{
-            width: '100%', borderRadius: 4, overflow: 'hidden', background: '#fff',
+            maxWidth: '100%', borderRadius: 4, overflow: 'hidden', background: '#fff',
             border: `1px solid ${dropping ? '#4a90e2' : '#d1d5db'}`, boxShadow: dropping ? '0 0 0 3px #bfdbfe' : undefined,
           }}
         />

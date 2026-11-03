@@ -50,7 +50,7 @@ export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDele
   const hasTechnique = block.type === 'pairs' || block.type === 'fours'
 
   return (
-    <div style={{ padding: 32, maxWidth: 1180 }}>
+    <div style={{ padding: '24px 32px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
         <div style={{
