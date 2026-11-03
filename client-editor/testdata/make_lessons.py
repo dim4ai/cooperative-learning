@@ -128,9 +128,11 @@ def card(t, left, top, fill='#e0e7ff'):
 def slide(objects, background='#ffffff'):
     return {'id': uid(), 'engine': 'fabric', 'width': W, 'height': H, 'background': background, 'objects': objects}
 
+LESSON_MIME = 'application/vnd.colearn.lesson+zip'
 def write(fname, lesson, media, extra=None):
     p = os.path.join(OUT, fname)
     with zipfile.ZipFile(p, 'w') as z:
+        z.writestr(zipfile.ZipInfo('mimetype'), LESSON_MIME, zipfile.ZIP_STORED)  # first, uncompressed
         z.writestr(zipfile.ZipInfo('lesson.json'), json.dumps(lesson, ensure_ascii=False, indent=2), zipfile.ZIP_DEFLATED)
         for n, d in media.items(): z.writestr('media/' + n, d, zipfile.ZIP_STORED)
         for n, d in (extra or {}).items(): z.writestr(n, d)
@@ -178,7 +180,7 @@ drobi = {'version': 1, 'meta': {'title': 'Сравнение дробей', 'sub
                        rect(800, 110, 1000, 130, '#ffffffcc'), text('Придумайте задачу про покупки', 800, 110, 52, 950),
                        *card('½ кг', 400, 600, '#fef3c7'), *card('¾ л', 800, 650, '#fef3c7'), *card('⅓ дыни', 1200, 600, '#fef3c7')])]},
   ]}
-write('drobi.lesson.zip', drobi, m)
+write('drobi.colesson', drobi, m)
 
 # ---------- 2. heavy ----------
 m = {f'фото {i:02d}.png': noise_png(1920, 1080, (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))) for i in range(1, 13)}
@@ -201,7 +203,7 @@ for bi, typ in enumerate(['group', 'individual', 'pairs', 'fours', 'group', 'pai
 blocks[0]['slides'].insert(0, slide([image('4k.png', m, 800, 450, 1600)]))
 blocks[1]['slides'].insert(0, slide([image('пейзаж.jpg', m, 800, 450, 1600), text('JPEG 4K', 800, 800, 72, 600, fill='#fff')]))
 blocks[0]['attachments'] = [{'name': 'ролик.mp4', 'kind': 'video'}, {'name': 'ролик.webm', 'kind': 'video'}]
-write('heavy.lesson.zip', {'version': 1, 'meta': {'title': 'Нагрузочный урок (тяжёлые медиа)', 'subject': 'Тест', 'grade': '', 'author': '', 'createdAt': '2026-11-02'}, 'blocks': blocks}, m)
+write('heavy.colesson', {'version': 1, 'meta': {'title': 'Нагрузочный урок (тяжёлые медиа)', 'subject': 'Тест', 'grade': '', 'author': '', 'createdAt': '2026-11-02'}, 'blocks': blocks}, m)
 
 # ---------- 3. edge ----------
 m = {'круг.svg': svg(), 'анимация.gif': gif(), 'фото.webp': webp(),
@@ -237,14 +239,18 @@ edge = {'version': 1, 'meta': {'title': '⚠️ Краевые случаи: э�
      'slides': [slide([circle(random.randint(0, W), random.randint(0, H), random.randint(5, 40),
                               f'#{random.randint(0, 0xFFFFFF):06x}', studentDraggable=random.random() < 0.2) for _ in range(500)])]},
   ]}
-write('edge.lesson.zip', edge, m)
+write('edge.colesson', edge, m)
 
 # ---------- 4. broken ----------
-open(os.path.join(OUT, 'broken-not-zip.lesson.zip'), 'wb').write(b'this is not a zip at all')
+open(os.path.join(OUT, 'broken-not-zip.colesson'), 'wb').write(b'this is not a zip at all')
 def broken(fname, entries):
     with zipfile.ZipFile(os.path.join(OUT, fname), 'w') as z:
+        mt = entries.pop('mimetype', LESSON_MIME)
+        if mt is not None: z.writestr(zipfile.ZipInfo('mimetype'), mt, zipfile.ZIP_STORED)
         for n, d in entries.items(): z.writestr(n, d)
     print(fname)
-broken('broken-no-json.lesson.zip', {'media/a.png': pie(2, 1, 100)})
-broken('broken-bad-json.lesson.zip', {'lesson.json': '{"version": 1, "blocks": [ oops'})
-broken('broken-version-2.lesson.zip', {'lesson.json': json.dumps({'version': 2, 'meta': {}, 'blocks': []})})
+broken('broken-no-json.colesson', {'media/a.png': pie(2, 1, 100)})
+broken('broken-bad-json.colesson', {'lesson.json': '{"version": 1, "blocks": [ oops'})
+broken('broken-no-mimetype.colesson', {'mimetype': None, 'lesson.json': json.dumps({'version': 1, 'meta': {}, 'blocks': []})})  # plain zip with a lesson inside
+broken('broken-other-mimetype.colesson', {'mimetype': 'application/epub+zip', 'lesson.json': json.dumps({'version': 1, 'meta': {}, 'blocks': []})})
+broken('broken-version-2.colesson', {'lesson.json': json.dumps({'version': 2, 'meta': {}, 'blocks': []})})

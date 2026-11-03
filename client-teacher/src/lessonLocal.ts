@@ -1,4 +1,4 @@
-// The lesson file (.lesson.zip from the editor) lives here, in the teacher's browser — it is not
+// The lesson file (.colesson from the editor) lives here, in the teacher's browser — it is not
 // uploaded anywhere. The server only gets its structure (slides JSON + a catalog of media hashes)
 // and relays media files to students piece by piece when they need them.
 // The file is also kept in IndexedDB per lesson code, so a page reload doesn't lose it.
@@ -38,6 +38,9 @@ export async function readLesson(file: Blob): Promise<LocalLesson> {
   const zip = new Uint8Array(await file.arrayBuffer());
   const entries = await new Promise<Unzipped>((resolve, reject) =>
     unzip(zip, (err, data) => (err ? reject(new NotALessonError('not a zip')) : resolve(data))));
+  // .colesson starts with a 'mimetype' entry (see client-editor/src/lessonFile.ts)
+  const mimetype = entries['mimetype'];
+  if (!mimetype || strFromU8(mimetype) !== 'application/vnd.colearn.lesson+zip') throw new NotALessonError('no lesson mimetype');
   const json = entries['lesson.json'];
   if (!json) throw new NotALessonError('no lesson.json');
   let raw: { version?: number; meta?: { title?: string }; blocks?: (Record<string, unknown> & { scene?: Scene; slides?: Scene[] })[] };

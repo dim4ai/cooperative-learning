@@ -1,10 +1,8 @@
 // Open/save the lesson file. Chromium: File System Access API (save back into the same file).
 // Other browsers: <input type=file> + download.
-import { LESSON_EXT } from './lessonFile'
+import { LESSON_EXT, LESSON_MIME } from './lessonFile'
 
-const PICKER_TYPES: FilePickerAcceptType[] = [
-  { description: 'Урок', accept: { 'application/zip': [LESSON_EXT, '.zip'] } },
-]
+const PICKER_TYPES: FilePickerAcceptType[] = [{ description: 'Урок', accept: { [LESSON_MIME]: [LESSON_EXT] } }]
 
 export const canSaveInPlace = typeof window.showSaveFilePicker === 'function'
 
@@ -24,7 +22,7 @@ export async function pickLessonFile(): Promise<Opened | null> {
       throw e
     }
   }
-  const file = await pickViaInput('.zip,application/zip')
+  const file = await pickViaInput(LESSON_EXT)
   return file ? { file, handle: null } : null
 }
 

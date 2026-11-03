@@ -1,10 +1,13 @@
-// Lesson file format: a zip archive.
+// Lesson file format: a zip archive with its own extension (.colesson), like .docx/.epub.
+//   mimetype         — first entry, stored uncompressed: LESSON_MIME (EPUB-style signature —
+//                      the type is readable from the file's first bytes without unpacking); required
 //   lesson.json      — LessonFile (meta + blocks), attachments reference media by name
 //   media/<name>     — attachment bytes
 import { unzip, zip, strFromU8, strToU8, type Unzipped, type Zippable } from 'fflate'
 import { normalizeBlocks, usedMediaNames, type LessonFile } from './types'
 
-export const LESSON_EXT = '.lesson.zip'
+export const LESSON_EXT = '.colesson'
+export const LESSON_MIME = 'application/vnd.colearn.lesson+zip'
 export type Media = Record<string, Blob>
 
 export interface LoadedLesson {
@@ -16,6 +19,8 @@ export interface LoadedLesson {
 export async function packLesson(lesson: LessonFile, media: Media): Promise<Blob> {
   const used = usedMediaNames(lesson.blocks)
   const files: Zippable = {
+    // must stay first and uncompressed (object key order = order in the archive)
+    mimetype: [strToU8(LESSON_MIME), { level: 0 }],
     'lesson.json': strToU8(JSON.stringify(lesson, null, 2)),
   }
   for (const name of used) {
@@ -27,7 +32,7 @@ export async function packLesson(lesson: LessonFile, media: Media): Promise<Blob
   const bytes = await new Promise<Uint8Array>((resolve, reject) =>
     zip(files, { level: 6 }, (err, data) => (err ? reject(err) : resolve(data))),
   )
-  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/zip' })
+  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: LESSON_MIME })
 }
 
 export async function unpackLesson(file: Blob): Promise<LoadedLesson> {
@@ -35,6 +40,8 @@ export async function unpackLesson(file: Blob): Promise<LoadedLesson> {
   const entries = await new Promise<Unzipped>((resolve, reject) =>
     unzip(bytes, (err, data) => (err ? reject(new Error('Файл не похож на урок (не zip-архив)')) : resolve(data))),
   )
+  const mimetype = entries['mimetype']
+  if (!mimetype || strFromU8(mimetype) !== LESSON_MIME) throw new Error('Файл не похож на урок (нет отметки формата урока)')
   const json = entries['lesson.json']
   if (!json) throw new Error('В архиве нет lesson.json')
 
