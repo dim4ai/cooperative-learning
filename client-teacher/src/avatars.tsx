@@ -12,7 +12,10 @@ const urls = import.meta.glob('./avatars/*.svg', { eager: true, query: '?url', i
 export const AVATARS: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(urls).map(([path, url]) => [path.slice('./avatars/'.length, -'.svg'.length), url]),
 );
-export const AVATAR_IDS: readonly string[] = Object.keys(AVATARS).sort();
+/** For anyone who hasn't picked one: a neutral silhouette (avatars/default.svg) */
+export const DEFAULT_AVATAR = AVATARS.default;
+/** What can be picked — everything but the default */
+export const AVATAR_IDS: readonly string[] = Object.keys(AVATARS).filter(id => id !== 'default').sort();
 
 const AVATAR_KEY = 'avatar';
 
@@ -46,11 +49,12 @@ export function AvatarProvider({ participants, children }: {
   return <AvatarContext.Provider value={map}>{children}</AvatarContext.Provider>;
 }
 
-/** Picture URL of this participant's avatar, if they chose one we know */
+/** Picture URL of this participant's avatar — the default one if they didn't pick any */
 export function useAvatarUrl(identity: string | null | undefined): string | undefined {
   const map = useContext(AvatarContext);
-  const id = identity ? map.get(identity) : undefined;
-  return id ? AVATARS[id] : undefined;
+  if (!identity) return undefined;
+  const id = map.get(identity);
+  return (id && AVATARS[id]) || DEFAULT_AVATAR;
 }
 
 /** Grid to pick an avatar from (or none) */
@@ -62,8 +66,9 @@ export function AvatarPicker({ value, onChange }: { value: string | null; onChan
   });
   return (
     <div role="radiogroup" aria-label="Аватарка" style={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
-      <button role="radio" aria-checked={value === null} title="Без аватарки" onClick={() => onChange(null)}
-        style={{ ...cell(value === null), fontSize: 18, color: '#999', lineHeight: 1 }}>∅</button>
+      <button role="radio" aria-checked={value === null} title="Обычная" onClick={() => onChange(null)} style={cell(value === null)}>
+        <img src={DEFAULT_AVATAR} alt="Обычная" style={{ width: '100%', height: '100%', display: 'block' }} />
+      </button>
       {AVATAR_IDS.map(id => (
         <button key={id} role="radio" aria-checked={value === id} title={id} onClick={() => onChange(id)} style={cell(value === id)}>
           <img src={AVATARS[id]} alt={id} style={{ width: '100%', height: '100%', display: 'block' }} />

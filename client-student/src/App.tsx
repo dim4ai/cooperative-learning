@@ -11,7 +11,7 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
-import { AvatarPicker, AvatarProvider, loadAvatar, saveAvatar } from './avatars';
+import { AvatarPicker, AvatarProvider, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -33,6 +33,7 @@ function MicControl({ enabled }: { enabled: boolean }) {
 function SelfPreview() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const localTrackRef = tracks.find(t => t.participant.isLocal);
+  const selfAvatar = useAvatarUrl(myName); // without video: own avatar (or the default one)
 
   return (
     <div style={{
@@ -44,7 +45,9 @@ function SelfPreview() {
     }}>
       {localTrackRef && !localTrackRef.publication?.isMuted
         ? <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
-        : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>Камера выключена</div>}
+        : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 14, boxSizing: 'border-box' }}>
+            {selfAvatar && <img src={selfAvatar} alt="" data-testid="self-avatar" style={{ height: '62%' }} />}
+          </div>}
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         {myName}
       </div>
