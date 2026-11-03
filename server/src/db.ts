@@ -72,14 +72,25 @@ function generateLessonCode(): string {
   return code;
 }
 
+export class LessonLimitError extends Error {}
+
+// Lessons a teacher can have in the database at once (codes still valid, i.e. used within 30 days)
+export const MAX_LESSONS_PER_TEACHER = 1000;
+
 export async function createLesson(teacherId: number | null = null): Promise<Lesson> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateLessonCode();
     try {
+      // the count check and the insert are one statement, so a burst of requests can't slip past it
       const { rows } = await pool.query(
-        'INSERT INTO lessons (code, teacher_id) VALUES ($1, $2) RETURNING id, code, teacher_id AS "teacherId"',
-        [code, teacherId]
+        `INSERT INTO lessons (code, teacher_id)
+         SELECT $1, $2
+         WHERE $2::int IS NULL OR (SELECT count(*) FROM lessons
+           WHERE teacher_id = $2 AND last_active_at > now() - interval '30 days') < $3
+         RETURNING id, code, teacher_id AS "teacherId"`,
+        [code, teacherId, MAX_LESSONS_PER_TEACHER]
       );
+      if (!rows[0]) throw new LessonLimitError(`teacher ${teacherId} has ${MAX_LESSONS_PER_TEACHER} lessons`);
       return rows[0];
     } catch (err) {
       if ((err as { code?: string }).code === '23505') continue; // code collision, retry

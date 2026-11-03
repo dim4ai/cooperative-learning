@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { Server } from 'socket.io';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import {
-  verifyTeacher, getTeacherSessionVersion, createLesson, getLessonByCode, cleanupExpiredLessons,
+  verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, getLessonByCode, cleanupExpiredLessons,
   listStudents, createStudent, getStudentsForDevice, linkDevice,
 } from './db';
 import {
@@ -114,8 +114,12 @@ app.post('/login', async (req, res) => {
 });
 
 app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
-  const lesson = await createLesson(req.teacherId!).catch(() => null);
-  if (!lesson) {
+  const lesson = await createLesson(req.teacherId!).catch(e => e as Error);
+  if (lesson instanceof LessonLimitError) {
+    res.status(429).json({ error: 'too many lessons' });
+    return;
+  }
+  if (lesson instanceof Error) {
     res.status(500).json({ error: 'failed to create lesson' });
     return;
   }
@@ -173,7 +177,8 @@ app.post('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res)
   if (others.reduce((n, [, l]) => n + l.material!.bytes, 0) + material.bytes > MAX_MATERIALS_TOTAL_BYTES) {
     res.status(503).json({ error: 'server busy' }); return;
   }
-  const lesson = getLessonRuntime(code);
+  const lesson = getLessonRuntime(code, req.teacherId ?? null);
+  if (!lesson) { res.status(429).json({ error: 'too many open lessons' }); return; }
   const same = lesson.material?.id === material.id;
   setMaterial(code, lesson, material, { keepState: same });
   console.log(`[${code}] material ${same ? 'resent' : 'loaded'}: "${material.title}", ${material.media.size} media, ${Math.round(material.bytes / 1024)} KB`);
@@ -224,6 +229,7 @@ interface Poll {
 
 // Everything scoped to one lesson (one teacher + their students). Keyed by lesson code.
 interface LessonRuntime {
+  teacherId: number | null; // owner, for the per-teacher limit
   stage: Stage;
   timerEndsAt: number | null;
   participants: Map<string, Participant>;
@@ -240,25 +246,53 @@ interface LessonRuntime {
 
 const lessons = new Map<string, LessonRuntime>();
 
-function getLessonRuntime(code: string): LessonRuntime {
+// Lessons of one teacher held in memory at once. Lessons nobody is in are dropped first
+// (they come back empty — seating, boards and material start over); only lessons that
+// actually have people in them count against the limit.
+const MAX_OPEN_LESSONS_PER_TEACHER = 5;
+
+/** Nobody connected, including sockets still in the middle of joining */
+function isEmpty(code: string, lesson: LessonRuntime): boolean {
+  return lesson.participants.size === 0 && lesson.boardConnections.size === 0 && !io.sockets.adapter.rooms.get(code)?.size;
+}
+
+function dropLesson(code: string, why: string) {
+  const lesson = lessons.get(code);
+  if (!lesson) return;
+  lesson.relay.dispose();
+  lessons.delete(code);
+  console.log(`[${code}] dropped from memory (${why})`);
+}
+
+/** The lesson's runtime, created if needed; null if the teacher already has too many open lessons */
+function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime | null {
   let lesson = lessons.get(code);
-  if (!lesson) {
-    lesson = {
-      stage: 'waiting',
-      timerEndsAt: null,
-      participants: new Map(),
-      seats: [],
-      sharedTexts: new Map(),
-      boards: new Map(),
-      boardConnections: new Map(),
-      currentPoll: null,
-      material: null,
-      slides: emptySlidesState(),
-      relay: new MediaRelay(io, code),
-      emptySince: Date.now(),
-    };
-    lessons.set(code, lesson);
+  if (lesson) return lesson;
+  if (teacherId !== null) {
+    const mine = [...lessons.entries()].filter(([, l]) => l.teacherId === teacherId);
+    if (mine.length >= MAX_OPEN_LESSONS_PER_TEACHER) {
+      const empty = mine.filter(([c, l]) => isEmpty(c, l)).sort(([, a], [, b]) => (a.emptySince ?? 0) - (b.emptySince ?? 0));
+      const excess = mine.length - MAX_OPEN_LESSONS_PER_TEACHER + 1;
+      if (empty.length < excess) return null;
+      for (const [c] of empty.slice(0, excess)) dropLesson(c, 'teacher opened another lesson');
+    }
   }
+  lesson = {
+    teacherId,
+    stage: 'waiting',
+    timerEndsAt: null,
+    participants: new Map(),
+    seats: [],
+    sharedTexts: new Map(),
+    boards: new Map(),
+    boardConnections: new Map(),
+    currentPoll: null,
+    material: null,
+    slides: emptySlidesState(),
+    relay: new MediaRelay(io, code),
+    emptySince: Date.now(),
+  };
+  lessons.set(code, lesson);
   return lesson;
 }
 
@@ -624,7 +658,13 @@ io.on('connection', async (socket) => {
   }
 
   const code = dbLesson.code;
-  const lesson = getLessonRuntime(code);
+  const runtime = getLessonRuntime(code, dbLesson.teacherId);
+  if (!runtime) {
+    socket.emit('lessonError', { error: 'too many open lessons' });
+    socket.disconnect(true);
+    return;
+  }
+  const lesson: LessonRuntime = runtime;
   socket.join(code);
 
   // Board-only connection: mobile student viewing/drawing the board via WebView, as a second
@@ -658,8 +698,23 @@ io.on('connection', async (socket) => {
   // need to guess who just joined. A shared device can be linked to several students, in
   // which case the client is asked to pick which one before the join completes.
   async function finishJoin(effectiveName: string, studentId: number | null, resolvedDeviceId: string | null) {
+    if (socket.disconnected) return; // left while we were looking things up — nothing to add
     lesson.participants.set(socket.id, { id: socket.id, name: effectiveName, role, livekitRoom: null, deviceId: resolvedDeviceId, studentId });
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
+    // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
+    socket.on('disconnect', () => {
+      lesson.relay.removePeer(socket.id);
+      lesson.participants.delete(socket.id);
+      if (lesson.participants.size === 0) lesson.emptySince = Date.now();
+      if (role === 'student') {
+        for (const seat of lesson.seats) {
+          if (seat.occupant === effectiveName) seat.occupant = null;
+        }
+        io.to(code).emit('seats', lesson.seats);
+      }
+      console.log(`- [${code}] ${role}: ${effectiveName}`);
+      broadcastState(code, lesson);
+    });
     broadcastState(code, lesson);
     socket.emit('seats', lesson.seats);
 
@@ -910,19 +965,6 @@ io.on('connection', async (socket) => {
       if (typeof ack === 'function') ack();
     });
 
-    socket.on('disconnect', () => {
-      lesson.relay.removePeer(socket.id);
-      lesson.participants.delete(socket.id);
-      if (lesson.participants.size === 0) lesson.emptySince = Date.now();
-      if (role === 'student') {
-        for (const seat of lesson.seats) {
-          if (seat.occupant === effectiveName) seat.occupant = null;
-        }
-        io.to(code).emit('seats', lesson.seats);
-      }
-      console.log(`- [${code}] ${role}: ${effectiveName}`);
-      broadcastState(code, lesson);
-    });
   }
 
   if (role === 'student' && deviceId && dbLesson.teacherId) {
@@ -945,14 +987,12 @@ io.on('connection', async (socket) => {
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
-// A lesson nobody has been in for a while drops its material (memory), like an ended lesson
-const IDLE_MATERIAL_MS = (Number(process.env.IDLE_MATERIAL_MINUTES) || 60) * 60 * 1000;
+// A lesson nobody has been in for a while is dropped from memory (the code stays valid in the DB;
+// coming back starts from an empty seating)
+const IDLE_LESSON_MS = (Number(process.env.IDLE_LESSON_MINUTES ?? process.env.IDLE_MATERIAL_MINUTES) || 60) * 60 * 1000;
 setInterval(() => {
   for (const [code, lesson] of lessons) {
-    if (lesson.material && lesson.emptySince && Date.now() - lesson.emptySince > IDLE_MATERIAL_MS) {
-      setMaterial(code, lesson, null);
-      console.log(`[${code}] idle lesson: material dropped`);
-    }
+    if (isEmpty(code, lesson) && lesson.emptySince && Date.now() - lesson.emptySince > IDLE_LESSON_MS) dropLesson(code, 'idle');
   }
 }, 5 * 60 * 1000);
 
