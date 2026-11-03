@@ -7,8 +7,9 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
-import { MediaSetup, LocalMediaSync, SidebarMediaToggles, loadMediaPrefs, saveMediaPrefs, deviceConstraint } from './MediaSetup';
-import type { MediaPrefs } from './MediaSetup';
+import { MediaSetup, SidebarMediaToggles } from './MediaSetup';
+import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
+import type { MediaPrefs } from './mediaCheck';
 
 interface LivekitInfo {
   url: string;
@@ -261,10 +262,8 @@ export default function App() {
   const [confirmed, setConfirmed] = useState(false);
   const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
   function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
-  const roomOptions = useMemo(() => ({
-    videoCaptureDefaults: { deviceId: deviceConstraint(media.camId) },
-    audioCaptureDefaults: { deviceId: deviceConstraint(media.micId) },
-  }), [media.camId, media.micId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const roomOptions = useMemo(() => captureOptions(media), [media.camId, media.micId]);
 
   function logout() {
     localStorage.removeItem(TEACHER_KEY);
