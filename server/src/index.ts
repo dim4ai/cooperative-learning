@@ -8,7 +8,7 @@ import { Server } from 'socket.io';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import {
   verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
-  listStudents, createStudent, getStudentsForDevice, linkDevice,
+  isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
 } from './db';
 import {
   parseMaterial, MaterialError, MAX_MATERIAL_JSON_BYTES, mediaCatalog, emptySlidesState, blockSlides, currentScene,
@@ -81,7 +81,7 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
 const app = express();
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
@@ -89,7 +89,14 @@ app.use((req, res, next) => {
 // The lesson structure (slides JSON) may be a few MB; everything else is small
 const smallJson = express.json();
 const materialJson = express.json({ limit: MAX_MATERIAL_JSON_BYTES });
-app.use((req, res, next) => (/^\/lessons\/[^/]+\/material$/.test(req.path) ? materialJson : smallJson)(req, res, next));
+// The teacher's journal: ciphertext the server can't read, one per teacher
+const MAX_JOURNAL_BYTES = Number(process.env.MAX_JOURNAL_BYTES) || 1024 * 1024;
+const journalJson = express.json({ limit: MAX_JOURNAL_BYTES + 4096 });
+app.use((req, res, next) => (
+  /^\/lessons\/[^/]+\/material$/.test(req.path) ? materialJson
+  : req.path === '/journal' || req.path === '/password' ? journalJson
+  : smallJson
+)(req, res, next));
 
 app.post('/login', async (req, res) => {
   const ip = clientIpFromReq(req);
@@ -97,12 +104,16 @@ app.post('/login', async (req, res) => {
     res.status(429).json({ error: 'too many attempts' });
     return;
   }
-  const { email, password } = req.body ?? {};
-  if (typeof email !== 'string' || typeof password !== 'string') {
-    res.status(400).json({ error: 'email and password are required' });
+  const { email, authKey, password } = req.body ?? {};
+  if (typeof email !== 'string' || !isAuthKey(authKey)) {
+    res.status(400).json({ error: 'email and authKey are required' });
     return;
   }
-  const teacher = await verifyTeacher(email, password).catch(() => null);
+  const teacher = await verifyTeacher(email, authKey, password).catch(() => null);
+  if (teacher === 'upgrade') {
+    res.status(428).json({ error: 'send the password once' });
+    return;
+  }
   if (!teacher) {
     recordFailedAttempt(loginAttempts, ip);
     res.status(401).json({ error: 'invalid credentials' });
@@ -128,27 +139,52 @@ app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
   res.json({ lesson });
 });
 
-app.get('/students', requireAuth, async (req: AuthedRequest, res) => {
-  const students = await listStudents(req.teacherId!).catch(() => null);
-  if (!students) {
-    res.status(500).json({ error: 'failed to load students' });
-    return;
-  }
-  res.json({ students });
+const isJournalData = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= MAX_JOURNAL_BYTES;
+
+app.get('/journal', requireAuth, async (req: AuthedRequest, res) => {
+  if (!hasJournal) { res.status(503).json({ error: 'journal unavailable' }); return; }
+  const journal = await getJournal(req.teacherId!).catch(() => undefined);
+  if (journal === undefined) { res.status(500).json({ error: 'failed to load journal' }); return; }
+  res.json({ journal });
 });
 
-app.post('/students', requireAuth, async (req: AuthedRequest, res) => {
-  const { name } = req.body ?? {};
-  if (typeof name !== 'string' || !name.trim()) {
-    res.status(400).json({ error: 'name is required' });
+app.put('/journal', requireAuth, async (req: AuthedRequest, res) => {
+  if (!hasJournal) { res.status(503).json({ error: 'journal unavailable' }); return; }
+  const { version, data } = req.body ?? {};
+  if (!Number.isInteger(version) || version < 0 || !isJournalData(data)) {
+    res.status(400).json({ error: 'version and data are required' });
     return;
   }
-  const student = await createStudent(req.teacherId!, name.trim()).catch(() => null);
-  if (!student) {
-    res.status(500).json({ error: 'failed to create student' });
+  const saved = await saveJournal(req.teacherId!, version, data).catch(() => undefined);
+  if (saved === undefined) { res.status(500).json({ error: 'failed to save journal' }); return; }
+  if (saved === null) { res.status(409).json({ error: 'journal has changed' }); return; }
+  res.json({ version: saved });
+});
+
+// Password change: the journal's key rewrapped by the new password comes along. A forgotten
+// password can't be reset here — that's not built yet, and the journal would stay closed anyway.
+app.post('/password', requireAuth, async (req: AuthedRequest, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(loginAttempts, ip)) {
+    res.status(429).json({ error: 'too many attempts' });
     return;
   }
-  res.json({ student });
+  const { authKey, newAuthKey, journal } = req.body ?? {};
+  const journalOk = journal === null || (Number.isInteger(journal?.version) && isJournalData(journal?.data));
+  if (!isAuthKey(authKey) || !isAuthKey(newAuthKey) || !journalOk) {
+    res.status(400).json({ error: 'authKey, newAuthKey and journal are required' });
+    return;
+  }
+  const result = await changePassword(req.teacherId!, authKey, newAuthKey, journal).catch(() => null);
+  if (result === 'wrong password') {
+    recordFailedAttempt(loginAttempts, ip);
+    res.status(401).json({ error: 'wrong password' });
+    return;
+  }
+  if (result === 'conflict') { res.status(409).json({ error: 'journal has changed' }); return; }
+  if (result === null) { res.status(500).json({ error: 'failed to change password' }); return; }
+  clearAttempts(loginAttempts, ip);
+  res.json({ ok: true });
 });
 
 // ---------- lesson material (structure only; the file stays in the teacher's browser) ----------
@@ -210,8 +246,7 @@ interface Participant {
   name: string;
   role: Role;
   livekitRoom: string | null;
-  deviceId: string | null;
-  studentId: number | null;
+  uuid: string | null; // the student's profile in their browser; only teachers get to see it
   avatar: string | null; // id of a picture from the clients' built-in set (avatars/<id>.svg)
 }
 
@@ -222,6 +257,7 @@ export interface Seat {
   row: number;   // 0 = верхняя пара, 1 = нижняя пара
   col: number;   // 0 = левый, 1 = правый
   occupant: string | null;
+  reserved: boolean; // kept by the seat plan for a certain student
 }
 
 interface Poll {
@@ -238,6 +274,7 @@ interface LessonRuntime {
   timerEndsAt: number | null;
   participants: Map<string, Participant>;
   seats: Seat[];
+  seatPlan: Map<string, string>; // from the teacher's journal, in memory only: student uuid → seat id
   sharedTexts: Map<string, string>; // per livekit room name
   boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
@@ -253,6 +290,9 @@ interface LessonRuntime {
 }
 
 const lessons = new Map<string, LessonRuntime>();
+
+const isUuid = (v: unknown): v is string =>
+  typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
 
 // Lessons of one teacher held in memory at once. Lessons nobody is in are dropped first
 // (they come back empty — seating, boards and material start over); only lessons that
@@ -293,6 +333,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     timerEndsAt: null,
     participants: new Map(),
     seats: [],
+    seatPlan: new Map(),
     sharedTexts: new Map(),
     boards: new Map(),
     boardConnections: new Map(),
@@ -317,16 +358,46 @@ function roomName(code: string, base: string): string {
 
 function createSeats(lesson: LessonRuntime, n: number) {
   const prev = new Map(lesson.seats.map(s => [s.id, s.occupant]));
+  const planned = new Set(lesson.seatPlan.values());
   lesson.seats = [];
   const numGroups = Math.floor(n / 4);
   for (let g = 0; g < numGroups; g++) {
     for (let row = 0; row < 2; row++) {
       for (let col = 0; col < 2; col++) {
         const id = `g${g}r${row}c${col}`;
-        lesson.seats.push({ id, groupIndex: g, row, col, occupant: prev.get(id) ?? null });
+        lesson.seats.push({ id, groupIndex: g, row, col, occupant: prev.get(id) ?? null, reserved: planned.has(id) });
       }
     }
   }
+}
+
+const MAX_CAPACITY = 400;
+
+/** Whether this seat is kept for someone other than this student */
+function reservedForOther(lesson: LessonRuntime, seat: Seat, uuid: string | null): boolean {
+  return seat.reserved && (uuid === null || lesson.seatPlan.get(uuid) !== seat.id);
+}
+
+/** Sit this student on their planned seat, if they have one and it's free */
+function seatByPlan(lesson: LessonRuntime, p: Participant): boolean {
+  const seatId = p.uuid ? lesson.seatPlan.get(p.uuid) : undefined;
+  const seat = lesson.seats.find(s => s.id === seatId);
+  if (!seat || seat.occupant) return false;
+  for (const s of lesson.seats) if (s.occupant === p.name) s.occupant = null;
+  seat.occupant = p.name;
+  return true;
+}
+
+function applySeatPlan(lesson: LessonRuntime, capacity: unknown, plan: unknown) {
+  // grows only: the teacher may have added seats in this lesson, and nobody loses theirs
+  if (Number.isInteger(capacity) && (capacity as number) > lesson.seats.length && (capacity as number) <= MAX_CAPACITY) {
+    createSeats(lesson, capacity as number);
+  }
+  const entries = plan && typeof plan === 'object' ? Object.entries(plan).slice(0, MAX_CAPACITY) : [];
+  lesson.seatPlan = new Map(entries.filter((e): e is [string, string] => isUuid(e[0]) && typeof e[1] === 'string'));
+  const planned = new Set(lesson.seatPlan.values());
+  for (const seat of lesson.seats) seat.reserved = planned.has(seat.id);
+  for (const p of lesson.participants.values()) if (p.role === 'student') seatByPlan(lesson, p);
 }
 
 function broadcastSeats(code: string, lesson: LessonRuntime) {
@@ -349,9 +420,12 @@ function broadcastState(code: string, lesson: LessonRuntime) {
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
     participants: Array.from(lesson.participants.values()).map(p => ({
-      id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, identified: p.studentId !== null, avatar: p.avatar,
+      id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, avatar: p.avatar,
     })),
   });
+  // Only for the teacher: a student's uuid is what seats them, classmates must not learn it
+  const uuids = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.uuid).map(p => [p.id, p.uuid]));
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('studentUuids', uuids);
 }
 
 // ---------- slides ----------
@@ -688,9 +762,10 @@ function sweepAttempts(store: Map<string, AttemptEntry>) {
 }
 
 io.on('connection', async (socket) => {
-  const { name, role, lessonId, deviceId, token, avatar: rawAvatar } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; deviceId?: string; token?: string; avatar?: unknown };
+  const { name, role, lessonId, uuid: rawUuid, token, avatar: rawAvatar } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; uuid?: unknown; token?: string; avatar?: unknown };
   // only an id from the built-in set travels — never a picture; clients ignore ids they don't know
   const avatar = typeof rawAvatar === 'string' && /^[a-z]{1,20}$/.test(rawAvatar) ? rawAvatar : null;
+  const uuid = role === 'student' && isUuid(rawUuid) ? rawUuid : null;
   const ip = clientIp(socket);
 
   if (isLockedOut(codeAttempts, ip)) {
@@ -778,13 +853,11 @@ io.on('connection', async (socket) => {
     return;
   }
 
-  // Students can be recognized by this device (localStorage UUID), scoped to this lesson's
-  // teacher, so returning students don't need to re-type their name and the teacher doesn't
-  // need to guess who just joined. A shared device can be linked to several students, in
-  // which case the client is asked to pick which one before the join completes.
-  async function finishJoin(effectiveName: string, studentId: number | null, resolvedDeviceId: string | null) {
+  async function finishJoin(effectiveName: string) {
     if (socket.disconnected) return; // left while we were looking things up — nothing to add
-    lesson.participants.set(socket.id, { id: socket.id, name: effectiveName, role, livekitRoom: null, deviceId: resolvedDeviceId, studentId, avatar });
+    const participant: Participant = { id: socket.id, name: effectiveName, role, livekitRoom: null, uuid, avatar };
+    lesson.participants.set(socket.id, participant);
+    if (seatByPlan(lesson, participant)) broadcastSeats(code, lesson);
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
     socket.on('disconnect', () => {
@@ -802,6 +875,15 @@ io.on('connection', async (socket) => {
       console.log(`- [${code}] ${role}: ${effectiveName}`);
       broadcastState(code, lesson);
     });
+    // The seating saved in the teacher's journal. Comes without names: the server only learns
+    // which uuid sits where, the journal stays in the teacher's browser.
+    socket.on('seatPlan', ({ capacity, seats }: { capacity?: unknown; seats?: unknown } = {}) => {
+      if (role !== 'teacher') return;
+      applySeatPlan(lesson, capacity, seats);
+      broadcastSeats(code, lesson);
+    });
+
+    if (role === 'teacher') socket.emit('joined'); // the lines above are listening now: the plan may come
     broadcastState(code, lesson);
     socket.emit('seats', lesson.seats);
 
@@ -847,11 +929,12 @@ io.on('connection', async (socket) => {
 
     socket.on('claimSeat', (seatId: string) => {
       if (role !== 'student') return;
+      const target = lesson.seats.find(s => s.id === seatId);
+      if (target && reservedForOther(lesson, target, uuid)) return; // stay where you are
       // Release current seat
       const current = lesson.seats.find(s => s.occupant === effectiveName);
       if (current) current.occupant = null;
       // Claim new seat if free
-      const target = lesson.seats.find(s => s.id === seatId);
       if (target && !target.occupant) target.occupant = effectiveName;
       broadcastSeats(code, lesson);
     });
@@ -981,18 +1064,6 @@ io.on('connection', async (socket) => {
       }
     });
 
-    // Teacher recognizes an unidentified (or misidentified) participant as a specific
-    // roster student; links that participant's device so future joins auto-resolve.
-    socket.on('adoptParticipant', async ({ participantId, studentId: sid, studentName }: { participantId: string; studentId: number; studentName: string }) => {
-      if (role !== 'teacher') return;
-      const target = lesson.participants.get(participantId);
-      if (!target || !target.deviceId) return;
-      await linkDevice(sid, target.deviceId).catch(() => {});
-      target.name = studentName;
-      target.studentId = sid;
-      broadcastState(code, lesson);
-    });
-
     // Teacher presents slides: open/close, navigate, reveal hidden objects, move ✋ objects.
     socket.on('slides:open', ({ blockId }: { blockId?: string } = {}) => {
       if (role !== 'teacher' || !lesson.material) return;
@@ -1057,23 +1128,7 @@ io.on('connection', async (socket) => {
 
   }
 
-  if (role === 'student' && deviceId && dbLesson.teacherId) {
-    const candidates = await getStudentsForDevice(dbLesson.teacherId, deviceId).catch(() => []);
-    if (candidates.length === 1) {
-      await finishJoin(candidates[0].name, candidates[0].id, deviceId);
-      return;
-    }
-    if (candidates.length > 1) {
-      socket.emit('chooseIdentity', candidates.map(c => ({ id: c.id, name: c.name })));
-      socket.once('confirmIdentity', async ({ studentId: chosenId }: { studentId: number }) => {
-        const chosen = candidates.find(c => c.id === chosenId);
-        await finishJoin(chosen ? chosen.name : name, chosen ? chosen.id : null, deviceId);
-      });
-      return;
-    }
-  }
-
-  await finishJoin(name, null, deviceId ?? null);
+  await finishJoin(name);
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});

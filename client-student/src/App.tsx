@@ -11,7 +11,8 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
-import { AvatarPicker, AvatarProvider, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
+import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
+import { forgetProfile, profiles, saveProfileAvatar, enterProfile } from './profiles';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -110,8 +111,14 @@ function BoardOnlyMode({ room, readOnly }: { room: string; readOnly: boolean }) 
   );
 }
 
-function NameScreen({ onNext }: { onNext: (name: string) => void }) {
+function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
   const [name, setNameInput] = useState('');
+  const [known, setKnown] = useState(profiles);
+  function onNext(n: string) {
+    enterProfile(n);
+    next(n);
+  }
+  const shown = known.filter(p => p.name.toLowerCase().includes(name.trim().toLowerCase()));
 
   return (
     <div style={{
@@ -126,6 +133,25 @@ function NameScreen({ onNext }: { onNext: (name: string) => void }) {
         onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onNext(name.trim()); }}
         style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', width: 240 }}
       />
+      {/* who has used this browser: one click and the name, avatar and seat are theirs */}
+      {shown.length > 0 && (
+        <div style={{ width: 240, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {shown.map(p => (
+            <div key={p.uuid} data-testid="profile" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button onClick={() => onNext(p.name)} style={{
+                flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6,
+                border: '1px solid #ddd', background: '#fff', color: '#222', cursor: 'pointer', fontSize: 14, textAlign: 'left',
+              }}>
+                <img src={(p.avatar && AVATARS[p.avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 22 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+              </button>
+              <button title="Удалить с этого компьютера" aria-label={`Удалить ${p.name} с этого компьютера`}
+                onClick={() => setKnown(forgetProfile(p.uuid))}
+                style={{ border: 'none', background: 'transparent', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
       <button
         onClick={() => name.trim() && onNext(name.trim())}
         disabled={!name.trim()}
@@ -152,7 +178,7 @@ function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media:
       <MediaCheck prefs={media} onChange={onMedia} />
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
       <div style={{ maxWidth: 520 }}>
-        <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); }} />
+        <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
       </div>
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
       <div style={{ width: '100%', maxWidth: 640, height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>

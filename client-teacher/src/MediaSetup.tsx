@@ -26,7 +26,10 @@ const mainButton: CSSProperties = {
 };
 
 // The teacher's start screen after login: check camera/mic, then start a new lesson or join one by code.
-export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnauthorized }: {
+export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnauthorized, journalLabel, onJournal, onLogout }: {
+  journalLabel: string;
+  onJournal: () => void;
+  onLogout: () => void;
   token: string;
   initial: MediaPrefs;
   error: string;
@@ -92,6 +95,9 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
             }}>{VIDEO_MODE_LABELS[m]}</button>
           ))}
         </div>
+        <button data-testid="journal-open" onClick={onJournal} style={{
+          padding: '8px 10px', fontSize: 14, borderRadius: 6, border: '1px solid #ccc', background: '#fff', color: '#222', cursor: 'pointer',
+        }}>{journalLabel}</button>
         <button onClick={createNew} disabled={creating} style={mainButton}>
           {creating ? 'Создаём…' : 'Новое занятие'}
         </button>
@@ -110,6 +116,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
           </button>
         </div>
         {(createError || lessonError) && <div style={{ color: '#e74c3c', fontSize: 13, textAlign: 'center' }}>{createError || lessonError}</div>}
+        <button onClick={onLogout} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Выйти</button>
       </div>
     </div>
   );
