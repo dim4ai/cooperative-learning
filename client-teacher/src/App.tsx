@@ -6,11 +6,14 @@ import { AvatarProvider } from './avatars';
 import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
-import type { Seat } from './SeatingMap';
+import type { Seat, SeatNames } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type VideoMode } from './MediaSetup';
 import { EndLessonDialog } from './EndLessonDialog';
+import { JournalDialog } from './JournalDialog';
+import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
+import { derivePasswordKeys } from './journalCrypto';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
@@ -118,9 +121,9 @@ function ScreenShareSync({ active }: { active: boolean }) {
   return null;
 }
 
-function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode }) {
+function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames }) {
   if (stage === 'waiting') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} names={names} />;
   }
 
   if (stage === 'group') {
@@ -138,11 +141,11 @@ function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRoo
   }
 
   if (stage === 'individual') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} />;
   }
 
   if (stage === 'pairs' || stage === 'fours') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} />;
   }
 
   return (
@@ -160,6 +163,8 @@ interface Teacher {
 
 const TEACHER_KEY = 'teacher';
 const TOKEN_KEY = 'teacherToken';
+const CLASS_KEY = 'journalClass'; // a random id, tells nothing about the class
+const JOURNAL_IDLE_MS = (Number(import.meta.env.VITE_JOURNAL_IDLE_MINUTES) || 60) * 60 * 1000;
 
 function loadSavedTeacher(): Teacher | null {
   try {
@@ -186,7 +191,7 @@ const formButtonStyle: CSSProperties = {
   background: '#4a90e2', color: '#fff', cursor: 'pointer', width: 240,
 };
 
-function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string) => void }) {
+function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string, wrapKey: CryptoKey) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -197,14 +202,20 @@ function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string) => 
     setError('');
     setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
+      // The password stays here: the server gets a key derived from it, and another one opens the journal
+      const { authKey, wrapKey } = await derivePasswordKeys(email, password);
+      const post = (extra: object) => fetch(`${import.meta.env.VITE_API_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), authKey, ...extra }),
       });
+      let res = await post({});
+      // an account made before this scheme: the password goes to the server once, to replace its hash
+      if (res.status === 428) res = await post({ password });
+      if (res.status === 429) { setError('Слишком много попыток — подождите минуту и попробуйте снова'); return; }
       if (!res.ok) { setError('Неверный email или пароль'); return; }
       const { teacher, token } = await res.json();
-      onLogin(teacher, token);
+      onLogin(teacher, token, wrapKey);
     } catch {
       setError('Не удалось подключиться к серверу');
     } finally {
@@ -263,6 +274,13 @@ function StudentTile({ name, color }: { name: string; color?: string }) {
   );
 }
 
+function journalLabel(status: ReturnType<typeof useJournal>['status'], className?: string): string {
+  if (status === 'locked') return '🔒 Журнал закрыт. Открыть';
+  if (status === 'none') return '📒 Создать журнал';
+  if (status === 'open') return `📒 Журнал${className ? `: ${className}` : ''}`;
+  return '📒 Журнал';
+}
+
 export default function App() {
   const [teacher, setTeacher] = useState<Teacher | null>(loadSavedTeacher);
   const [token, setToken] = useState<string | null>(loadSavedToken);
@@ -277,6 +295,7 @@ export default function App() {
   function logout() {
     localStorage.removeItem(TEACHER_KEY);
     localStorage.removeItem(TOKEN_KEY);
+    forgetJournal();
     setTeacher(null);
     setToken(null);
     setLessonCodeReady(null);
@@ -291,6 +310,42 @@ export default function App() {
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
   const slides = useTeacherSlides(lessonCode, token, logout);
+
+  const journal = useJournal();
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [classId, setClassIdState] = useState<string | null>(() => { try { return localStorage.getItem(CLASS_KEY); } catch { return null; } });
+  function setClassId(id: string | null) {
+    setClassIdState(id);
+    try { if (id) localStorage.setItem(CLASS_KEY, id); else localStorage.removeItem(CLASS_KEY); } catch { /* private mode */ }
+  }
+  const currentClass = journal.data?.classes.find(c => c.id === classId) ?? null;
+  const [studentUuids, setStudentUuids] = useState<Record<string, string>>({});
+
+  // After a page reload there's a token but no key: the journal stays locked until asked for
+  useEffect(() => {
+    if (token && journal.status === 'loading') loadJournal(token);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Idle: the key leaves memory. Never during a lesson — the journal shows who is who there.
+  const inLesson = !!lessonCode;
+  useEffect(() => {
+    if (inLesson) return;
+    let last = Date.now();
+    const touch = () => { last = Date.now(); };
+    const events = ['pointerdown', 'keydown'] as const;
+    events.forEach(e => window.addEventListener(e, touch));
+    const timer = setInterval(() => { if (Date.now() - last > JOURNAL_IDLE_MS) lockJournal(); }, 30_000);
+    return () => { events.forEach(e => window.removeEventListener(e, touch)); clearInterval(timer); };
+  }, [inLesson]);
+
+  // The class's saved seating goes to the server: who sits where, without names
+  // (a locked journal says nothing: the server keeps the plan it has)
+  const planJson = journal.status === 'open' ? JSON.stringify(currentClass ? seatPlanOf(currentClass) : { seats: {} }) : '';
+  const [joins, setJoins] = useState(0); // the server is ready for the plan after each (re)join
+  useEffect(() => {
+    if (joins && planJson) socket.emit('seatPlan', JSON.parse(planJson));
+  }, [joins, planJson]);
 
   // Slides are being shown to the class (e.g. after a page reload) — show them here too
   useEffect(() => {
@@ -337,6 +392,8 @@ export default function App() {
     });
     socket.on('state', (s: LessonState) => { setState(s); setConfirmed(true); });
     socket.on('seats', setSeats);
+    socket.on('studentUuids', setStudentUuids);
+    socket.on('joined', () => setJoins(n => n + 1));
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('callTeacher', ({ room, calling }: { room: string; calling: boolean }) => {
       setCallingRooms(prev => {
@@ -345,21 +402,26 @@ export default function App() {
         return next;
       });
     });
-    return () => { socket.disconnect(); socket.off(); setConfirmed(false); };
+    return () => { socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); };
   }, [lessonCode]);
 
   if (!teacher || !token) {
-    return <LoginForm onLogin={(t, tok) => {
+    return <LoginForm onLogin={(t, tok, wrapKey) => {
       localStorage.setItem(TEACHER_KEY, JSON.stringify(t));
       localStorage.setItem(TOKEN_KEY, tok);
       setTeacher(t);
       setToken(tok);
+      loadJournal(tok, wrapKey);
     }} />;
   }
 
   if (!lessonCode) {
-    return <MediaSetup token={token} initial={media} error={lessonError} onUnauthorized={logout}
-      onJoin={(code, p) => { setMedia(p); setLessonErrorState(''); setLessonCodeReady(code); }} />;
+    return (<>
+      <MediaSetup token={token} initial={media} error={lessonError} onUnauthorized={logout}
+        onJoin={(code, p) => { setMedia(p); setLessonErrorState(''); setLessonCodeReady(code); }}
+        journalLabel={journalLabel(journal.status, currentClass?.name)} onJournal={() => setJournalOpen(true)} onLogout={logout} />
+      {journalOpen && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId} onClose={() => setJournalOpen(false)} />}
+    </>);
   }
 
   if (!confirmed) {
@@ -372,6 +434,17 @@ export default function App() {
 
   const students = state.participants.filter(p => p.role === 'student');
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
+
+  // Who is who, seen only here: name in the lesson (what classmates see) → name in the journal
+  const lessonStudents = students.map(p => ({
+    name: p.name, uuid: studentUuids[p.id] ?? null, seat: seats.find(s => s.occupant === p.name)?.id ?? null,
+  }));
+  const journalStudentOf = (uuid: string | null) => uuid ? currentClass?.students.find(s => s.uuids.includes(uuid)) : undefined;
+  const seatNames: SeatNames = {
+    journalName: occupant => journalStudentOf(lessonStudents.find(p => p.name === occupant)?.uuid ?? null)?.name,
+    reservedFor: seatId => currentClass?.students.find(s => s.seat === seatId)?.name,
+  };
+  const notInJournal = currentClass ? lessonStudents.filter(p => p.uuid && !journalStudentOf(p.uuid)).length : 0;
 
   const inner = (
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', overflow: 'hidden' }}>
@@ -394,6 +467,15 @@ export default function App() {
         )}
 
         <MaterialPanel slides={slides} />
+
+        <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
+          marginTop: 8, padding: '6px', borderRadius: 6, border: '1px solid #444', cursor: 'pointer',
+          background: 'transparent', color: journal.status === 'locked' ? '#f0c36d' : '#ccc', fontSize: 12, textAlign: 'left',
+        }}>
+          {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
+        </button>
+        {journalOpen && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
+          lesson={{ students: lessonStudents, capacity: seats.length }} onClose={() => setJournalOpen(false)} />}
 
         {state.stage === 'waiting' && (
           <>
@@ -502,7 +584,7 @@ export default function App() {
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
-                slidesView={<SlidesPresenter slides={slides} />} />
+                slidesView={<SlidesPresenter slides={slides} />} names={seatNames} />
           }
         </div>
       </div>

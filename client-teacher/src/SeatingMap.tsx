@@ -53,13 +53,20 @@ export interface Seat {
   row: number;
   col: number;
   occupant: string | null;
+  reserved?: boolean;
+}
+
+/** From the journal; only the teacher's browser knows these names */
+export interface SeatNames {
+  journalName: (occupant: string) => string | undefined;
+  reservedFor: (seatId: string) => string | undefined;
 }
 
 const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63'];
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -171,6 +178,11 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                       <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
                         {seat.occupant}
                       </div>
+                      {names?.journalName(seat.occupant) && (
+                        <div data-testid="seat-journal-name" style={{ position: 'relative', zIndex: 1, fontSize: 11, color: '#222', textShadow: '0 1px 3px rgba(255,255,255,0.8)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {names.journalName(seat.occupant)}
+                        </div>
+                      )}
                       {!readOnly && (
                         <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
                           <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>
@@ -191,7 +203,10 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                       )}
                     </>
                   ) : (
-                    <div style={{ fontSize: 32, color: isTarget ? '#4a4' : '#ddd', lineHeight: 1 }}>{seatNum}</div>
+                    <>
+                      <div style={{ fontSize: 32, color: isTarget ? '#4a4' : '#ddd', lineHeight: 1 }}>{seatNum}</div>
+                      {names?.reservedFor(seat.id) && <div data-testid="seat-reserved" style={{ fontSize: 11, color: '#999', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{names.reservedFor(seat.id)}</div>}
+                    </>
                   )}
                 </div>
               );
