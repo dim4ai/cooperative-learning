@@ -90,9 +90,57 @@ let hasTeacherSees = false; // the column's CHECK accepts 'teacherSees'
 
 // Same for the journal table: without it lessons work, only the journal is unavailable
 export let hasJournal = false;
+// Same for the demo tables: without them demo lessons are off, everything else works
+export let hasDemo = false;
 
 /** Schema changes the code relies on; idempotent, run on every start */
 export async function migrate(): Promise<void> {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS demo_lessons (
+      code text PRIMARY KEY,
+      ip_hash text,
+      video_mode text NOT NULL,
+      created_at timestamptz NOT NULL,
+      ends_at timestamptz NOT NULL,
+      first_student_at timestamptz,
+      peak_students int NOT NULL DEFAULT 0,
+      ended_at timestamptz,
+      end_reason text,
+      cooldown_until timestamptz,
+      slot_free_at timestamptz
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS demo_feedback (
+      code text PRIMARY KEY,
+      rating int NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      comment text NOT NULL DEFAULT '',
+      email text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS demo_ip_stats (
+      day date NOT NULL,
+      ip_hash text NOT NULL,
+      attempts int NOT NULL DEFAULT 0,
+      refused int NOT NULL DEFAULT 0,
+      penalties int NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, ip_hash)
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS load_samples (
+      at timestamptz PRIMARY KEY,
+      cpu_pct real,
+      mem_used_mb int,
+      rx_pps int,
+      tx_pps int,
+      udp_dropped bigint,
+      real_lessons int NOT NULL,
+      demo_camera int NOT NULL,
+      demo_audio int NOT NULL,
+      teachers int NOT NULL,
+      students int NOT NULL
+    )`);
+    hasDemo = true;
+  } catch (e) {
+    console.error('!!! DB migration failed (demo lessons are off):', e);
+  }
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS teacher_journals (
       teacher_id int PRIMARY KEY REFERENCES teachers(id) ON DELETE CASCADE,
@@ -175,6 +223,89 @@ export async function getLessonByCode(code: string): Promise<Lesson | null> {
 export async function cleanupExpiredLessons(): Promise<number> {
   const { rowCount } = await pool.query(`DELETE FROM lessons WHERE last_active_at < now() - interval '30 days'`);
   return rowCount ?? 0;
+}
+
+export async function deleteLesson(code: string): Promise<void> {
+  await pool.query('DELETE FROM lessons WHERE code = $1', [code]);
+}
+
+// ---------- demo lessons: no account, a limited pool of slots ----------
+
+export interface DemoRecord {
+  code: string;
+  ipHash: string;
+  videoMode: 'teacher' | 'none';
+  createdAt: number;
+  endsAt: number;
+  firstStudentAt: number | null;
+  peakStudents: number;
+  endedAt: number | null;
+  endReason: string | null;
+  cooldownUntil: number;
+  slotFreeAt: number;
+}
+
+const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
+
+export async function saveDemo(d: DemoRecord): Promise<void> {
+  await pool.query(
+    `INSERT INTO demo_lessons (code, ip_hash, video_mode, created_at, ends_at, first_student_at, peak_students,
+       ended_at, end_reason, cooldown_until, slot_free_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (code) DO UPDATE SET first_student_at = $6, peak_students = $7,
+       ended_at = $8, end_reason = $9, cooldown_until = $10, slot_free_at = $11`,
+    [d.code, d.ipHash, d.videoMode, toDate(d.createdAt), toDate(d.endsAt), toDate(d.firstStudentAt), d.peakStudents,
+      toDate(d.endedAt), d.endReason, toDate(d.cooldownUntil), toDate(d.slotFreeAt)],
+  );
+}
+
+/** Lessons still running, or still holding back their address or slot */
+export async function loadCurrentDemos(): Promise<DemoRecord[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM demo_lessons WHERE ip_hash IS NOT NULL
+       AND (ended_at IS NULL OR cooldown_until > now() OR slot_free_at > now())`);
+  const ms = (d: Date | null) => (d ? d.getTime() : null);
+  return rows.map(r => ({
+    code: r.code, ipHash: r.ip_hash, videoMode: r.video_mode,
+    createdAt: r.created_at.getTime(), endsAt: r.ends_at.getTime(),
+    firstStudentAt: ms(r.first_student_at), peakStudents: r.peak_students,
+    endedAt: ms(r.ended_at), endReason: r.end_reason,
+    cooldownUntil: ms(r.cooldown_until) ?? 0, slotFreeAt: ms(r.slot_free_at) ?? 0,
+  }));
+}
+
+export async function saveDemoFeedback(code: string, rating: number, comment: string, email: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO demo_feedback (code, rating, comment, email) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (code) DO UPDATE SET rating = $2, comment = $3, email = $4, created_at = now()`,
+    [code, rating, comment, email]);
+}
+
+export async function addDemoIpStats(ipHash: string, attempts: number, refused: number, penalties: number): Promise<void> {
+  await pool.query(
+    `INSERT INTO demo_ip_stats (day, ip_hash, attempts, refused, penalties) VALUES (current_date, $1, $2, $3, $4)
+     ON CONFLICT (day, ip_hash) DO UPDATE SET attempts = demo_ip_stats.attempts + $2,
+       refused = demo_ip_stats.refused + $3, penalties = demo_ip_stats.penalties + $4`,
+    [ipHash, attempts, refused, penalties]);
+}
+
+export interface LoadSample {
+  cpuPct: number | null; memUsedMb: number | null; rxPps: number | null; txPps: number | null; udpDropped: number | null;
+  realLessons: number; demoCamera: number; demoAudio: number; teachers: number; students: number;
+}
+
+export async function saveLoadSample(s: LoadSample): Promise<void> {
+  await pool.query(
+    `INSERT INTO load_samples (at, cpu_pct, mem_used_mb, rx_pps, tx_pps, udp_dropped, real_lessons, demo_camera, demo_audio, teachers, students)
+     VALUES (now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [s.cpuPct, s.memUsedMb, s.rxPps, s.txPps, s.udpDropped, s.realLessons, s.demoCamera, s.demoAudio, s.teachers, s.students]);
+}
+
+/** Load samples and per-address counts live 30 days; a finished lesson keeps its numbers, not its address */
+export async function cleanupDemoLogs(): Promise<void> {
+  await pool.query(`DELETE FROM load_samples WHERE at < now() - interval '30 days'`);
+  await pool.query(`DELETE FROM demo_ip_stats WHERE day < current_date - 30`);
+  await pool.query(`UPDATE demo_lessons SET ip_hash = NULL WHERE ended_at < now() - interval '30 days'`);
 }
 
 // ---------- teacher's journal ----------

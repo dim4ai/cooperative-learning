@@ -15,7 +15,8 @@ function loadMinutes(): number {
 
 // Asked every time the teacher ends a lesson: end it for everyone now, or let students talk
 // in their fours for a few minutes (the last chosen number of minutes is suggested).
-export function EndLessonDialog({ onEnd, onCancel }: {
+export function EndLessonDialog({ noChat = false, onEnd, onCancel }: {
+  noChat?: boolean; // a demo lesson ends on its hour, without the chat
   onEnd: (chatMinutes: number) => void;
   onCancel: () => void;
 }) {
@@ -38,6 +39,9 @@ export function EndLessonDialog({ onEnd, onCancel }: {
         display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif',
       }}>
         <h3 style={{ margin: 0 }}>Завершить урок</h3>
+        {noChat ? <div style={{ fontSize: 13, color: '#666' }}>
+          Демо-урок закончится для всех. Новый с этого адреса можно будет начать через час.
+        </div> : <>
         <div style={{ fontSize: 13, color: '#666' }}>
           Можно дать ученикам немного поговорить в своих четвёрках — вы при этом выйдете из занятия и их не услышите.
         </div>
@@ -56,6 +60,7 @@ export function EndLessonDialog({ onEnd, onCancel }: {
           <span style={{ fontSize: 14 }}>мин</span>
         </div>
         {!valid && <div style={{ fontSize: 12, color: '#e74c3c' }}>От 1 до {MAX_MINUTES} минут</div>}
+        </>}
 
         <button onClick={() => onEnd(0)} style={{ ...btn, background: '#e74c3c' }}>Завершить для всех сразу</button>
         <button onClick={onCancel} style={{ ...btn, background: 'transparent', color: '#666', border: '1px solid #ccc' }}>Отмена</button>
