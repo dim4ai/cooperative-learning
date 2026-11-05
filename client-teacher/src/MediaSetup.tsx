@@ -3,9 +3,10 @@ import type { CSSProperties } from 'react';
 import { MediaCheck, saveMediaPrefs } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
-export type VideoMode = 'all' | 'teacher' | 'none';
+export type VideoMode = 'all' | 'teacherSees' | 'teacher' | 'none';
 export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
   all: 'С видео',
+  teacherSees: 'Учеников видит только учитель',
   teacher: 'Камера только у учителя',
   none: 'Без видео',
 };
@@ -14,7 +15,7 @@ const VIDEO_MODE_KEY = 'videoMode';
 function loadVideoMode(): VideoMode {
   try {
     const v = localStorage.getItem(VIDEO_MODE_KEY);
-    return v === 'teacher' || v === 'none' ? v : 'all';
+    return v && v in VIDEO_MODE_LABELS ? v as VideoMode : 'all';
   } catch {
     return 'all';
   }

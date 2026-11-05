@@ -72,8 +72,9 @@ export async function createTeacher(email: string, password: string, name: strin
 }
 
 /** Who may show video in a lesson — chosen when it's created, fixed for its whole life */
-export type VideoMode = 'all' | 'teacher' | 'none';
-export const VIDEO_MODES: readonly VideoMode[] = ['all', 'teacher', 'none'];
+// teacher: only the teacher's camera exists. teacherSees: students' cameras go to the teacher alone
+export type VideoMode = 'all' | 'teacherSees' | 'teacher' | 'none';
+export const VIDEO_MODES: readonly VideoMode[] = ['all', 'teacherSees', 'teacher', 'none'];
 
 export interface Lesson {
   id: number;
@@ -85,6 +86,7 @@ export interface Lesson {
 // Whether lessons.video_mode exists. If adding it failed (no rights on that DB), lessons keep
 // working as before — all with video — instead of failing to be created or found.
 let hasVideoMode = false;
+let hasTeacherSees = false; // the column's CHECK accepts 'teacherSees'
 
 // Same for the journal table: without it lessons work, only the journal is unavailable
 export let hasJournal = false;
@@ -112,6 +114,13 @@ export async function migrate(): Promise<void> {
     if (!rowCount) throw e;
   }
   hasVideoMode = true;
+  try {
+    await pool.query(`ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_video_mode_check,
+      ADD CONSTRAINT lessons_video_mode_check CHECK (video_mode IN ('all', 'teacherSees', 'teacher', 'none'))`);
+    hasTeacherSees = true;
+  } catch (e) {
+    console.error('!!! DB migration failed (teacherSees falls back to the teacher-only mode):', e);
+  }
 }
 
 const CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o/1/i/l, less error-prone when read aloud
@@ -128,6 +137,7 @@ export class LessonLimitError extends Error {}
 export const MAX_LESSONS_PER_TEACHER = Number(process.env.MAX_LESSONS_PER_TEACHER) || 1000;
 
 export async function createLesson(teacherId: number | null = null, videoMode: VideoMode = 'all'): Promise<Lesson> {
+  if (videoMode === 'teacherSees' && !hasTeacherSees) videoMode = 'teacher';
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateLessonCode();
     try {

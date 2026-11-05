@@ -583,7 +583,22 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
 
 /** May this participant show their camera in this lesson? */
 function canVideo(lesson: LessonRuntime, role: Role): boolean {
-  return lesson.videoMode === 'all' || (lesson.videoMode === 'teacher' && role === 'teacher');
+  return lesson.videoMode === 'all' || (lesson.videoMode !== 'none' && role === 'teacher');
+}
+
+/** Second connection of a student: publishes the camera for the teacher, receives nothing */
+async function makeCameraOnlyToken(identity: string, room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity });
+  token.addGrant({ roomJoin: true, room, canPublish: true, canPublishData: false, canSubscribe: false,
+    canPublishSources: [TrackSource.CAMERA] });
+  return await token.toJwt();
+}
+
+/** The teacher watches the students' cameras and publishes nothing there */
+async function makeCameraViewerToken(identity: string, room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity });
+  token.addGrant({ roomJoin: true, room, canPublish: false, canPublishData: false, canSubscribe: true });
+  return await token.toJwt();
 }
 
 /** Without video the token itself forbids the camera, so no client can switch it on anyway */
@@ -914,9 +929,17 @@ io.on('connection', async (socket) => {
     await livekit.createRoom({ name: mainRoom }).catch(() => {});
     // Monitor token — student stays visible to teacher in main-room even during pair work.
     // It only carries the camera, so without video there is nothing to monitor.
-    if (canVideo(lesson, role)) {
-      const monToken = await makeLivekitToken(effectiveName, mainRoom);
-      socket.emit('monitor', { url: LIVEKIT_WS_URL, token: monToken, room: mainRoom });
+    if (lesson.videoMode === 'teacherSees') {
+      // A room of its own: no token but the teacher's can watch it, so classmates can't see each other
+      const camsRoom = roomName(code, 'class-cams');
+      await livekit.createRoom({ name: camsRoom }).catch(() => {});
+      if (role === 'teacher') {
+        socket.emit('classCams', { url: LIVEKIT_WS_URL, token: await makeCameraViewerToken(effectiveName, camsRoom), room: camsRoom });
+      } else if (role === 'student') {
+        socket.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(effectiveName, camsRoom), room: camsRoom });
+      }
+    } else if (role === 'student' && canVideo(lesson, role)) {
+      socket.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(effectiveName, mainRoom), room: mainRoom });
     }
     await sendToRoom(code, lesson, socket.id, mainRoom);
 

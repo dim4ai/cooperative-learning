@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useLocalParticipant } from '@livekit/components-react';
+import { VideoPresets } from 'livekit-client';
 
 export interface MediaPrefs {
   camOn: boolean;
@@ -35,8 +36,21 @@ export function deviceConstraint(id: string): ConstrainDOMString | undefined {
 // LiveKitRoom `options` that make the chosen devices the default for publishing
 export function captureOptions(p: MediaPrefs) {
   return {
-    videoCaptureDefaults: { deviceId: deviceConstraint(p.camId) },
+    // send and receive only the quality somebody is actually looking at: video is the server's main load
+    adaptiveStream: true,
+    dynacast: true,
+    videoCaptureDefaults: { deviceId: deviceConstraint(p.camId), resolution: VideoPresets.h360.resolution },
     audioCaptureDefaults: { deviceId: deviceConstraint(p.micId) },
+  };
+}
+
+// The second connection, for the teacher's small tile: one 180p stream
+export function monitorOptions(p: MediaPrefs) {
+  const options = captureOptions(p);
+  return {
+    ...options,
+    videoCaptureDefaults: { ...options.videoCaptureDefaults, resolution: VideoPresets.h180.resolution },
+    publishDefaults: { simulcast: false, videoEncoding: VideoPresets.h180.encoding },
   };
 }
 
