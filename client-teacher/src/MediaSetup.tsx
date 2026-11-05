@@ -79,7 +79,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'center',
-      justifyContent: 'center', gap: '24px 64px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
+      justifyContent: 'center', gap: '24px 128px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
     }}>
       <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Камера и микрофон</h3>

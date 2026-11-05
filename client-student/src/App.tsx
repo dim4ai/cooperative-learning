@@ -172,7 +172,7 @@ function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media:
   return (
     <div style={{
       height: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start',
-      justifyContent: 'center', gap: '24px 64px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
+      justifyContent: 'center', gap: '24px 128px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
     }}>
       <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Камера и микрофон</h3>
