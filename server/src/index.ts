@@ -388,6 +388,7 @@ const demos = new Map<string, DemoRecord>();
 const bookings = new Map<string, BookingRecord>();
 const DEMO_SOLO_MS = envNumber('DEMO_SOLO_MINUTES', 30) * MINUTE_MS;
 const DEMO_SOLO_ABSENT_MS = envNumber('DEMO_SOLO_ABSENT_MINUTES', 2) * MINUTE_MS;
+const DEMO_SOLO_NO_TEACHER_MS = envNumber('DEMO_SOLO_NO_TEACHER_MINUTES', 1) * MINUTE_MS;
 const DEMO_SOLO_MAX = envNumber('DEMO_SOLO_MAX', 50);
 const DEMO_SOLO_PER_IP = envNumber('DEMO_SOLO_PER_IP', 3); // a school shares one address
 const SOLO_STAGES = ['waiting', 'group', 'individual', 'pairs', 'fours'];
@@ -1650,6 +1651,8 @@ function bookingTick(now: number) {
   }
 }
 
+const serverStartedAt = Date.now(); // after a restart lessons are out of memory until their teacher reconnects
+
 function demoTick() {
   const now = Date.now();
   bookingTick(now);
@@ -1657,6 +1660,11 @@ function demoTick() {
     if (code.startsWith('pending:')) continue;
     if (demo.endedAt !== null) {
       if (demo.cooldownUntil <= now && demo.slotFreeAt <= now) demos.delete(code);
+      continue;
+    }
+    // A request alone doesn't hold a place: without this, a few addresses could fill the pool for free
+    if (demo.videoMode === 'solo' && !lessons.has(code) && now - Math.max(demo.createdAt, serverStartedAt) >= DEMO_SOLO_NO_TEACHER_MS) {
+      closeDemo(code, 'teacher never came');
       continue;
     }
     const reason = now >= demo.endsAt ? 'time is up'
