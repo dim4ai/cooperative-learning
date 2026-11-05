@@ -107,6 +107,7 @@ async function requireTeacherOrDemo(req: AuthedRequest, res: Response, next: Nex
 }
 
 const app = express();
+app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -1422,6 +1423,16 @@ app.post('/demo/feedback', async (req, res) => {
   const saved = await saveDemoFeedback(code, rating, text(comment, 4000), text(email, 200)).then(() => true, () => false);
   if (!saved) { res.status(500).json({ error: 'failed to save feedback' }); return; }
   res.json({ ok: true });
+});
+
+// Last in the chain, after every route. Clients only look at the status (413 is
+// "the lesson is too big"), so it stays; the details stay in the server log.
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) { next(err); return; }
+  const raw = (err as { status?: unknown } | null)?.status;
+  const status = typeof raw === 'number' && raw >= 400 && raw < 500 ? raw : 500;
+  if (status === 500) console.error('!!! request failed:', err);
+  res.status(status).json({ error: status === 500 ? 'server error' : status === 413 ? 'too large' : 'bad request' });
 });
 
 function demoTick() {
