@@ -4,17 +4,23 @@ import { Track } from 'livekit-client';
 import { socket } from './socket';
 import { SpeakingRing } from './speaking';
 import { useAvatarUrl } from './avatars';
+import { ClassCamVideo, useClassCam } from './classCams';
 
 function SeatVideo({ identity }: { identity: string }) {
   const tracks = useTracks([Track.Source.Camera]);
   const trackRef = tracks.find(t => t.participant.identity === identity);
+  const classCam = useClassCam(identity);
   const avatar = useAvatarUrl(identity);
   return (<>
     {/* in the tile's centered column, above the name */}
-    {!trackRef && avatar && <img src={avatar} alt="" data-testid="avatar" style={{
+    {!trackRef && !classCam && avatar && <img src={avatar} alt="" data-testid="avatar" style={{
       position: 'relative', zIndex: 1, height: 52, marginBottom: 2, pointerEvents: 'none',
     }} />}
     {trackRef && <VideoTrack trackRef={trackRef} style={{
+      position: 'absolute', inset: 0, width: '100%', height: '100%',
+      objectFit: 'cover', borderRadius: 5,
+    }} />}
+    {classCam && <ClassCamVideo track={classCam} style={{
       position: 'absolute', inset: 0, width: '100%', height: '100%',
       objectFit: 'cover', borderRadius: 5,
     }} />}

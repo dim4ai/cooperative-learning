@@ -14,7 +14,7 @@ import { Board } from './slides/Board';
 import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
 import { forgetProfile, profiles, saveProfileAvatar, enterProfile } from './profiles';
 import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
-import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
+import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
 function MicControl({ enabled }: { enabled: boolean }) {
@@ -61,7 +61,7 @@ type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
 interface LessonState {
   stage: Stage;
   /** Who may show video in this lesson; students only when 'all' */
-  videoMode?: 'all' | 'teacher' | 'none';
+  videoMode?: 'all' | 'teacherSees' | 'teacher' | 'none';
   timerEndsAt: number | null;
   /** After-lesson chat in fours: the teacher has left, the lesson ends at this time */
   afterUntil?: number | null;
@@ -231,11 +231,16 @@ export default function App() {
   function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const roomOptions = useMemo(() => captureOptions(media), [media.camId, media.micId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const monitorRoomOptions = useMemo(() => monitorOptions(media), [media.camId, media.micId]);
   const [waitingForLesson, setWaitingForLesson] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
   const afterLeft = useTimer(lessonState.afterUntil ?? null);
-  const camAllowed = (lessonState.videoMode ?? 'all') === 'all';
+  const videoMode = lessonState.videoMode ?? 'all';
+  const camAllowed = videoMode === 'all' || videoMode === 'teacherSees';
+  // teacherSees: the camera goes out through the monitor connection only, never to classmates
+  const camInClass = videoMode === 'all';
   const slides = useStudentSlides(joined);
 
   useEffect(() => {
@@ -381,6 +386,9 @@ export default function App() {
         <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
           {students.length} уч.
         </span>
+        {livekit && videoMode === 'teacherSees' && media.camOn && (
+          <span data-testid="teacher-sees-you" style={{ color: '#888', fontSize: 12 }}>Вас видит только учитель</span>
+        )}
         {livekit && camAllowed && (
           <button
             onClick={() => setMedia({ ...media, camOn: !media.camOn })}
@@ -469,7 +477,7 @@ export default function App() {
             connect={true}
             video={media.camOn && camAllowed}
             audio={false}
-            options={roomOptions}
+            options={monitorRoomOptions}
             style={{ display: 'none' }}
           >
             <LocalMediaSync camOn={media.camOn && camAllowed} />
@@ -481,14 +489,14 @@ export default function App() {
             serverUrl={livekit.url}
             token={livekit.token}
             connect={true}
-            video={media.camOn && camAllowed}
+            video={media.camOn && camInClass}
             audio={false}
             options={roomOptions}
             style={{ height: '100%' }}
           >
             <RoomAudioRenderer />
             <MicControl enabled={micOn} />
-            <LocalMediaSync camOn={media.camOn && camAllowed} />
+            <LocalMediaSync camOn={media.camOn && camInClass} />
             {lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />

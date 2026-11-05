@@ -9,6 +9,7 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat, SeatNames } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
+import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type VideoMode } from './MediaSetup';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
@@ -47,6 +48,14 @@ const LESSON_STAGES: { value: Stage; label: string }[] = [
   { value: 'fours',      label: 'Четвёрки' },
 ];
 
+/** A student's camera in the teacherSees mode comes from another room than the pair's */
+function PairCamOrName({ identity, name }: { identity: string; name: string }) {
+  const cam = useClassCam(identity);
+  return cam
+    ? <ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    : <NameCard name={name} identity={identity} />;
+}
+
 function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -64,7 +73,7 @@ function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
           <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
             {isTrackReference(t) && !t.publication.isMuted
               ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <NameCard name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} identity={t.participant.identity} />}
+              : <PairCamOrName identity={t.participant.identity} name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
             <SpeakingRing identity={t.participant.identity} />
             <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
               {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
@@ -307,6 +316,8 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [seats, setSeats] = useState<Seat[]>([]);
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
+  const [camsInfo, setCamsInfo] = useState<CamsInfo | null>(null);
+  const classCams = useClassCamsRoom(camsInfo);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
   const slides = useTeacherSlides(lessonCode, token, logout);
@@ -395,6 +406,7 @@ export default function App() {
     socket.on('studentUuids', setStudentUuids);
     socket.on('joined', () => setJoins(n => n + 1));
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
+    socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
     socket.on('callTeacher', ({ room, calling }: { room: string; calling: boolean }) => {
       setCallingRooms(prev => {
         const next = new Set(prev);
@@ -402,7 +414,7 @@ export default function App() {
         return next;
       });
     });
-    return () => { socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); };
+    return () => { socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); setCamsInfo(null); };
   }, [lessonCode]);
 
   if (!teacher || !token) {
@@ -592,9 +604,9 @@ export default function App() {
     </div>
   );
 
-  if (!livekit) return <AvatarProvider participants={state.participants}>{inner}</AvatarProvider>;
+  if (!livekit) return <AvatarProvider participants={state.participants}><ClassCams.Provider value={classCams}>{inner}</ClassCams.Provider></AvatarProvider>;
 
-  return (<AvatarProvider participants={state.participants}>
+  return (<AvatarProvider participants={state.participants}><ClassCams.Provider value={classCams}>
     <LiveKitRoom
       key={livekit.room}
       serverUrl={livekit.url}
@@ -609,5 +621,5 @@ export default function App() {
       <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn} />
       {inner}
     </LiveKitRoom>
-  </AvatarProvider>);
+  </ClassCams.Provider></AvatarProvider>);
 }
