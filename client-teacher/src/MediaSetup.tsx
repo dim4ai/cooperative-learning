@@ -6,7 +6,7 @@ import type { MediaPrefs } from './mediaCheck';
 export type VideoMode = 'all' | 'teacher' | 'none';
 export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
   all: 'С видео',
-  teacher: 'Видео только у учителя',
+  teacher: 'Камера только у учителя',
   none: 'Без видео',
 };
 const VIDEO_MODE_KEY = 'videoMode';
