@@ -84,8 +84,11 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
 
   const numGroups = Math.max(...seats.map(s => s.groupIndex)) + 1;
 
-  function handleOccupiedClick(studentName: string) {
-    setSelected(prev => prev === studentName ? null : studentName);
+  function handleOccupiedClick(studentName: string, seatId: string) {
+    if (selected && selected !== studentName) {
+      socket.emit('moveSeat', { studentName: selected, toSeatId: seatId }); // the two swap
+      setSelected(null);
+    } else setSelected(prev => prev === studentName ? null : studentName);
   }
 
   function handleEmptyClick(seatId: string) {
@@ -101,7 +104,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
   }
 
   return (
-    <div style={{ position: 'relative', padding: `${showSelf ? 200 : 16}px 16px 16px`, boxSizing: 'border-box' }}>
+    <div data-testid="seating-map" style={{ position: 'relative', height: '100%', overflow: 'auto', padding: `${showSelf ? 200 : 16}px 16px 16px`, boxSizing: 'border-box' }}>
       <style>{`
         @keyframes pairPulse {
           0%, 100% { border-color: #f39c12; box-shadow: 0 0 0 2px #f39c1266; }
@@ -157,12 +160,12 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               if (!seat) return null;
               const seatNum = row * 2 + col + 1;
               const isSelected = !!selected && seat.occupant === selected;
-              const isTarget = !seat.occupant && !!selected;
+              const isTarget = !!selected && seat.occupant !== selected;
               const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
               return (
                 <div key={seat.id}
-                  onClick={() => readOnly ? undefined : seat.occupant ? handleOccupiedClick(seat.occupant) : handleEmptyClick(seat.id)}
+                  onClick={() => readOnly ? undefined : seat.occupant ? handleOccupiedClick(seat.occupant, seat.id) : handleEmptyClick(seat.id)}
                   style={{
                     width: 160, height: 120,
                     background: '#f5f5f5',
