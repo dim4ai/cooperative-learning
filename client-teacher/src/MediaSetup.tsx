@@ -78,19 +78,22 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', gap: 14, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
+      minHeight: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'center',
+      justifyContent: 'center', gap: '24px 64px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
     }}>
-      <h2 style={{ margin: 0 }}>Настройка камеры и микрофона</h2>
-      <div style={{ color: '#888', fontSize: 13 }}>Проверьте себя перед занятием</div>
-
-      <MediaCheck prefs={prefs} onChange={setPrefs} />
+      <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0 }}>Камера и микрофон</h3>
+        <div style={{ color: '#888', fontSize: 13 }}>Проверьте себя перед занятием</div>
+        <MediaCheck prefs={prefs} onChange={setPrefs} />
+      </div>
 
       <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div role="radiogroup" aria-label="Видео на занятии" style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+        <h3 style={{ margin: 0 }}>Занятие</h3>
+        <div style={{ color: '#888', fontSize: 13 }}>Видео на занятии</div>
+        <div role="radiogroup" aria-label="Видео на занятии" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {(Object.keys(VIDEO_MODE_LABELS) as VideoMode[]).map(m => (
             <button key={m} role="radio" aria-checked={videoMode === m} onClick={() => setVideoMode(m)} style={{
-              flex: 1, padding: '6px 4px', fontSize: 12, borderRadius: 6, cursor: 'pointer', lineHeight: 1.2,
+              padding: '8px 6px', fontSize: 13, borderRadius: 6, cursor: 'pointer', lineHeight: 1.2,
               border: videoMode === m ? '1px solid #4a90e2' : '1px solid #ccc',
               background: videoMode === m ? '#e7f1fc' : '#fff', color: '#222',
             }}>{VIDEO_MODE_LABELS[m]}</button>
