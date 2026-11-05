@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { NameCard, SpeakingRing } from './speaking';
@@ -11,7 +11,7 @@ import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoFinished, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
@@ -60,7 +60,7 @@ function PairCamOrName({ identity, name }: { identity: string; name: string }) {
     : <NameCard name={name} identity={identity} />;
 }
 
-function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
+function TeacherPairContent({ onLeave, others }: { onLeave: () => void; others: string[] }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
 
@@ -82,6 +82,11 @@ function TeacherPairContent({ onLeave }: { onLeave: () => void }) {
             <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
               {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
             </div>
+          </div>
+        ))}
+        {others.map(name => (
+          <div key={name} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3', flexShrink: 0 }}>
+            <NameCard name={name} identity={name} />
           </div>
         ))}
         <div style={{ marginTop: 'auto' }}>
@@ -319,7 +324,9 @@ export default function App() {
   const [token, setToken] = useState<string | null>(loadSavedToken);
   const [demo, setDemoState] = useState<DemoStart | null>(loadSavedDemo);
   function setDemo(d: DemoStart | null) { setDemoState(d); saveDemo(d); }
-  const [demoSetup, setDemoSetup] = useState(() => !loadSavedDemo() && (new URLSearchParams(location.search).has('demo') || hasBookingLink()));
+  // null: not in the demo; 'choice': alone or with a class; 'book': the booking screen
+  const [demoScreen, setDemoScreen] = useState<'choice' | 'book' | null>(() =>
+    loadSavedDemo() ? null : hasBookingLink() ? 'book' : new URLSearchParams(location.search).has('demo') ? 'choice' : null);
   const [demoEnd, setDemoEnd] = useState<DemoEnd | null>(null);
   const lessonToken = demo?.token ?? token; // a demo lesson is run with its own token, not an account's
   const [lessonCode, setLessonCodeReady] = useState<string | null>(demo?.code ?? null);
@@ -351,6 +358,7 @@ export default function App() {
   const classCams = useClassCamsRoom(camsInfo);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
+  const [callNotes, setCallNotes] = useState<Record<string, string>>({}); // what the solo demo's class is asking
   const slides = useTeacherSlides(lessonCode, lessonToken, logout);
 
   const journal = useJournal();
@@ -402,6 +410,17 @@ export default function App() {
 
   const [endDialog, setEndDialog] = useState(false);
 
+  // The solo demo's class works on the sample lesson, so it is open from the start
+  const soloLoaded = useRef<string | null>(null);
+  useEffect(() => {
+    if (!demo?.solo || !confirmed || !lessonCode || soloLoaded.current === lessonCode) return;
+    soloLoaded.current = lessonCode;
+    fetch('/demo/parallelogram.colesson')
+      .then(res => res.ok ? res.blob() : Promise.reject(new Error('no sample lesson')))
+      .then(blob => slides.open(new File([blob], 'parallelogram.colesson')))
+      .catch(e => console.error('sample lesson not loaded:', e));
+  }, [demo, confirmed, lessonCode, slides]);
+
   /** The demo is over, whoever or whatever ended it: on to the feedback form */
   function finishDemo(info?: { reason?: string | null }) {
     if (!demo) return;
@@ -434,7 +453,7 @@ export default function App() {
     socket.on('disconnect', () => setConnected(false));
     socket.on('lessonError', ({ error, minutesLeft }: { error: string; minutesLeft?: number }) => {
       if (demo && error === 'lesson ended') { finishDemo(); return; }
-      if (demo) { setDemo(null); setDemoSetup(true); setLessonCodeReady(null); return; }
+      if (demo) { setDemo(null); setDemoScreen('choice'); setLessonCodeReady(null); return; }
       if (error === 'unauthorized') {
         logout();
         return;
@@ -462,7 +481,12 @@ export default function App() {
     socket.on('joined', () => setJoins(n => n + 1));
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
-    socket.on('callTeacher', ({ room, calling }: { room: string; calling: boolean }) => {
+    socket.on('callTeacher', ({ room, calling, note }: { room: string; calling: boolean; note?: string }) => {
+      setCallNotes(prev => {
+        const next = { ...prev };
+        if (calling && note) next[room] = note; else delete next[room];
+        return next;
+      });
       setCallingRooms(prev => {
         const next = new Set(prev);
         calling ? next.add(room) : next.delete(room);
@@ -473,20 +497,31 @@ export default function App() {
   }, [lessonCode]);
 
   if (!lessonCode && demoEnd) {
-    return <DemoFinished end={demoEnd} onAgain={() => { setDemoEnd(null); setDemoSetup(true); }} />;
+    return <DemoFinished end={demoEnd} onAgain={() => { setDemoEnd(null); setDemoScreen('choice'); }} />;
   }
 
-  if (!lessonCode && demoSetup) {
-    return <BookingScreen initial={media} onBack={() => setDemoSetup(false)} onStart={(d, p) => {
+  if (!lessonCode && demoScreen === 'choice') {
+    return <DemoChoice onBack={() => setDemoScreen(null)} onBook={() => setDemoScreen('book')} onSolo={async () => {
+      const started = await startSolo();
+      if ('error' in started) return started.error;
+      setDemo({ ...started, solo: true });
+      setDemoScreen(null);
+      setLessonCodeReady(started.code);
+      return null;
+    }} />;
+  }
+
+  if (!lessonCode && demoScreen === 'book') {
+    return <BookingScreen initial={media} onBack={() => setDemoScreen('choice')} onStart={(d, p) => {
       setMedia(p);
       setDemo(d);
-      setDemoSetup(false);
+      setDemoScreen(null);
       setLessonCodeReady(d.code);
     }} />;
   }
 
   if (!lessonCode && (!teacher || !token)) {
-    return <LoginForm onDemo={() => setDemoSetup(true)} onLogin={(t, tok, wrapKey) => {
+    return <LoginForm onDemo={() => setDemoScreen('choice')} onLogin={(t, tok, wrapKey) => {
       localStorage.setItem(TEACHER_KEY, JSON.stringify(t));
       localStorage.setItem(TOKEN_KEY, tok);
       setTeacher(t);
@@ -557,7 +592,7 @@ export default function App() {
         {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
           lesson={{ students: lessonStudents, capacity: seats.length }} onClose={() => setJournalOpen(false)} />}
 
-        {state.stage === 'waiting' && (
+        {state.stage === 'waiting' && !demo?.solo && (
           <>
             <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Мест в классе</div>
             <CapacityInput />
@@ -606,9 +641,9 @@ export default function App() {
           </>
         )}
 
-        {livekit && <SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} />}
+        {livekit && !demo?.solo && <SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} />}
 
-        {livekit && (
+        {livekit && !demo?.solo && (
           <button
             onClick={() => socket.emit('mute', { target: 'all' })}
             style={{
@@ -663,13 +698,14 @@ export default function App() {
             const base = livekit?.room.split(':')[1] ?? '';
             return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
           })()
-            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} />
+            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
                 slidesView={<SlidesPresenter slides={slides} />} names={seatNames} />
           }
         </div>
       </div>
 
+      {demo?.solo && <SoloGuide stage={state.stage} calls={Object.values(callNotes)} />}
     </div>
   );
 
@@ -682,12 +718,12 @@ export default function App() {
       token={livekit.token}
       connect={true}
       video={media.camOn && camAllowed}
-      audio={media.micOn}
+      audio={media.micOn && !demo?.solo}
       options={roomOptions}
       style={{ display: 'contents' }}
     >
       <RoomAudioRenderer />
-      <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn} />
+      <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn && !demo?.solo} />
       {inner}
     </LiveKitRoom>
   </ClassCams.Provider></AvatarProvider>);

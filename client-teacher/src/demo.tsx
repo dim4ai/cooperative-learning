@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 
-export interface DemoTimes { endsAt: number; noStudentsAt: number | null }
+export interface DemoTimes { endsAt: number; noStudentsAt: number | null; solo?: boolean }
 export interface DemoEnd { token: string; reason: string | null }
 
 const WARN_LAST_MS = 5 * 60 * 1000;
@@ -37,6 +37,7 @@ export function DemoBanner({ times, clockSkew }: { times: DemoTimes; clockSkew: 
 
 function endText({ reason }: DemoEnd): string {
   return reason === 'time is up' ? 'Час закончился.'
+    : reason === 'no teacher' ? 'Вы вышли из урока, поэтому он завершился.'
     : reason === 'no students' ? 'За 15 минут после начала никто не вошёл, поэтому занятие закрылось.'
     : 'Демо-урок завершён.';
 }
@@ -108,3 +109,108 @@ const screen: CSSProperties = {
 const input: CSSProperties = {
   fontSize: 14, padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box', width: '100%', fontFamily: 'inherit',
 };
+
+// ---------- how to try it: alone at once, or with a class on a booked time ----------
+
+export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<string | null>; onBook: () => void; onBack: () => void }) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState('');
+  async function solo() {
+    setStarting(true);
+    setError((await onSolo()) ?? '');
+    setStarting(false);
+  }
+  return (
+    <div style={screen}>
+      <div style={{ width: 460, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={{ margin: 0 }}>Попробовать Co-Learn</h2>
+        <div style={card}>
+          <b>Одному, прямо сейчас</b>
+          <div style={cardText}>
+            Проведите короткий урок с виртуальным классом: восемь учеников сядут за парты, будут решать и звать вас на помощь.
+            Камера и микрофон не нужны, займёт 10–15 минут.
+          </div>
+          <button data-testid="solo-start" onClick={solo} disabled={starting} style={{ ...primary, opacity: starting ? 0.5 : 1 }}>
+            {starting ? 'Собираем класс…' : 'Начать урок с виртуальным классом'}
+          </button>
+          {error && <div data-testid="solo-error" style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+        </div>
+        <div style={card}>
+          <b>Со своим классом</b>
+          <div style={cardText}>
+            Забронируйте время: код для учеников будет сразу, а место останется за вами. До 32 учеников, урок идёт час.
+          </div>
+          <button data-testid="book-open" onClick={onBook} style={{ ...primary, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2' }}>
+            Забронировать занятие
+          </button>
+        </div>
+        <button onClick={onBack} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Назад</button>
+      </div>
+    </div>
+  );
+}
+
+export async function startSolo(): Promise<{ code: string; token: string } | { error: string }> {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && body.token) return { code: body.code, token: body.token };
+    if (body.error === 'slow down') return { error: 'Слишком много попыток, подождите немного' };
+    if (body.error === 'ip busy' || body.error === 'busy') return { error: 'Сейчас слишком много пробных уроков, попробуйте через минуту' };
+    return { error: 'Не удалось начать, попробуйте ещё раз' };
+  } catch {
+    return { error: 'Нет связи с сервером' };
+  }
+}
+
+const GUIDE: Record<string, { title: string; steps: string[] }> = {
+  waiting: { title: 'Рассадка', steps: [
+    'Ученики заходят и садятся сами. Рядом сидят пары, две пары образуют четвёрку.',
+    'Попробуйте пересадить кого-нибудь: кликните по ученику, потом по другому месту.',
+    'Когда все сядут, нажмите слева «Начать урок».',
+  ] },
+  group: { title: 'Объяснение', steps: [
+    'Сверху выберите «Слайды»: урок уже загружен. Его видят все ученики.',
+    'Листайте стрелками. Скрытые ответы открывайте по одному, когда ученики подумают.',
+    'Здесь можно и просто писать на доске. Затем слева выберите «Индивидуально».',
+  ] },
+  individual: { title: 'Индивидуальная работа', steps: [
+    'Каждый думает сам, у каждого своя доска. Вы не прерываете класс.',
+    'Кто-то позовёт вас: на его месте появится 🔔. Нажмите на колокольчик, и вы окажетесь у доски ученика.',
+    'Напишите подсказку и вернитесь кнопкой «← Назад». Затем слева выберите «Пары».',
+  ] },
+  pairs: { title: 'Пары', steps: [
+    'Ученики сами разошлись по парам, у пары общая доска.',
+    'В живом уроке здесь говорит весь класс сразу, но каждая пара слышит только себя.',
+    'Одна пара ошибётся и позовёт вас. Нажмите 🔔, подскажите на доске и дождитесь исправления. Затем выберите «Четвёрки».',
+  ] },
+  fours: { title: 'Четвёрки', steps: [
+    'Пары объединились: каждая сравнивает свой список с соседней.',
+    'Нажмите 🔔 у группы, которая зовёт. Остальные продолжают работать.',
+    'Это весь цикл урока. Нажмите слева «Завершить урок» и расскажите, что думаете.',
+  ] },
+};
+
+/** The solo demo has nobody to explain it: this says what to do on each stage */
+export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) {
+  const part = GUIDE[stage] ?? GUIDE.waiting;
+  return (
+    <div data-testid="solo-guide" style={{
+      width: 'min(250px, 32vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
+      background: '#fbfbfd', fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
+      <b style={{ fontSize: 15 }}>{part.title}</b>
+      {part.steps.map(step => <div key={step}>{step}</div>)}
+      {calls.map(note => (
+        <div key={note} data-testid="solo-call" style={{ padding: 10, borderRadius: 8, background: '#fdf1d6', color: '#8a5a00' }}>
+          <div style={{ fontSize: 11, marginBottom: 2 }}>Вас зовут</div>«{note}»
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const card: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10, border: '1px solid #e2e2e2' };
+const cardText: CSSProperties = { color: '#666', fontSize: 14, lineHeight: 1.4 };
+const primary: CSSProperties = { padding: '10px 12px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', fontSize: 15, cursor: 'pointer' };
