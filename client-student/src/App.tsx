@@ -169,8 +169,8 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
   );
 }
 
-function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
-  const [code, setCode] = useState('');
+function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: string; earlyCode: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
+  const [code, setCode] = useState(earlyCode); // came too early: no need to type it again
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
   return (
     <div style={{
@@ -220,6 +220,7 @@ export default function App() {
   const [name, setNameState] = useState(myName);
   const [joined, setJoined] = useState(!!myName && !!lessonId);
   const [joinError, setJoinError] = useState('');
+  const [earlyCode, setEarlyCode] = useState('');
 
   const [lessonState, setLessonState] = useState<LessonState>({
     stage: 'waiting',
@@ -260,8 +261,15 @@ export default function App() {
     socket.connect();
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    socket.on('lessonError', ({ error }: { error: string }) => {
-      if (error === 'lesson not found') {
+    socket.on('lessonError', ({ error, opensAt }: { error: string; opensAt?: number }) => {
+      if (error === 'not open yet') {
+        setJoined(false);
+        setEarlyCode(lessonId);
+        const at = opensAt ? new Date(opensAt) : null;
+        setJoinError(at
+          ? `Занятие ещё не началось. Вход откроется ${at.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${at.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
+          : 'Занятие ещё не началось');
+      } else if (error === 'lesson not found') {
         // Teacher may not have started the lesson with this code yet — wait and keep retrying.
         setWaitingForLesson(true);
       } else if (error === 'too many attempts') {
@@ -336,6 +344,7 @@ export default function App() {
   if (!joined) {
     return (
       <PracticeArea
+        earlyCode={earlyCode}
         error={joinError}
         media={media}
         onMedia={setMedia}

@@ -10,8 +10,9 @@ import type { Seat, SeatNames } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
-import { DemoSetup, MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
+import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
 import { DemoBanner, DemoFinished, type DemoEnd, type DemoTimes } from './demo';
+import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
@@ -318,7 +319,7 @@ export default function App() {
   const [token, setToken] = useState<string | null>(loadSavedToken);
   const [demo, setDemoState] = useState<DemoStart | null>(loadSavedDemo);
   function setDemo(d: DemoStart | null) { setDemoState(d); saveDemo(d); }
-  const [demoSetup, setDemoSetup] = useState(() => !loadSavedDemo() && new URLSearchParams(location.search).has('demo'));
+  const [demoSetup, setDemoSetup] = useState(() => !loadSavedDemo() && (new URLSearchParams(location.search).has('demo') || hasBookingLink()));
   const [demoEnd, setDemoEnd] = useState<DemoEnd | null>(null);
   const lessonToken = demo?.token ?? token; // a demo lesson is run with its own token, not an account's
   const [lessonCode, setLessonCodeReady] = useState<string | null>(demo?.code ?? null);
@@ -402,10 +403,10 @@ export default function App() {
   const [endDialog, setEndDialog] = useState(false);
 
   /** The demo is over, whoever or whatever ended it: on to the feedback form */
-  function finishDemo(info?: { reason?: string | null; retryAfterSeconds?: number }) {
+  function finishDemo(info?: { reason?: string | null }) {
     if (!demo) return;
     slides.forget();
-    setDemoEnd({ token: demo.token, reason: info?.reason ?? null, retryAfterSeconds: info?.retryAfterSeconds ?? 0 });
+    setDemoEnd({ token: demo.token, reason: info?.reason ?? null });
     setDemo(null);
     setGroupMode('board');
     setLessonCodeReady(null);
@@ -415,13 +416,13 @@ export default function App() {
     setEndDialog(false);
     slides.forget();
     // wait for the server to finish before leaving; don't hang if it doesn't answer
-    const leave = (info?: { reason?: string | null; retryAfterSeconds?: number }) => {
+    const leave = (info?: { reason?: string | null }) => {
       if (demo) { finishDemo(info); return; }
       setGroupMode('board');
       setLessonCodeReady(null);
     };
     const timer = setTimeout(leave, 3000);
-    socket.emit('endLesson', { chatMinutes }, (info?: { reason?: string | null; retryAfterSeconds?: number }) => { clearTimeout(timer); leave(info); });
+    socket.emit('endLesson', { chatMinutes }, (info?: { reason?: string | null }) => { clearTimeout(timer); leave(info); });
   }
 
   useEffect(() => {
@@ -442,6 +443,7 @@ export default function App() {
         error === 'video full' ? 'Сейчас нет мест для занятий с камерой. Можно начать новое занятие «Без видео»'
         : error === 'server full' ? 'Сейчас все места для занятий заняты, попробуйте через несколько минут'
         : error === 'too many attempts' ? 'Слишком много попыток — подождите минуту и попробуйте снова'
+        : error === 'not open yet' ? 'Это занятие забронировано на другое время, вход ещё не открыт'
         : error === 'not your lesson' ? 'Это занятие ведёт другой учитель'
         : error === 'after lesson' ? `Урок окончен, ученики ещё общаются без вас — занятие закроется через ${minutesLeft ?? 'несколько'} мин`
         : error === 'too many open lessons' ? 'У вас уже 5 занятий, в которых сейчас есть участники. Завершите одно из них и выйдите из него'
@@ -475,7 +477,7 @@ export default function App() {
   }
 
   if (!lessonCode && demoSetup) {
-    return <DemoSetup initial={media} onBack={() => setDemoSetup(false)} onStart={(d, p) => {
+    return <BookingScreen initial={media} onBack={() => setDemoSetup(false)} onStart={(d, p) => {
       setMedia(p);
       setDemo(d);
       setDemoSetup(false);
