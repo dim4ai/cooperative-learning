@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 export interface DemoTimes { endsAt: number; noStudentsAt: number | null }
-export interface DemoEnd { token: string; reason: string | null; retryAfterSeconds: number }
+export interface DemoEnd { token: string; reason: string | null }
 
 const WARN_LAST_MS = 5 * 60 * 1000;
 
@@ -35,12 +35,10 @@ export function DemoBanner({ times, clockSkew }: { times: DemoTimes; clockSkew: 
   );
 }
 
-function endText({ reason, retryAfterSeconds }: DemoEnd): string {
-  const headline = reason === 'time is up' ? 'Час закончился.'
-    : reason === 'no students' ? 'За 10 минут никто не вошёл, поэтому занятие закрылось.'
+function endText({ reason }: DemoEnd): string {
+  return reason === 'time is up' ? 'Час закончился.'
+    : reason === 'no students' ? 'За 15 минут после начала никто не вошёл, поэтому занятие закрылось.'
     : 'Демо-урок завершён.';
-  if (retryAfterSeconds <= 0) return headline;
-  return `${headline} Новый урок с этого адреса можно начать через ${Math.ceil(retryAfterSeconds / 60)} мин.`;
 }
 
 // The point of the demo: what the teacher thought of it

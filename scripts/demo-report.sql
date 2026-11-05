@@ -27,3 +27,8 @@ ORDER BY 4 DESC, 5 DESC;
 
 \echo '== Feedback'
 SELECT created_at::date AS day, rating, email, comment FROM demo_feedback ORDER BY created_at DESC;
+
+\echo '== Bookings: how they ended, and how far ahead they were made'
+SELECT status, count(*), count(*) FILTER (WHERE teacher_came) AS teacher_came,
+       round(avg(extract(epoch FROM starts_at - created_at)) / 3600, 1) AS avg_hours_ahead
+FROM demo_bookings GROUP BY 1 ORDER BY 2 DESC;

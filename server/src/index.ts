@@ -9,7 +9,7 @@ import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk'
 import {
   verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
   isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
-  hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
+  hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveBooking, loadCurrentBookings, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
   type DemoRecord,
 } from './db';
 import {
@@ -18,6 +18,7 @@ import {
 } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
+import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 
 function requireEnv(name: string): string {
@@ -364,20 +365,21 @@ function joinRefusal(code: string, videoMode: VideoMode, role: Role, uuid: strin
 }
 
 // ---------- demo lessons ----------
-// Anyone can start one, no account and so no journal. A lesson takes a slot from the moment of
-// the button; a finished one frees its slot after a random pause and bars its address for a while.
+// No account and so no journal. A lesson is booked for a set time: the class is gathered in
+// advance, so the place has to be certain before anyone is told to come.
 const MINUTE_MS = 60 * 1000;
 const DEMO_LESSON_MS = envNumber('DEMO_LESSON_MINUTES', 60) * MINUTE_MS;
-const DEMO_NO_STUDENTS_MS = envNumber('DEMO_NO_STUDENTS_MINUTES', 10) * MINUTE_MS;
-const DEMO_COOLDOWN_MS = envNumber('DEMO_COOLDOWN_MINUTES', 60) * MINUTE_MS;
-const DEMO_EMPTY_COOLDOWN_MS = envNumber('DEMO_EMPTY_COOLDOWN_MINUTES', 10) * MINUTE_MS;
-const DEMO_SLOT_PAUSE_MIN_MS = envNumber('DEMO_SLOT_PAUSE_MIN_MINUTES', 3) * MINUTE_MS;
-const DEMO_SLOT_PAUSE_MAX_MS = envNumber('DEMO_SLOT_PAUSE_MAX_MINUTES', 5) * MINUTE_MS;
-const DEMO_SLOTS = { teacher: envNumber('DEMO_CAMERA_SLOTS', 3), none: envNumber('DEMO_AUDIO_SLOTS', 10) };
-
-type DemoMode = keyof typeof DEMO_SLOTS;
+const DEMO_NO_STUDENTS_MS = envNumber('DEMO_NO_STUDENTS_MINUTES', 15) * MINUTE_MS; // counted from the start
+const DEMO_OPENS_EARLY_MS = envNumber('DEMO_OPENS_EARLY_MINUTES', 15) * MINUTE_MS;
+const DEMO_NO_SHOW_MS = envNumber('DEMO_NO_SHOW_MINUTES', 15) * MINUTE_MS; // counted from the start
+const DEMO_NO_SHOW_BAR_MS = envNumber('DEMO_NO_SHOW_BAR_HOURS', 24) * 60 * MINUTE_MS;
+const DEMO_BOOK_AHEAD_MS = envNumber('DEMO_BOOK_AHEAD_DAYS', 7) * 24 * 60 * MINUTE_MS;
+const DEMO_BOOK_STEP_MS = envNumber('DEMO_BOOK_STEP_MINUTES', 30) * MINUTE_MS;
+const DEMO_ENDED_REMEMBERED_MS = 10 * MINUTE_MS; // those who come back after the end are told so, not sent looking
+const DEMO_SLOTS: Record<BookingMode, number> = { teacher: envNumber('DEMO_CAMERA_SLOTS', 3), none: envNumber('DEMO_AUDIO_SLOTS', 10) };
 
 const demos = new Map<string, DemoRecord>();
+const bookings = new Map<string, BookingRecord>();
 const demoThrottle = new Throttle();
 const demoIpCounts = new Map<string, { attempts: number; refused: number; penalties: number }>();
 
@@ -385,15 +387,31 @@ function saveDemoLater(d: DemoRecord) {
   saveDemo(d).catch(e => console.error('!!! demo lesson not saved:', e));
 }
 
-const holdsSlot = (d: DemoRecord, now: number) => d.endedAt === null || d.slotFreeAt > now;
-const demoSlotsTaken = (mode: DemoMode, now = Date.now()) =>
-  [...demos.values()].filter(d => d.videoMode === mode && holdsSlot(d, now)).length;
+function saveBookingLater(b: BookingRecord) {
+  saveBooking(b).catch(e => console.error('!!! booking not saved:', e));
+}
 
-/** When a slot of this kind is sure to be free. The exact random moment isn't given away. */
-function nextDemoSlotMs(mode: DemoMode, now: number): number {
-  const times = [...demos.values()].filter(d => d.videoMode === mode && holdsSlot(d, now))
-    .map(d => (d.endedAt ?? d.endsAt) + DEMO_SLOT_PAUSE_MAX_MS - now);
-  return Math.max(30_000, Math.min(...times));
+const demosRunning = (mode: BookingMode) => [...demos.values()].filter(d => d.videoMode === mode && d.endedAt === null).length;
+const opensAt = (startsAt: number) => startsAt - DEMO_OPENS_EARLY_MS;
+const bookingWindow = (startsAt: number) => ({ from: opensAt(startsAt), to: startsAt + DEMO_LESSON_MS });
+
+function placesLeft(mode: BookingMode, startsAt: number): number {
+  const held = [...bookings.values()].filter(b => isHeld(b) && b.videoMode === mode).map(b => bookingWindow(b.startsAt));
+  return DEMO_SLOTS[mode] - peakTaken(held, bookingWindow(startsAt));
+}
+
+/** The door opens: from here on the booking is a running demo lesson. Safe to call more than once. */
+function openBooking(b: BookingRecord) {
+  if (b.status !== 'booked') return;
+  b.status = 'open';
+  const demo: DemoRecord = {
+    code: b.code, ipHash: b.ipHash, videoMode: b.videoMode, createdAt: Date.now(), endsAt: b.startsAt + DEMO_LESSON_MS,
+    firstStudentAt: null, peakStudents: 0, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0,
+  };
+  demos.set(b.code, demo);
+  saveDemoLater(demo);
+  saveBookingLater(b);
+  console.log(`[${b.code}] booked demo open (${b.videoMode})`);
 }
 
 /** Marks the demo as over; safe to call from every path that ends a lesson */
@@ -403,16 +421,23 @@ function closeDemo(code: string, reason: string) {
   const now = Date.now();
   demo.endedAt = now;
   demo.endReason = reason;
-  demo.cooldownUntil = now + (demo.firstStudentAt === null ? DEMO_EMPTY_COOLDOWN_MS : DEMO_COOLDOWN_MS);
-  demo.slotFreeAt = now + DEMO_SLOT_PAUSE_MIN_MS + Math.random() * (DEMO_SLOT_PAUSE_MAX_MS - DEMO_SLOT_PAUSE_MIN_MS);
+  demo.cooldownUntil = now + DEMO_ENDED_REMEMBERED_MS;
+  demo.slotFreeAt = now;
   saveDemoLater(demo);
+  const booking = bookings.get(code);
+  if (booking?.status === 'open') {
+    booking.status = 'over';
+    saveBookingLater(booking);
+  }
   deleteLesson(code).catch(e => console.error('!!! demo lesson code not deleted:', e));
   console.log(`[${code}] demo over (${reason}): peak ${demo.peakStudents} students`);
 }
 
 function demoEndInfo(demo: DemoRecord) {
-  return { reason: demo.endReason, retryAfterSeconds: Math.max(0, Math.ceil((demo.cooldownUntil - Date.now()) / 1000)) };
+  return { reason: demo.endReason };
 }
+
+const demoStart = (demo: DemoRecord) => demo.endsAt - DEMO_LESSON_MS;
 
 function demoStudentCame(demo: DemoRecord, students: number) {
   const first = demo.firstStudentAt === null;
@@ -554,7 +579,7 @@ function pollResults(lesson: LessonRuntime) {
 function demoState(code: string) {
   const demo = demos.get(code);
   if (!demo || demo.endedAt !== null) return null;
-  return { endsAt: demo.endsAt, noStudentsAt: demo.firstStudentAt === null ? demo.createdAt + DEMO_NO_STUDENTS_MS : null };
+  return { endsAt: demo.endsAt, noStudentsAt: demo.firstStudentAt === null ? demoStart(demo) + DEMO_NO_STUDENTS_MS : null };
 }
 
 function broadcastState(code: string, lesson: LessonRuntime) {
@@ -969,6 +994,16 @@ io.on('connection', async (socket) => {
   }
   clearAttempts(codeAttempts, ip);
 
+  const booked = bookings.get(dbLesson.code);
+  if (booked?.status === 'booked') {
+    if (Date.now() < opensAt(booked.startsAt)) {
+      socket.emit('lessonError', { error: 'not open yet', opensAt: opensAt(booked.startsAt), startsAt: booked.startsAt });
+      socket.disconnect(true);
+      return;
+    }
+    openBooking(booked);
+  }
+
   // Teacher role is only trusted once backed by a verified token — the client can no longer
   // just claim role: 'teacher'. A teacher also can't control someone else's lesson.
   if (role === 'teacher' && demos.has(dbLesson.code)) {
@@ -1083,7 +1118,11 @@ io.on('connection', async (socket) => {
 
     lesson.emptySince = null;
     lesson.ended = false; // someone came (back) — it's a live lesson again
-    if (role === 'teacher') lesson.noTeacherSince = null;
+    if (role === 'teacher') {
+      lesson.noTeacherSince = null;
+      const booking = bookings.get(code);
+      if (booking && !booking.teacherCame) { booking.teacherCame = true; saveBookingLater(booking); }
+    }
     if (role === 'teacher') {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
@@ -1347,6 +1386,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, lesson] of lessons) {
     if (lesson.ended || lesson.afterUntil || !lesson.noTeacherSince || now - lesson.noTeacherSince <= TEACHER_ABSENT_MS) continue;
+    const booking = bookings.get(code);
+    if (booking && now < booking.startsAt + DEMO_NO_SHOW_MS) continue; // the class gathers before the teacher is due
     if (isEmpty(code, lesson)) dropLesson(code, 'no teacher');
     else endLesson(code, lesson, 'no teacher');
   }
@@ -1365,7 +1406,30 @@ function refuseDemo(res: Response, status: number, ipHash: string, error: string
   res.status(status).json({ error, retryAfterSeconds: Math.ceil(retryAfterMs / 1000) });
 }
 
-app.post('/demo/lessons', async (req, res) => {
+const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+const isBookingMode = (v: unknown): v is BookingMode => v === 'teacher' || v === 'none';
+
+function bookingOf(req: Request): BookingRecord | null {
+  const token = bearerToken(req);
+  if (!token) return null;
+  const hash = hashToken(token);
+  return [...bookings.values()].find(b => b.tokenHash === hash) ?? null;
+}
+
+const bookingView = (b: BookingRecord) => ({
+  code: b.code, videoMode: b.videoMode, startsAt: b.startsAt, opensAt: opensAt(b.startsAt),
+  endsAt: b.startsAt + DEMO_LESSON_MS, status: b.status, now: Date.now(),
+});
+
+app.get('/demo/slots', (_req, res) => {
+  if (!hasDemo) { res.status(503).json({ error: 'demo unavailable' }); return; }
+  const now = Date.now();
+  const slots = bookableStarts(now, DEMO_BOOK_STEP_MS, DEMO_BOOK_AHEAD_MS)
+    .map(startsAt => ({ startsAt, teacher: placesLeft('teacher', startsAt) > 0, none: placesLeft('none', startsAt) > 0 }));
+  res.json({ slots, now });
+});
+
+app.post('/demo/bookings', async (req, res) => {
   const ipHash = hashIp(clientIpFromReq(req), JWT_SECRET);
   countDemoIp(ipHash, 'attempts');
   const throttled = demoThrottle.attempt(ipHash);
@@ -1379,39 +1443,74 @@ app.post('/demo/lessons', async (req, res) => {
   }
   if (!hasDemo) { res.status(503).json({ error: 'demo unavailable' }); return; }
 
-  const videoMode: DemoMode = (req.body as { videoMode?: unknown } | undefined)?.videoMode === 'none' ? 'none' : 'teacher';
+  const { startsAt, videoMode } = (req.body ?? {}) as { startsAt?: unknown; videoMode?: unknown };
   const now = Date.now();
-  const mine = [...demos.values()].filter(d => d.ipHash === ipHash);
-  const running = mine.find(d => d.endedAt === null);
-  if (running) { refuseDemo(res, 409, ipHash, 'ip busy', running.endsAt - now + DEMO_COOLDOWN_MS); return; }
-  const barred = Math.max(0, ...mine.map(d => d.cooldownUntil - now));
-  if (barred > 0) { refuseDemo(res, 429, ipHash, 'cooldown', barred); return; }
-  if (demoSlotsTaken(videoMode, now) >= DEMO_SLOTS[videoMode]) {
-    refuseDemo(res, 429, ipHash, 'no slots', nextDemoSlotMs(videoMode, now));
+  if (!isBookingMode(videoMode) || typeof startsAt !== 'number' || !bookableStarts(now, DEMO_BOOK_STEP_MS, DEMO_BOOK_AHEAD_MS).includes(startsAt)) {
+    res.status(400).json({ error: 'bad time' });
     return;
   }
+  const mine = [...bookings.values()].filter(b => b.ipHash === ipHash);
+  if (mine.some(isHeld)) { refuseDemo(res, 409, ipHash, 'ip busy', 0); return; }
+  const barred = Math.max(0, ...mine.map(b => b.barUntil - now));
+  if (barred > 0) { refuseDemo(res, 429, ipHash, 'barred', barred); return; }
+  if (placesLeft(videoMode, startsAt) <= 0) { refuseDemo(res, 409, ipHash, 'no slots', 0); return; }
 
   // The place is taken before the first await, so a burst of requests can't slip past the checks
   const pendingKey = `pending:${crypto.randomUUID()}`;
-  const demo: DemoRecord = {
-    code: pendingKey, ipHash, videoMode, createdAt: now, endsAt: now + DEMO_LESSON_MS, firstStudentAt: null,
-    peakStudents: 0, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0,
+  const token = crypto.randomBytes(24).toString('base64url');
+  const booking: BookingRecord = {
+    code: pendingKey, tokenHash: hashToken(token), ipHash, videoMode, startsAt, createdAt: now,
+    status: 'booked', teacherCame: false, barUntil: 0,
   };
-  demos.set(pendingKey, demo);
+  bookings.set(pendingKey, booking);
   try {
     const lesson = await createLesson(null, videoMode);
-    demo.code = lesson.code;
-    demos.set(lesson.code, demo);
-    demos.delete(pendingKey);
-    await saveDemo(demo);
-    console.log(`[${lesson.code}] demo started (${videoMode}), address ${ipHash}`);
-    res.json({ lesson, token: signDemoToken(lesson.code), endsAt: demo.endsAt });
+    booking.code = lesson.code;
+    bookings.set(lesson.code, booking);
+    bookings.delete(pendingKey);
+    await saveBooking(booking);
+    console.log(`[${lesson.code}] demo booked (${videoMode}) for ${new Date(startsAt).toISOString()}, address ${ipHash}`);
+    res.json({ token, booking: bookingView(booking) });
   } catch (e) {
-    console.error('!!! demo lesson not created:', e);
-    demos.delete(pendingKey);
-    demos.delete(demo.code);
-    res.status(500).json({ error: 'failed to create lesson' });
+    console.error('!!! booking not created:', e);
+    bookings.delete(pendingKey);
+    bookings.delete(booking.code);
+    res.status(500).json({ error: 'failed to book' });
   }
+});
+
+app.get('/demo/bookings/mine', (req, res) => {
+  const booking = bookingOf(req);
+  if (!booking) { res.status(404).json({ error: 'not found' }); return; }
+  res.json({ booking: bookingView(booking) });
+});
+
+// The teacher's way in: the token that runs the lesson is only given once the door is open
+app.post('/demo/bookings/mine/enter', (req, res) => {
+  const booking = bookingOf(req);
+  if (!booking) { res.status(404).json({ error: 'not found' }); return; }
+  if (!isHeld(booking)) { res.status(410).json({ error: 'over' }); return; }
+  if (Date.now() < opensAt(booking.startsAt)) { res.status(409).json({ error: 'not open yet' }); return; }
+  openBooking(booking);
+  res.json({ code: booking.code, token: signDemoToken(booking.code) });
+});
+
+app.delete('/demo/bookings/mine', (req, res) => {
+  const booking = bookingOf(req);
+  if (!booking) { res.status(404).json({ error: 'not found' }); return; }
+  if (!isHeld(booking)) { res.status(410).json({ error: 'over' }); return; }
+  const wasOpen = booking.status === 'open';
+  booking.status = 'cancelled';
+  saveBookingLater(booking);
+  if (wasOpen) {
+    const lesson = lessons.get(booking.code);
+    if (lesson) endLesson(booking.code, lesson, 'cancelled');
+    else closeDemo(booking.code, 'cancelled');
+  } else {
+    deleteLesson(booking.code).catch(e => console.error('!!! booked lesson code not deleted:', e));
+  }
+  console.log(`[${booking.code}] booking cancelled`);
+  res.json({ ok: true });
 });
 
 app.post('/demo/feedback', async (req, res) => {
@@ -1435,8 +1534,25 @@ app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
   res.status(status).json({ error: status === 500 ? 'server error' : status === 413 ? 'too large' : 'bad request' });
 });
 
+function bookingTick(now: number) {
+  for (const [key, b] of bookings) {
+    if (key.startsWith('pending:')) continue;
+    if (b.status === 'booked' && now >= opensAt(b.startsAt)) openBooking(b);
+    if (b.status === 'open' && !b.teacherCame && now >= b.startsAt + DEMO_NO_SHOW_MS) {
+      b.status = 'no show';
+      b.barUntil = now + DEMO_NO_SHOW_BAR_MS;
+      saveBookingLater(b);
+      const lesson = lessons.get(b.code);
+      if (lesson) endLesson(b.code, lesson, 'no teacher');
+      else closeDemo(b.code, 'no teacher');
+    }
+    if (!isHeld(b) && b.barUntil <= now) bookings.delete(key);
+  }
+}
+
 function demoTick() {
   const now = Date.now();
+  bookingTick(now);
   for (const [code, demo] of demos) {
     if (code.startsWith('pending:')) continue;
     if (demo.endedAt !== null) {
@@ -1444,7 +1560,7 @@ function demoTick() {
       continue;
     }
     const reason = now >= demo.endsAt ? 'time is up'
-      : demo.firstStudentAt === null && now - demo.createdAt >= DEMO_NO_STUDENTS_MS ? 'no students' : null;
+      : demo.firstStudentAt === null && now - demoStart(demo) >= DEMO_NO_STUDENTS_MS ? 'no students' : null;
     if (!reason) continue;
     const lesson = lessons.get(code);
     if (lesson) endLesson(code, lesson, reason);
@@ -1467,7 +1583,7 @@ setInterval(() => {
       cpuPct: machine?.cpuPct ?? null, memUsedMb: machine?.memUsedMb ?? null, rxPps: machine?.rxPps ?? null,
       txPps: machine?.txPps ?? null, udpDropped: machine?.udpDropped ?? null,
       realLessons: all.filter(([c]) => !demos.has(c)).length,
-      demoCamera: demoSlotsTaken('teacher', now), demoAudio: demoSlotsTaken('none', now),
+      demoCamera: demosRunning('teacher'), demoAudio: demosRunning('none'),
       teachers: people.filter(p => p.role === 'teacher').length, students: people.filter(p => p.role === 'student').length,
     }).catch(e => console.error('!!! load sample not saved:', e));
     for (const [ipHash, c] of demoIpCounts) {
@@ -1483,7 +1599,8 @@ migrate()
   .catch(e => console.error('!!! DB migration failed — lessons work, but only with video (no lessons.video_mode):', e))
   .then(async () => {
     if (!hasDemo) return;
-    for (const demo of await loadCurrentDemos()) demos.set(demo.code, demo); // a restart mustn't free slots or addresses
+    for (const demo of await loadCurrentDemos()) demos.set(demo.code, demo);
+    for (const booking of await loadCurrentBookings()) bookings.set(booking.code, booking); // a restart mustn't free places
   })
   .catch(e => console.error('!!! demo lessons not restored:', e))
   .finally(() => httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`)));

@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import type { BookingRecord } from './booking';
 
 const pool = new Pool({
   host: process.env.PG_HOST || 'localhost',
@@ -136,6 +137,17 @@ export async function migrate(): Promise<void> {
       demo_audio int NOT NULL,
       teachers int NOT NULL,
       students int NOT NULL
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS demo_bookings (
+      code text PRIMARY KEY,
+      token_hash text NOT NULL UNIQUE,
+      ip_hash text,
+      video_mode text NOT NULL,
+      starts_at timestamptz NOT NULL,
+      created_at timestamptz NOT NULL,
+      status text NOT NULL,
+      teacher_came boolean NOT NULL DEFAULT false,
+      bar_until timestamptz
     )`);
     hasDemo = true;
   } catch (e) {
@@ -274,6 +286,27 @@ export async function loadCurrentDemos(): Promise<DemoRecord[]> {
   }));
 }
 
+export async function saveBooking(b: BookingRecord): Promise<void> {
+  await pool.query(
+    `INSERT INTO demo_bookings (code, token_hash, ip_hash, video_mode, starts_at, created_at, status, teacher_came, bar_until)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (code) DO UPDATE SET status = $7, teacher_came = $8, bar_until = $9`,
+    [b.code, b.tokenHash, b.ipHash, b.videoMode, toDate(b.startsAt), toDate(b.createdAt), b.status, b.teacherCame,
+      toDate(b.barUntil || null)],
+  );
+}
+
+/** Bookings still holding a place, or still barring their address */
+export async function loadCurrentBookings(): Promise<BookingRecord[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM demo_bookings WHERE ip_hash IS NOT NULL AND (status IN ('booked', 'open') OR bar_until > now())`);
+  return rows.map(r => ({
+    code: r.code, tokenHash: r.token_hash, ipHash: r.ip_hash, videoMode: r.video_mode,
+    startsAt: r.starts_at.getTime(), createdAt: r.created_at.getTime(), status: r.status,
+    teacherCame: r.teacher_came, barUntil: r.bar_until ? r.bar_until.getTime() : 0,
+  }));
+}
+
 export async function saveDemoFeedback(code: string, rating: number, comment: string, email: string): Promise<void> {
   await pool.query(
     `INSERT INTO demo_feedback (code, rating, comment, email) VALUES ($1, $2, $3, $4)
@@ -306,6 +339,7 @@ export async function cleanupDemoLogs(): Promise<void> {
   await pool.query(`DELETE FROM load_samples WHERE at < now() - interval '30 days'`);
   await pool.query(`DELETE FROM demo_ip_stats WHERE day < current_date - 30`);
   await pool.query(`UPDATE demo_lessons SET ip_hash = NULL WHERE ended_at < now() - interval '30 days'`);
+  await pool.query(`DELETE FROM demo_bookings WHERE starts_at < now() - interval '30 days'`);
 }
 
 // ---------- teacher's journal ----------
