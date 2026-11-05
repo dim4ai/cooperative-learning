@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  ActiveSelection, Canvas, Ellipse, IText, Line, Path, PencilBrush, Rect, util,
+  ActiveSelection, Canvas, Ellipse, IText, Line, Path, PencilBrush, Rect, Triangle, util,
   type FabricObject, type TPointerEventInfo,
 } from 'fabric'
 import { SLIDE_HEIGHT as H, SLIDE_WIDTH as W } from './model'
@@ -32,9 +32,12 @@ export interface BoardLink {
 /** student — basic tools; teacher — also marker, arrow and clearing the whole board */
 export type BoardRole = 'student' | 'teacher'
 
-type Tool = 'select' | 'pen' | 'marker' | 'eraser' | 'line' | 'arrow' | 'rect' | 'ellipse' | 'text'
-type ShapeTool = 'line' | 'arrow' | 'rect' | 'ellipse'
-const SHAPES: readonly Tool[] = ['line', 'arrow', 'rect', 'ellipse']
+type Tool = 'select' | 'pen' | 'marker' | 'eraser' | 'line' | 'arrow' | 'rect' | 'triangle' | 'ellipse' | 'text'
+type ShapeTool = 'line' | 'arrow' | 'rect' | 'triangle' | 'ellipse'
+const SHAPES: readonly Tool[] = ['line', 'arrow', 'rect', 'triangle', 'ellipse']
+// The eraser paints the page's own colour: it takes part of a stroke, and undo and sync work as for any stroke
+const ERASER_COLOR = '#ffffff'
+const ERASER_SCALE = 5
 
 const lineIcon = (children: ReactNode) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -50,16 +53,25 @@ const EraserIcon = lineIcon(<>
   <path d="M8 20h12" />
 </>)
 
+const TriangleIcon = lineIcon(<path d="M12 4.5L21 19.5H3z" />)
+const EllipseIcon = lineIcon(<circle cx="12" cy="12" r="8" />)
+const TextIcon = lineIcon(<path d="M5 6.5V5h14v1.5M12 5v14M9 19h6" />)
+const LineIcon = lineIcon(<path d="M5 19L19 5" />)
+const RectIcon = lineIcon(<rect x="4.5" y="5.5" width="15" height="13" rx="0.5" />)
+const SelectIcon = lineIcon(<path d="M20.5 20.5L3.5 3.5M3.5 13V3.5H13" />)
+const ArrowIcon = lineIcon(<path d="M2.5 12h19M15 5.5l6.5 6.5-6.5 6.5" />)
+
 const TOOLS: { key: Tool; icon: ReactNode; title: string; teacherOnly?: boolean }[] = [
-  { key: 'select', icon: '↖', title: 'Выбрать и двигать (Delete — удалить)' },
+  { key: 'select', icon: SelectIcon, title: 'Выбрать и двигать (Delete — удалить)' },
   { key: 'pen', icon: PencilIcon, title: 'Карандаш' },
   { key: 'marker', icon: '🖍', title: 'Маркер: полупрозрачный, для выделения', teacherOnly: true },
-  { key: 'eraser', icon: EraserIcon, title: 'Ластик: проведите по тому, что нужно стереть' },
-  { key: 'line', icon: '╱', title: 'Линия' },
-  { key: 'arrow', icon: '→', title: 'Стрелка', teacherOnly: true },
-  { key: 'rect', icon: '▭', title: 'Прямоугольник' },
-  { key: 'ellipse', icon: '◯', title: 'Овал' },
-  { key: 'text', icon: 'T', title: 'Текст: кликните, где писать' },
+  { key: 'eraser', icon: EraserIcon, title: 'Ластик: проведите там, где нужно стереть. Толщину можно выбрать' },
+  { key: 'line', icon: LineIcon, title: 'Линия' },
+  { key: 'arrow', icon: ArrowIcon, title: 'Стрелка', teacherOnly: true },
+  { key: 'rect', icon: RectIcon, title: 'Прямоугольник' },
+  { key: 'triangle', icon: TriangleIcon, title: 'Треугольник' },
+  { key: 'ellipse', icon: EllipseIcon, title: 'Овал' },
+  { key: 'text', icon: TextIcon, title: 'Текст: кликните, где писать' },
 ]
 const COLORS = ['#1e1e1e', '#e03131', '#1971c2', '#2f9e44', '#f08c00', '#9c36b5']
 const WIDTHS = [3, 6, 12]
@@ -86,6 +98,7 @@ function makeShape(tool: ShapeTool, a: { x: number; y: number }, b: { x: number;
   const box = { left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), originX: 'left' as const, originY: 'top' as const }
   const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y)
   if (tool === 'rect') return new Rect({ ...box, width: w, height: h, ...stroke })
+  if (tool === 'triangle') return new Triangle({ ...box, width: w, height: h, ...stroke })
   return new Ellipse({ ...box, rx: w / 2, ry: h / 2, ...stroke })
 }
 
@@ -130,8 +143,8 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
 
     const style = (o: FabricObject) => {
       const { tool, readOnly } = live.current
-      const sel = tool === 'select' && !readOnly
-      o.set({ selectable: sel, evented: sel || (tool === 'eraser' && !readOnly), hoverCursor: tool === 'eraser' ? 'crosshair' : 'move' })
+      const sel = tool === 'select' && !readOnly && o.stroke !== ERASER_COLOR // a rub-out isn't something to pick up
+      o.set({ selectable: sel, evented: sel, hoverCursor: 'move' })
     }
 
     // ---- applying operations to the canvas (remote ones and undo/redo) ----
@@ -237,14 +250,15 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
         const editing = fc.getActiveObject() as IText | undefined
         if (editing?.isEditing) editing.exitEditing() // typed text is sent on exit
         if (tool !== 'select') fc.discardActiveObject()
-        fc.isDrawingMode = !readOnly && (tool === 'pen' || tool === 'marker')
+        fc.isDrawingMode = !readOnly && (tool === 'pen' || tool === 'marker' || tool === 'eraser')
         fc.selection = !readOnly && tool === 'select'
-        fc.skipTargetFind = readOnly || !(tool === 'select' || tool === 'eraser')
+        fc.skipTargetFind = readOnly || tool !== 'select'
         fc.defaultCursor = readOnly ? 'default' : tool === 'text' ? 'text' : tool === 'select' ? 'default' : 'crosshair'
         if (fc.isDrawingMode) {
           const b = new PencilBrush(fc)
-          b.color = tool === 'marker' ? withAlpha(live.current.color, 0.35) : live.current.color
-          b.width = tool === 'marker' ? live.current.width * 4 : live.current.width
+          const { color, width } = live.current
+          b.color = tool === 'eraser' ? ERASER_COLOR : tool === 'marker' ? withAlpha(color, 0.35) : color
+          b.width = tool === 'eraser' ? width * ERASER_SCALE : tool === 'marker' ? width * 4 : width
           fc.freeDrawingBrush = b
         }
         fc.requestRenderAll()
@@ -256,12 +270,10 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
 
     let start: { x: number; y: number } | null = null
     let preview: FabricObject | null = null
-    let erasing = false
 
     fc.on('mouse:down', (e: TPointerEventInfo) => {
       const { tool, readOnly, color } = live.current
       if (readOnly) return
-      if (tool === 'eraser') { erasing = true; if (e.target) erase([e.target]); return }
       if (tool === 'text') {
         const editing = fc.getActiveObject() as IText | undefined
         if (editing?.isEditing) { editing.exitEditing(); fc.discardActiveObject(); fc.requestRenderAll(); return }
@@ -276,7 +288,6 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
     })
     fc.on('mouse:move', (e: TPointerEventInfo) => {
       const { tool, color, width } = live.current
-      if (erasing && e.target) { erase([e.target]); return }
       if (!start) return
       if (preview) fc.remove(preview)
       preview = makeShape(tool as ShapeTool, start, e.scenePoint, color, width)
@@ -285,7 +296,6 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
       fc.requestRenderAll()
     })
     fc.on('mouse:up', (e: TPointerEventInfo) => {
-      erasing = false
       if (!start) return
       const { tool, color, width } = live.current
       if (preview) { fc.remove(preview); preview = null }

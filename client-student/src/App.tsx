@@ -169,6 +169,19 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
   );
 }
 
+/** The chosen avatar on a seat tile of the same size and look as in the lesson */
+function AvatarPreview({ avatar }: { avatar: string | null }) {
+  return (
+    <div data-testid="avatar-preview" title="Так вас увидят одноклассники" style={{
+      width: 160, height: 120, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: '#3498db55',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 11,
+    }}>
+      <img src={(avatar && AVATARS[avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 52, marginBottom: 2 }} />
+      <div style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{myName}</div>
+    </div>
+  );
+}
+
 function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: string; earlyCode: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState(earlyCode); // came too early: no need to type it again
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
@@ -201,7 +214,12 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
       </div>
       {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
-      <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', justifyContent: 'center' }}>
+        <AvatarPreview avatar={avatar} />
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
+        </div>
+      </div>
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
       <div style={{ width: '100%', height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Board />
