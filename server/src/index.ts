@@ -18,7 +18,7 @@ import {
 } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
-import { BOTS, BotRun } from './demoBots';
+import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 
@@ -459,14 +459,15 @@ function demoEndInfo(demo: DemoRecord) {
 
 /** The simulated class comes in by itself: nothing here is connected to anybody */
 function startBots(code: string, lesson: LessonRuntime) {
-  createSeats(lesson, BOTS.length);
+  createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
   const bots = new BotRun({
     seat(i) {
       const { name, avatar } = BOTS[i];
       const id = `bot:${i}`;
-      lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: null, avatar, bot: true });
-      const seat = lesson.seats.find(s => !s.occupant);
+      if (lesson.seats.some(s => s.occupant === name)) return;
+      if (!lesson.participants.has(id)) lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: null, avatar, bot: true });
+      const seat = scatteredSeat(lesson.seats);
       if (seat) seat.occupant = name;
       broadcastSeats(code, lesson);
       broadcastState(code, lesson);
@@ -1248,6 +1249,7 @@ io.on('connection', async (socket) => {
     socket.on('clearSeat', (seatId: string) => {
       if (role !== 'teacher') return;
       const seat = lesson.seats.find(s => s.id === seatId);
+      if (seat?.occupant) lesson.bots?.onUnseated(seat.occupant);
       if (seat) seat.occupant = null;
       broadcastSeats(code, lesson);
     });

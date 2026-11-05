@@ -10,7 +10,10 @@ export const BOTS = [
   { name: 'Вика', avatar: 'cat' }, { name: 'Глеб', avatar: 'hedgehog' },
 ];
 
+/** Twice the class: there is room to move people around, and four desks to gather them from */
+export const SOLO_SEATS = 16;
 const SEAT_PAUSE_MS = 2000;
+const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
 const COLORS = ['#1971c2', '#2f9e44', '#9c36b5', '#f08c00'];
 
@@ -49,8 +52,21 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   ],
 };
 
+/** The bots spread out as far as they can, so nobody starts next to anybody: the teacher gathers them */
+export function scatteredSeat<S extends { groupIndex: number; row: number; occupant: string | null }>(seats: S[]): S | undefined {
+  const taken = seats.filter(s => s.occupant);
+  const crowd = (s: S) => {
+    const desk = taken.filter(t => t.groupIndex === s.groupIndex);
+    return desk.length * 3 + desk.filter(t => t.row === s.row).length; // first the desk, then the row
+  };
+  const free = seats.filter(s => !s.occupant);
+  const best = Math.min(...free.map(crowd));
+  const emptiest = free.filter(s => crowd(s) === best);
+  return emptiest[Math.floor(Math.random() * emptiest.length)];
+}
+
 export interface BotHost {
-  /** A bot takes its seat */
+  /** A bot takes a seat, if it has none */
   seat(botIndex: number): void;
   /** The rooms of this stage, in a stable order */
   rooms(): string[];
@@ -74,6 +90,12 @@ export class BotRun {
 
   seatEveryone() {
     BOTS.forEach((_, i) => this.after(800 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
+  }
+
+  /** The teacher sent someone from their seat: as in a real class, they find another one */
+  onUnseated(name: string) {
+    const i = BOTS.findIndex(b => b.name === name);
+    if (i >= 0) this.after(RESEAT_MS, () => this.host.seat(i), this.timers);
   }
 
   /** One line down the board, each room filling up on its own */
