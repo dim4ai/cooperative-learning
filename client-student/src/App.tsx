@@ -65,6 +65,9 @@ interface LessonState {
   timerEndsAt: number | null;
   /** After-lesson chat in fours: the teacher has left, the lesson ends at this time */
   afterUntil?: number | null;
+  /** A demo lesson's end, by the server's clock */
+  demo?: { endsAt: number } | null;
+  now?: number;
   participants: { id: string; name: string; role: string; avatar?: string | null }[];
 }
 
@@ -240,6 +243,8 @@ export default function App() {
   const [confirmed, setConfirmed] = useState(false);
   const secondsLeft = useTimer(lessonState.timerEndsAt);
   const afterLeft = useTimer(lessonState.afterUntil ?? null);
+  const [clockSkew, setClockSkew] = useState(0); // server time − this computer's
+  const demoLeft = useTimer(lessonState.demo ? lessonState.demo.endsAt - clockSkew : null);
   const videoMode = lessonState.videoMode ?? 'all';
   const camAllowed = videoMode === 'all' || videoMode === 'teacherSees';
   // teacherSees: the camera goes out through the monitor connection only, never to classmates
@@ -268,12 +273,23 @@ export default function App() {
       } else if (error === 'too many open lessons') {
         setJoined(false);
         setJoinError('Занятие сейчас не открыть: у учителя слишком много занятий одновременно');
+      } else if (error === 'lesson full') {
+        setJoined(false);
+        setJoinError('В классе нет свободных мест');
+      } else if (error === 'server full' || error === 'video full') {
+        setJoined(false);
+        setJoinError('Сейчас на сервере нет мест, попробуйте через несколько минут');
       } else {
         setJoined(false);
         setJoinError('Не удалось подключиться');
       }
     });
-    socket.on('state', (s: LessonState) => { setLessonState(s); setWaitingForLesson(false); setConfirmed(true); });
+    socket.on('state', (s: LessonState) => {
+      setLessonState(s);
+      if (s.now) setClockSkew(s.now - Date.now());
+      setWaitingForLesson(false);
+      setConfirmed(true);
+    });
     socket.on('seats', setSeats);
     socket.on('monitor', (info: LivekitInfo) => setMonitor(info));
     socket.on('livekit', (info: LivekitInfo) => {
@@ -381,6 +397,11 @@ export default function App() {
               Урок окончен. Учитель покинул занятие. Можно поболтать ещё {Math.floor(afterLeft / 60)}:{String(afterLeft % 60).padStart(2, '0')}
             </strong>
           : <strong>{STAGE_LABELS[lessonState.stage]}</strong>}
+        {demoLeft !== null && demoLeft <= 300 && (
+          <span data-testid="demo-ending" style={{ color: '#b9770e', fontSize: 13 }}>
+            Демо-урок закончится через {Math.floor(demoLeft / 60)}:{String(demoLeft % 60).padStart(2, '0')}
+          </span>
+        )}
         {secondsLeft !== null && (
           <span style={{ fontSize: 20, fontWeight: 'bold', marginLeft: 'auto' }}>
             {secondsLeft}s

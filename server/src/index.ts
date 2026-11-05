@@ -9,12 +9,16 @@ import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk'
 import {
   verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
   isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
+  hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
+  type DemoRecord,
 } from './db';
 import {
   parseMaterial, MaterialError, MAX_MATERIAL_JSON_BYTES, mediaCatalog, emptySlidesState, blockSlides, currentScene,
   studentScenes, scenesMedia, allowedHashes, type SlidesState, type Material,
 } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
+import { Throttle, hashIp } from './demoGuard';
+import { createSampler } from './loadSampler';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -64,11 +68,29 @@ async function verifyTeacherToken(token: string): Promise<number | null> {
   return payload.teacherId;
 }
 
-interface AuthedRequest extends Request { teacherId?: number }
+interface AuthedRequest extends Request { teacherId?: number; demoCode?: string }
+
+// A demo lesson has no account: the one who started it holds a token for that lesson alone
+function signDemoToken(code: string): string {
+  return jwt.sign({ demoCode: code }, JWT_SECRET, { audience: 'demo', expiresIn: Math.round(DEMO_LESSON_MS / 1000) + 2 * 60 * 60 });
+}
+
+function verifyDemoToken(token: unknown): string | null {
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    return (jwt.verify(token, JWT_SECRET, { audience: 'demo' }) as { demoCode?: string }).demoCode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const bearerToken = (req: Request) => {
+  const header = req.headers.authorization ?? '';
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
+};
 
 async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const header = req.headers.authorization ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const token = bearerToken(req);
   const teacherId = token ? await verifyTeacherToken(token) : null;
   if (teacherId === null) {
     res.status(401).json({ error: 'unauthorized' });
@@ -76,6 +98,12 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
   }
   req.teacherId = teacherId;
   next();
+}
+
+async function requireTeacherOrDemo(req: AuthedRequest, res: Response, next: NextFunction) {
+  const demoCode = verifyDemoToken(bearerToken(req));
+  if (demoCode) { req.demoCode = demoCode; next(); return; }
+  await requireAuth(req, res, next);
 }
 
 const app = express();
@@ -127,6 +155,8 @@ app.post('/login', async (req, res) => {
 app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
   const requested = (req.body as { videoMode?: unknown } | undefined)?.videoMode;
   const videoMode: VideoMode = VIDEO_MODES.includes(requested as VideoMode) ? requested as VideoMode : 'all';
+  const full = realLessonRefusal(videoMode);
+  if (full) { res.status(429).json({ error: full }); return; }
   const lesson = await createLesson(req.teacherId!, videoMode).catch(e => e as Error);
   if (lesson instanceof LessonLimitError) {
     res.status(429).json({ error: 'too many lessons' });
@@ -196,11 +226,13 @@ const MAX_MATERIALS_TOTAL_BYTES = 300 * 1024 * 1024;
 async function ownLesson(req: AuthedRequest, res: Response): Promise<string | null> {
   const dbLesson = await getLessonByCode(String(req.params.code)).catch(() => null);
   if (!dbLesson) { res.status(404).json({ error: 'lesson not found' }); return null; }
-  if (dbLesson.teacherId !== null && dbLesson.teacherId !== req.teacherId) { res.status(403).json({ error: 'not your lesson' }); return null; }
+  const owner = demos.has(dbLesson.code) ? req.demoCode === dbLesson.code
+    : !req.demoCode && (dbLesson.teacherId === null || dbLesson.teacherId === req.teacherId);
+  if (!owner) { res.status(403).json({ error: 'not your lesson' }); return null; }
   return dbLesson.code;
 }
 
-app.post('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res) => {
+app.post('/lessons/:code/material', requireTeacherOrDemo, async (req: AuthedRequest, res) => {
   const code = await ownLesson(req, res);
   if (!code) return;
   let material: Material;
@@ -209,7 +241,7 @@ app.post('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res)
     throw e;
   }
   const others = [...lessons.entries()].filter(([c, l]) => c !== code && l.material);
-  if (others.filter(([, l]) => l.material!.teacherId === material.teacherId).length >= MAX_MATERIALS_PER_TEACHER) {
+  if (material.teacherId !== null && others.filter(([, l]) => l.material!.teacherId === material.teacherId).length >= MAX_MATERIALS_PER_TEACHER) {
     res.status(429).json({ error: 'too many lessons with material' }); return;
   }
   if (others.reduce((n, [, l]) => n + l.material!.bytes, 0) + material.bytes > MAX_MATERIALS_TOTAL_BYTES) {
@@ -223,7 +255,7 @@ app.post('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res)
   res.json({ ok: true });
 });
 
-app.delete('/lessons/:code/material', requireAuth, async (req: AuthedRequest, res) => {
+app.delete('/lessons/:code/material', requireTeacherOrDemo, async (req: AuthedRequest, res) => {
   const code = await ownLesson(req, res);
   if (!code) return;
   const lesson = lessons.get(code);
@@ -283,6 +315,7 @@ interface LessonRuntime {
   slides: SlidesState;
   relay: MediaRelay;
   emptySince: number | null;
+  visited: boolean; // someone has been in: from then on it holds its place until it's over
   noTeacherSince: number | null; // since when no teacher is in (left, or never came yet); null while one is in
   ended: boolean;                  // the lesson was ended — dropped from memory as soon as nobody is left
   afterUntil: number | null;       // after-lesson chat in fours (teacher gone) lasts until; then the lesson ends
@@ -290,6 +323,108 @@ interface LessonRuntime {
 }
 
 const lessons = new Map<string, LessonRuntime>();
+
+// ---------- limits for the whole server ----------
+// Refusals only ever touch a new lesson or a new arrival: nothing already running is cut off.
+// Upper bounds on real lessons are separate from the demo pool, so demos can't use up their place.
+const envNumber = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+const MAX_REAL_LESSONS = envNumber('MAX_REAL_LESSONS', 2);
+const MAX_REAL_VIDEO_LESSONS = envNumber('MAX_REAL_VIDEO_LESSONS', 1);
+const MAX_STUDENTS_PER_LESSON = envNumber('MAX_STUDENTS_PER_LESSON', 32);
+const MAX_PARTICIPANTS_TOTAL = envNumber('MAX_PARTICIPANTS_TOTAL', 500);
+
+/** Holds a place: someone is in, or was and may come back (the absent-teacher rule ends it otherwise) */
+function holdsPlace(code: string, lesson: LessonRuntime): boolean {
+  return !lesson.ended && (lesson.visited || !isEmpty(code, lesson));
+}
+
+function realLessonRefusal(videoMode: VideoMode): 'server full' | 'video full' | null {
+  const live = [...lessons.entries()].filter(([c, l]) => !demos.has(c) && holdsPlace(c, l)).map(([, l]) => l);
+  if (live.length >= MAX_REAL_LESSONS) return 'server full';
+  if (videoMode !== 'none' && live.filter(l => l.videoMode !== 'none').length >= MAX_REAL_VIDEO_LESSONS) return 'video full';
+  return null;
+}
+
+/** Why this person can't come in now, if so. Checked right before joining, with no await in between. */
+function joinRefusal(code: string, videoMode: VideoMode, role: Role, uuid: string | null): string | null {
+  const lesson = lessons.get(code);
+  if (role === 'board') return null;
+  if (role === 'student') {
+    const others = lesson ? [...lesson.participants.values()].filter(p => p.role === 'student' && (!uuid || p.uuid !== uuid)) : [];
+    if (others.length >= MAX_STUDENTS_PER_LESSON) return 'lesson full';
+    const total = [...lessons.values()].reduce((n, l) => n + l.participants.size, 0);
+    if (total >= MAX_PARTICIPANTS_TOTAL) return 'server full';
+  }
+  if (demos.has(code) || (lesson && holdsPlace(code, lesson))) return null;
+  return realLessonRefusal(videoMode);
+}
+
+// ---------- demo lessons ----------
+// Anyone can start one, no account and so no journal. A lesson takes a slot from the moment of
+// the button; a finished one frees its slot after a random pause and bars its address for a while.
+const MINUTE_MS = 60 * 1000;
+const DEMO_LESSON_MS = envNumber('DEMO_LESSON_MINUTES', 60) * MINUTE_MS;
+const DEMO_NO_STUDENTS_MS = envNumber('DEMO_NO_STUDENTS_MINUTES', 10) * MINUTE_MS;
+const DEMO_COOLDOWN_MS = envNumber('DEMO_COOLDOWN_MINUTES', 60) * MINUTE_MS;
+const DEMO_EMPTY_COOLDOWN_MS = envNumber('DEMO_EMPTY_COOLDOWN_MINUTES', 10) * MINUTE_MS;
+const DEMO_SLOT_PAUSE_MIN_MS = envNumber('DEMO_SLOT_PAUSE_MIN_MINUTES', 3) * MINUTE_MS;
+const DEMO_SLOT_PAUSE_MAX_MS = envNumber('DEMO_SLOT_PAUSE_MAX_MINUTES', 5) * MINUTE_MS;
+const DEMO_SLOTS = { teacher: envNumber('DEMO_CAMERA_SLOTS', 3), none: envNumber('DEMO_AUDIO_SLOTS', 10) };
+
+type DemoMode = keyof typeof DEMO_SLOTS;
+
+const demos = new Map<string, DemoRecord>();
+const demoThrottle = new Throttle();
+const demoIpCounts = new Map<string, { attempts: number; refused: number; penalties: number }>();
+
+function saveDemoLater(d: DemoRecord) {
+  saveDemo(d).catch(e => console.error('!!! demo lesson not saved:', e));
+}
+
+const holdsSlot = (d: DemoRecord, now: number) => d.endedAt === null || d.slotFreeAt > now;
+const demoSlotsTaken = (mode: DemoMode, now = Date.now()) =>
+  [...demos.values()].filter(d => d.videoMode === mode && holdsSlot(d, now)).length;
+
+/** When a slot of this kind is sure to be free. The exact random moment isn't given away. */
+function nextDemoSlotMs(mode: DemoMode, now: number): number {
+  const times = [...demos.values()].filter(d => d.videoMode === mode && holdsSlot(d, now))
+    .map(d => (d.endedAt ?? d.endsAt) + DEMO_SLOT_PAUSE_MAX_MS - now);
+  return Math.max(30_000, Math.min(...times));
+}
+
+/** Marks the demo as over; safe to call from every path that ends a lesson */
+function closeDemo(code: string, reason: string) {
+  const demo = demos.get(code);
+  if (!demo || demo.endedAt !== null) return;
+  const now = Date.now();
+  demo.endedAt = now;
+  demo.endReason = reason;
+  demo.cooldownUntil = now + (demo.firstStudentAt === null ? DEMO_EMPTY_COOLDOWN_MS : DEMO_COOLDOWN_MS);
+  demo.slotFreeAt = now + DEMO_SLOT_PAUSE_MIN_MS + Math.random() * (DEMO_SLOT_PAUSE_MAX_MS - DEMO_SLOT_PAUSE_MIN_MS);
+  saveDemoLater(demo);
+  deleteLesson(code).catch(e => console.error('!!! demo lesson code not deleted:', e));
+  console.log(`[${code}] demo over (${reason}): peak ${demo.peakStudents} students`);
+}
+
+function demoEndInfo(demo: DemoRecord) {
+  return { reason: demo.endReason, retryAfterSeconds: Math.max(0, Math.ceil((demo.cooldownUntil - Date.now()) / 1000)) };
+}
+
+function demoStudentCame(demo: DemoRecord, students: number) {
+  const first = demo.firstStudentAt === null;
+  if (first) demo.firstStudentAt = Date.now();
+  if (students > demo.peakStudents) demo.peakStudents = students;
+  if (first) saveDemoLater(demo);
+}
+
+function countDemoIp(ipHash: string, field: 'attempts' | 'refused' | 'penalties') {
+  const counts = demoIpCounts.get(ipHash) ?? { attempts: 0, refused: 0, penalties: 0 };
+  counts[field] += 1;
+  demoIpCounts.set(ipHash, counts);
+}
 
 const isUuid = (v: unknown): v is string =>
   typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
@@ -307,6 +442,7 @@ function isEmpty(code: string, lesson: LessonRuntime): boolean {
 function dropLesson(code: string, why: string) {
   const lesson = lessons.get(code);
   if (!lesson) return;
+  closeDemo(code, why);
   lesson.relay.dispose();
   if (lesson.afterTimer) clearTimeout(lesson.afterTimer);
   lessons.delete(code);
@@ -342,6 +478,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     slides: emptySlidesState(),
     relay: new MediaRelay(io, code),
     emptySince: Date.now(),
+    visited: false,
     noTeacherSince: Date.now(),
     ended: false,
     afterUntil: null,
@@ -371,7 +508,7 @@ function createSeats(lesson: LessonRuntime, n: number) {
   }
 }
 
-const MAX_CAPACITY = 400;
+const MAX_CAPACITY = MAX_STUDENTS_PER_LESSON;
 
 /** Whether this seat is kept for someone other than this student */
 function reservedForOther(lesson: LessonRuntime, seat: Seat, uuid: string | null): boolean {
@@ -413,12 +550,20 @@ function pollResults(lesson: LessonRuntime) {
   return { question: poll.question, options: poll.options, counts, total: poll.votes.size };
 }
 
+function demoState(code: string) {
+  const demo = demos.get(code);
+  if (!demo || demo.endedAt !== null) return null;
+  return { endsAt: demo.endsAt, noStudentsAt: demo.firstStudentAt === null ? demo.createdAt + DEMO_NO_STUDENTS_MS : null };
+}
+
 function broadcastState(code: string, lesson: LessonRuntime) {
   io.to(code).emit('state', {
     stage: lesson.stage,
     videoMode: lesson.videoMode,
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
+    demo: demoState(code),
+    now: Date.now(), // the clients' clocks may be off; the demo's times are the server's
     participants: Array.from(lesson.participants.values()).map(p => ({
       id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, avatar: p.avatar,
     })),
@@ -437,6 +582,7 @@ function socketsOf(lesson: LessonRuntime, role: Role): string[] {
 /** End of the lesson (teacher's button, or the teacher has been gone too long): material is
  *  forgotten, students are told and sent away; once nobody is left the lesson leaves memory. */
 function endLesson(code: string, lesson: LessonRuntime, why: string) {
+  closeDemo(code, why);
   lesson.ended = true;
   lesson.stage = 'waiting';
   lesson.timerEndsAt = null;
@@ -451,6 +597,14 @@ function endLesson(code: string, lesson: LessonRuntime, why: string) {
     s?.disconnect(true); // don't rely on the client leaving by itself
   }
   for (const id of lesson.boardConnections.keys()) io.sockets.sockets.get(id)?.disconnect(true);
+  const demo = demos.get(code);
+  if (demo) {
+    for (const id of socketsOf(lesson, 'teacher')) {
+      const s = io.sockets.sockets.get(id);
+      s?.emit('demoEnded', demoEndInfo(demo));
+      s?.disconnect(true);
+    }
+  }
   console.log(`[${code}] lesson ended (${why})`);
   dropIfEnded(code);
 }
@@ -796,7 +950,16 @@ io.on('connection', async (socket) => {
     return;
   }
 
+  function refuseIfDemoOver(code: string): boolean {
+    if (demos.get(code)?.endedAt == null) return false;
+    socket.emit('lessonError', { error: 'lesson ended' });
+    socket.disconnect(true);
+    return true;
+  }
+  if (refuseIfDemoOver(lessonId)) return;
+
   const dbLesson = await getLessonByCode(lessonId).catch(() => null);
+  if (refuseIfDemoOver(lessonId)) return;
   if (!dbLesson) {
     recordFailedAttempt(codeAttempts, ip);
     socket.emit('lessonError', { error: 'lesson not found' });
@@ -807,7 +970,13 @@ io.on('connection', async (socket) => {
 
   // Teacher role is only trusted once backed by a verified token — the client can no longer
   // just claim role: 'teacher'. A teacher also can't control someone else's lesson.
-  if (role === 'teacher') {
+  if (role === 'teacher' && demos.has(dbLesson.code)) {
+    if (verifyDemoToken(token) !== dbLesson.code) {
+      socket.emit('lessonError', { error: 'unauthorized' });
+      socket.disconnect(true);
+      return;
+    }
+  } else if (role === 'teacher') {
     const teacherId = token ? await verifyTeacherToken(token) : null;
     if (teacherId === null) {
       socket.emit('lessonError', { error: 'unauthorized' });
@@ -828,6 +997,12 @@ io.on('connection', async (socket) => {
     socket.emit('lessonError', role === 'teacher'
       ? { error: 'after lesson', minutesLeft: Math.max(1, Math.ceil((after - Date.now()) / 60000)) }
       : { error: 'lesson ended' });
+    socket.disconnect(true);
+    return;
+  }
+  const refusal = joinRefusal(code, dbLesson.videoMode, role, uuid);
+  if (refusal) {
+    socket.emit('lessonError', { error: refusal });
     socket.disconnect(true);
     return;
   }
@@ -872,6 +1047,9 @@ io.on('connection', async (socket) => {
     if (socket.disconnected) return; // left while we were looking things up — nothing to add
     const participant: Participant = { id: socket.id, name: effectiveName, role, livekitRoom: null, uuid, avatar };
     lesson.participants.set(socket.id, participant);
+    lesson.visited = true;
+    const demo = demos.get(code);
+    if (demo && role === 'student') demoStudentCame(demo, socketsOf(lesson, 'student').length);
     if (seatByPlan(lesson, participant)) broadcastSeats(code, lesson);
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
@@ -944,10 +1122,11 @@ io.on('connection', async (socket) => {
     await sendToRoom(code, lesson, socket.id, mainRoom);
 
     socket.on('setCapacity', (n: number) => {
-      if (role !== 'teacher') return;
-      createSeats(lesson, n);
+      if (role !== 'teacher' || !Number.isInteger(n) || n < 0) return;
+      const capacity = Math.min(n, MAX_CAPACITY);
+      createSeats(lesson, capacity);
       broadcastSeats(code, lesson);
-      console.log(`[${code}] capacity -> ${n} (${n / 4} groups)`);
+      console.log(`[${code}] capacity -> ${capacity} (${capacity / 4} groups)`);
     });
 
     socket.on('claimSeat', (seatId: string) => {
@@ -1143,8 +1322,11 @@ io.on('connection', async (socket) => {
       if (typeof opts === 'function') { ack = opts; opts = undefined; }
       if (role !== 'teacher') return;
       const m = Math.round(Number((opts as { chatMinutes?: unknown } | undefined)?.chatMinutes) || 0);
-      const minutes = Math.min(MAX_AFTER_LESSON_MINUTES, Math.max(0, m));
-      if (typeof ack === 'function') ack(); // the teacher leaves the lesson either way
+      // a demo ends on its hour: no after-lesson chat past it
+      const minutes = demos.has(code) ? 0 : Math.min(MAX_AFTER_LESSON_MINUTES, Math.max(0, m));
+      closeDemo(code, 'by the teacher');
+      const demo = demos.get(code);
+      if (typeof ack === 'function') ack(demo ? demoEndInfo(demo) : undefined); // the teacher leaves the lesson either way
       if (minutes > 0 && socketsOf(lesson, 'student').length > 0) await startAfterLesson(code, lesson, minutes);
       else endLesson(code, lesson, 'by the teacher');
     });
@@ -1172,9 +1354,125 @@ setInterval(() => {
 setInterval(() => {
   cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
   sweepAttempts(codeAttempts); sweepAttempts(loginAttempts);
+  cleanupDemoLogs().catch(e => console.error('!!! demo logs not cleaned up:', e));
 }, 6 * 60 * 60 * 1000);
+
+// ---------- demo: starting one, its clock, feedback ----------
+
+function refuseDemo(res: Response, status: number, ipHash: string, error: string, retryAfterMs: number) {
+  countDemoIp(ipHash, 'refused');
+  res.status(status).json({ error, retryAfterSeconds: Math.ceil(retryAfterMs / 1000) });
+}
+
+app.post('/demo/lessons', async (req, res) => {
+  const ipHash = hashIp(clientIpFromReq(req), JWT_SECRET);
+  countDemoIp(ipHash, 'attempts');
+  const throttled = demoThrottle.attempt(ipHash);
+  if (!throttled.ok) {
+    if (throttled.newPause) {
+      countDemoIp(ipHash, 'penalties');
+      console.log(`demo: address ${ipHash} paused for ${Math.round(throttled.retryAfterMs / 1000)}s`);
+    }
+    refuseDemo(res, 429, ipHash, 'slow down', throttled.retryAfterMs);
+    return;
+  }
+  if (!hasDemo) { res.status(503).json({ error: 'demo unavailable' }); return; }
+
+  const videoMode: DemoMode = (req.body as { videoMode?: unknown } | undefined)?.videoMode === 'none' ? 'none' : 'teacher';
+  const now = Date.now();
+  const mine = [...demos.values()].filter(d => d.ipHash === ipHash);
+  const running = mine.find(d => d.endedAt === null);
+  if (running) { refuseDemo(res, 409, ipHash, 'ip busy', running.endsAt - now + DEMO_COOLDOWN_MS); return; }
+  const barred = Math.max(0, ...mine.map(d => d.cooldownUntil - now));
+  if (barred > 0) { refuseDemo(res, 429, ipHash, 'cooldown', barred); return; }
+  if (demoSlotsTaken(videoMode, now) >= DEMO_SLOTS[videoMode]) {
+    refuseDemo(res, 429, ipHash, 'no slots', nextDemoSlotMs(videoMode, now));
+    return;
+  }
+
+  // The place is taken before the first await, so a burst of requests can't slip past the checks
+  const pendingKey = `pending:${crypto.randomUUID()}`;
+  const demo: DemoRecord = {
+    code: pendingKey, ipHash, videoMode, createdAt: now, endsAt: now + DEMO_LESSON_MS, firstStudentAt: null,
+    peakStudents: 0, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0,
+  };
+  demos.set(pendingKey, demo);
+  try {
+    const lesson = await createLesson(null, videoMode);
+    demo.code = lesson.code;
+    demos.set(lesson.code, demo);
+    demos.delete(pendingKey);
+    await saveDemo(demo);
+    console.log(`[${lesson.code}] demo started (${videoMode}), address ${ipHash}`);
+    res.json({ lesson, token: signDemoToken(lesson.code), endsAt: demo.endsAt });
+  } catch (e) {
+    console.error('!!! demo lesson not created:', e);
+    demos.delete(pendingKey);
+    demos.delete(demo.code);
+    res.status(500).json({ error: 'failed to create lesson' });
+  }
+});
+
+app.post('/demo/feedback', async (req, res) => {
+  const code = verifyDemoToken(bearerToken(req));
+  if (!code) { res.status(401).json({ error: 'unauthorized' }); return; }
+  const { rating, comment, email } = req.body ?? {};
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) { res.status(400).json({ error: 'rating is required' }); return; }
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const saved = await saveDemoFeedback(code, rating, text(comment, 4000), text(email, 200)).then(() => true, () => false);
+  if (!saved) { res.status(500).json({ error: 'failed to save feedback' }); return; }
+  res.json({ ok: true });
+});
+
+function demoTick() {
+  const now = Date.now();
+  for (const [code, demo] of demos) {
+    if (code.startsWith('pending:')) continue;
+    if (demo.endedAt !== null) {
+      if (demo.cooldownUntil <= now && demo.slotFreeAt <= now) demos.delete(code);
+      continue;
+    }
+    const reason = now >= demo.endsAt ? 'time is up'
+      : demo.firstStudentAt === null && now - demo.createdAt >= DEMO_NO_STUDENTS_MS ? 'no students' : null;
+    if (!reason) continue;
+    const lesson = lessons.get(code);
+    if (lesson) endLesson(code, lesson, reason);
+    else closeDemo(code, reason);
+  }
+}
+setInterval(demoTick, 5000);
+
+// One line a minute on how the machine copes: what the demo is run to find out
+const LOAD_SAMPLE_MS = 60 * 1000;
+const sampleMachine = createSampler();
+sampleMachine();
+setInterval(() => {
+  const machine = sampleMachine();
+  const now = Date.now();
+  const all = [...lessons.entries()].filter(([c, l]) => holdsPlace(c, l));
+  const people = all.flatMap(([, l]) => [...l.participants.values()]);
+  if (hasDemo) {
+    saveLoadSample({
+      cpuPct: machine?.cpuPct ?? null, memUsedMb: machine?.memUsedMb ?? null, rxPps: machine?.rxPps ?? null,
+      txPps: machine?.txPps ?? null, udpDropped: machine?.udpDropped ?? null,
+      realLessons: all.filter(([c]) => !demos.has(c)).length,
+      demoCamera: demoSlotsTaken('teacher', now), demoAudio: demoSlotsTaken('none', now),
+      teachers: people.filter(p => p.role === 'teacher').length, students: people.filter(p => p.role === 'student').length,
+    }).catch(e => console.error('!!! load sample not saved:', e));
+    for (const [ipHash, c] of demoIpCounts) {
+      addDemoIpStats(ipHash, c.attempts, c.refused, c.penalties).catch(e => console.error('!!! demo stats not saved:', e));
+    }
+    demoIpCounts.clear();
+  }
+  demoThrottle.sweep();
+}, LOAD_SAMPLE_MS);
 
 const PORT = Number(process.env.PORT) || 13113;
 migrate()
   .catch(e => console.error('!!! DB migration failed — lessons work, but only with video (no lessons.video_mode):', e))
+  .then(async () => {
+    if (!hasDemo) return;
+    for (const demo of await loadCurrentDemos()) demos.set(demo.code, demo); // a restart mustn't free slots or addresses
+  })
+  .catch(e => console.error('!!! demo lessons not restored:', e))
   .finally(() => httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`)));

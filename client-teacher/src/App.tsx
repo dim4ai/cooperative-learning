@@ -10,7 +10,8 @@ import type { Seat, SeatNames } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, MaterialPanel, SlidesPresenter } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
-import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type VideoMode } from './MediaSetup';
+import { DemoSetup, MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
+import { DemoBanner, DemoFinished, type DemoEnd, type DemoTimes } from './demo';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
@@ -38,6 +39,8 @@ interface LessonState {
   stage: Stage;
   videoMode?: VideoMode;
   timerEndsAt: number | null;
+  demo?: DemoTimes | null;
+  now?: number;
   participants: Participant[];
 }
 
@@ -104,7 +107,7 @@ function CapacityInput() {
         type="number"
         value={value}
         onChange={e => setValue(e.target.value)}
-        min={4} step={4}
+        min={4} max={32} step={4}
         style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #444', background: '#2e2e3e', color: '#fff', fontSize: 13 }}
         onKeyDown={e => { if (e.key === 'Enter') socket.emit('setCapacity', Number(value)); }}
       />
@@ -173,6 +176,7 @@ interface Teacher {
 const TEACHER_KEY = 'teacher';
 const TOKEN_KEY = 'teacherToken';
 const CLASS_KEY = 'journalClass'; // a random id, tells nothing about the class
+const DEMO_KEY = 'demoLesson'; // the running demo lesson: a page reload comes back to it
 const JOURNAL_IDLE_MS = (Number(import.meta.env.VITE_JOURNAL_IDLE_MINUTES) || 60) * 60 * 1000;
 
 function loadSavedTeacher(): Teacher | null {
@@ -188,6 +192,22 @@ function loadSavedToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+function loadSavedDemo(): DemoStart | null {
+  try {
+    const raw = localStorage.getItem(DEMO_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDemo(demo: DemoStart | null) {
+  try {
+    if (demo) localStorage.setItem(DEMO_KEY, JSON.stringify(demo));
+    else localStorage.removeItem(DEMO_KEY);
+  } catch { /* private mode: only the return after a reload is lost */ }
+}
+
 const formScreenStyle: CSSProperties = {
   height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
   justifyContent: 'center', gap: 12, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box',
@@ -200,7 +220,7 @@ const formButtonStyle: CSSProperties = {
   background: '#4a90e2', color: '#fff', cursor: 'pointer', width: 240,
 };
 
-function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string, wrapKey: CryptoKey) => void }) {
+function LoginForm({ onLogin, onDemo }: { onLogin: (teacher: Teacher, token: string, wrapKey: CryptoKey) => void; onDemo: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -254,6 +274,9 @@ function LoginForm({ onLogin }: { onLogin: (teacher: Teacher, token: string, wra
       <button onClick={submit} disabled={loading || !email.trim() || !password} style={formButtonStyle}>
         {loading ? 'Вход…' : 'Войти'}
       </button>
+      <button data-testid="demo-open" onClick={onDemo} style={{ ...formButtonStyle, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2' }}>
+        Попробовать без регистрации
+      </button>
     </div>
   );
 }
@@ -293,7 +316,12 @@ function journalLabel(status: ReturnType<typeof useJournal>['status'], className
 export default function App() {
   const [teacher, setTeacher] = useState<Teacher | null>(loadSavedTeacher);
   const [token, setToken] = useState<string | null>(loadSavedToken);
-  const [lessonCode, setLessonCodeReady] = useState<string | null>(null);
+  const [demo, setDemoState] = useState<DemoStart | null>(loadSavedDemo);
+  function setDemo(d: DemoStart | null) { setDemoState(d); saveDemo(d); }
+  const [demoSetup, setDemoSetup] = useState(() => !loadSavedDemo() && new URLSearchParams(location.search).has('demo'));
+  const [demoEnd, setDemoEnd] = useState<DemoEnd | null>(null);
+  const lessonToken = demo?.token ?? token; // a demo lesson is run with its own token, not an account's
+  const [lessonCode, setLessonCodeReady] = useState<string | null>(demo?.code ?? null);
   const [lessonError, setLessonErrorState] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
@@ -308,9 +336,11 @@ export default function App() {
     setTeacher(null);
     setToken(null);
     setLessonCodeReady(null);
+    setDemo(null);
   }
 
   const [state, setState] = useState<LessonState>({ stage: 'waiting', timerEndsAt: null, participants: [] });
+  const [clockSkew, setClockSkew] = useState(0); // server time − this computer's
   // The teacher shows video unless the lesson is without video for everyone
   const camAllowed = state.videoMode !== 'none';
   const [connected, setConnected] = useState(false);
@@ -320,7 +350,7 @@ export default function App() {
   const classCams = useClassCamsRoom(camsInfo);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
-  const slides = useTeacherSlides(lessonCode, token, logout);
+  const slides = useTeacherSlides(lessonCode, lessonToken, logout);
 
   const journal = useJournal();
   const [journalOpen, setJournalOpen] = useState(false);
@@ -355,8 +385,8 @@ export default function App() {
   const planJson = journal.status === 'open' ? JSON.stringify(currentClass ? seatPlanOf(currentClass) : { seats: {} }) : '';
   const [joins, setJoins] = useState(0); // the server is ready for the plan after each (re)join
   useEffect(() => {
-    if (joins && planJson) socket.emit('seatPlan', JSON.parse(planJson));
-  }, [joins, planJson]);
+    if (joins && planJson && !demo) socket.emit('seatPlan', JSON.parse(planJson));
+  }, [joins, planJson, demo]);
 
   // Slides are being shown to the class (e.g. after a page reload) — show them here too
   useEffect(() => {
@@ -371,29 +401,47 @@ export default function App() {
 
   const [endDialog, setEndDialog] = useState(false);
 
+  /** The demo is over, whoever or whatever ended it: on to the feedback form */
+  function finishDemo(info?: { reason?: string | null; retryAfterSeconds?: number }) {
+    if (!demo) return;
+    slides.forget();
+    setDemoEnd({ token: demo.token, reason: info?.reason ?? null, retryAfterSeconds: info?.retryAfterSeconds ?? 0 });
+    setDemo(null);
+    setGroupMode('board');
+    setLessonCodeReady(null);
+  }
+
   function endLesson(chatMinutes: number) {
     setEndDialog(false);
     slides.forget();
     // wait for the server to finish before leaving; don't hang if it doesn't answer
-    const leave = () => { setGroupMode('board'); setLessonCodeReady(null); };
+    const leave = (info?: { reason?: string | null; retryAfterSeconds?: number }) => {
+      if (demo) { finishDemo(info); return; }
+      setGroupMode('board');
+      setLessonCodeReady(null);
+    };
     const timer = setTimeout(leave, 3000);
-    socket.emit('endLesson', { chatMinutes }, () => { clearTimeout(timer); leave(); });
+    socket.emit('endLesson', { chatMinutes }, (info?: { reason?: string | null; retryAfterSeconds?: number }) => { clearTimeout(timer); leave(info); });
   }
 
   useEffect(() => {
     if (!lessonCode) return;
     setLessonCode(lessonCode);
-    setAuthToken(token ?? '');
+    setAuthToken(lessonToken ?? '');
     socket.connect();
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
     socket.on('lessonError', ({ error, minutesLeft }: { error: string; minutesLeft?: number }) => {
+      if (demo && error === 'lesson ended') { finishDemo(); return; }
+      if (demo) { setDemo(null); setDemoSetup(true); setLessonCodeReady(null); return; }
       if (error === 'unauthorized') {
         logout();
         return;
       }
       setLessonErrorState(
-        error === 'too many attempts' ? 'Слишком много попыток — подождите минуту и попробуйте снова'
+        error === 'video full' ? 'Сейчас нет мест для занятий с камерой. Можно начать новое занятие «Без видео»'
+        : error === 'server full' ? 'Сейчас все места для занятий заняты, попробуйте через несколько минут'
+        : error === 'too many attempts' ? 'Слишком много попыток — подождите минуту и попробуйте снова'
         : error === 'not your lesson' ? 'Это занятие ведёт другой учитель'
         : error === 'after lesson' ? `Урок окончен, ученики ещё общаются без вас — занятие закроется через ${minutesLeft ?? 'несколько'} мин`
         : error === 'too many open lessons' ? 'У вас уже 5 занятий, в которых сейчас есть участники. Завершите одно из них и выйдите из него'
@@ -401,7 +449,12 @@ export default function App() {
       );
       setLessonCodeReady(null);
     });
-    socket.on('state', (s: LessonState) => { setState(s); setConfirmed(true); });
+    socket.on('state', (s: LessonState) => {
+      setState(s);
+      if (s.now) setClockSkew(s.now - Date.now());
+      setConfirmed(true);
+    });
+    socket.on('demoEnded', finishDemo);
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
     socket.on('joined', () => setJoins(n => n + 1));
@@ -417,8 +470,21 @@ export default function App() {
     return () => { socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); setCamsInfo(null); };
   }, [lessonCode]);
 
-  if (!teacher || !token) {
-    return <LoginForm onLogin={(t, tok, wrapKey) => {
+  if (!lessonCode && demoEnd) {
+    return <DemoFinished end={demoEnd} onAgain={() => { setDemoEnd(null); setDemoSetup(true); }} />;
+  }
+
+  if (!lessonCode && demoSetup) {
+    return <DemoSetup initial={media} onBack={() => setDemoSetup(false)} onStart={(d, p) => {
+      setMedia(p);
+      setDemo(d);
+      setDemoSetup(false);
+      setLessonCodeReady(d.code);
+    }} />;
+  }
+
+  if (!lessonCode && (!teacher || !token)) {
+    return <LoginForm onDemo={() => setDemoSetup(true)} onLogin={(t, tok, wrapKey) => {
       localStorage.setItem(TEACHER_KEY, JSON.stringify(t));
       localStorage.setItem(TOKEN_KEY, tok);
       setTeacher(t);
@@ -429,10 +495,10 @@ export default function App() {
 
   if (!lessonCode) {
     return (<>
-      <MediaSetup token={token} initial={media} error={lessonError} onUnauthorized={logout}
+      <MediaSetup token={token!} initial={media} error={lessonError} onUnauthorized={logout}
         onJoin={(code, p) => { setMedia(p); setLessonErrorState(''); setLessonCodeReady(code); }}
         journalLabel={journalLabel(journal.status, currentClass?.name)} onJournal={() => setJournalOpen(true)} onLogout={logout} />
-      {journalOpen && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId} onClose={() => setJournalOpen(false)} />}
+      {journalOpen && <JournalDialog email={teacher!.email} classId={classId} onClassId={setClassId} onClose={() => setJournalOpen(false)} />}
     </>);
   }
 
@@ -480,13 +546,13 @@ export default function App() {
 
         <MaterialPanel slides={slides} />
 
-        <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
+        {!demo && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
           marginTop: 8, padding: '6px', borderRadius: 6, border: '1px solid #444', cursor: 'pointer',
           background: 'transparent', color: journal.status === 'locked' ? '#f0c36d' : '#ccc', fontSize: 12, textAlign: 'left',
         }}>
           {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
-        </button>
-        {journalOpen && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
+        </button>}
+        {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
           lesson={{ students: lessonStudents, capacity: seats.length }} onClose={() => setJournalOpen(false)} />}
 
         {state.stage === 'waiting' && (
@@ -565,11 +631,12 @@ export default function App() {
         >
           Завершить урок
         </button>
-        {endDialog && <EndLessonDialog onEnd={endLesson} onCancel={() => setEndDialog(false)} />}
+        {endDialog && <EndLessonDialog noChat={!!demo} onEnd={endLesson} onCancel={() => setEndDialog(false)} />}
       </div>
 
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
         <div style={{ padding: '10px 16px', background: '#f8f8f8', borderBottom: '1px solid #eee', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>{currentLabel}</span>
           {state.stage === 'group' && livekit && (
