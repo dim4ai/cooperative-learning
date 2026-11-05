@@ -171,26 +171,22 @@ function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media:
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
   return (
     <div style={{
-      height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      gap: 12, fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
+      height: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start',
+      justifyContent: 'center', gap: '24px 64px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
     }}>
-      <h3 style={{ margin: '8px 0 0' }}>Настройка камеры и микрофона</h3>
-      <MediaCheck prefs={media} onChange={onMedia} />
-      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
-      <div style={{ maxWidth: 520 }}>
-        <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
+      <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0 }}>Камера и микрофон</h3>
+        <MediaCheck prefs={media} onChange={onMedia} />
       </div>
-      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
-      <div style={{ width: '100%', maxWidth: 640, height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
-        <Board />
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+
+      <div style={{ flex: '1 1 420px', maxWidth: 640, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <input
           value={code}
           onChange={e => setCode(e.target.value)}
           placeholder="Код занятия"
           onKeyDown={e => { if (e.key === 'Enter' && code.trim()) onJoin(code.trim().toLowerCase()); }}
-          style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', width: 180, letterSpacing: 1 }}
+          style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box', letterSpacing: 1 }}
         />
         <button
           onClick={() => code.trim() && onJoin(code.trim().toLowerCase())}
@@ -201,6 +197,13 @@ function PracticeArea({ error, media, onMedia, onJoin }: { error: string; media:
         </button>
       </div>
       {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
+      <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
+      <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>
+      <div style={{ width: '100%', height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
+        <Board />
+      </div>
+      </div>
     </div>
   );
 }
