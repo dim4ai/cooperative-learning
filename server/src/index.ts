@@ -1258,8 +1258,8 @@ io.on('connection', async (socket) => {
       if (role !== 'teacher') return;
       const from = lesson.seats.find(s => s.occupant === studentName);
       const to = lesson.seats.find(s => s.id === toSeatId);
-      if (!to || to.occupant) return;
-      if (from) from.occupant = null;
+      if (!to || to === from || (to.occupant && !from)) return;
+      if (from) from.occupant = to.occupant; // into a taken seat they swap
       to.occupant = studentName;
       broadcastSeats(code, lesson);
     });

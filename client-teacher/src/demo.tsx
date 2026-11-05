@@ -167,7 +167,7 @@ export async function startSolo(): Promise<{ code: string; token: string } | { e
 const GUIDE: Record<string, { title: string; steps: string[] }> = {
   waiting: { title: 'Рассадка', steps: [
     'Ученики заходят и садятся как попало. Ряд за партой — это пара, вся парта — четвёрка.',
-    'Соберите их за две парты: кликните по ученику, потом по свободному месту.',
+    'Соберите их за две парты: кликните по ученику, потом по свободному месту или по другому ученику, и они поменяются местами.',
     'Крестик поднимает ученика с места, и он сам садится на другое.',
     'Когда все будут на местах, нажмите слева «Начать урок».',
   ] },
@@ -198,7 +198,7 @@ export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) 
   const part = GUIDE[stage] ?? GUIDE.waiting;
   return (
     <div data-testid="solo-guide" style={{
-      width: 'min(250px, 32vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
+      width: 'min(250px, 22vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
       background: '#fbfbfd', fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
