@@ -37,11 +37,25 @@ type Tool = 'select' | 'pen' | 'marker' | 'eraser' | 'line' | 'arrow' | 'rect' |
 type ShapeTool = 'line' | 'arrow' | 'rect' | 'ellipse'
 const SHAPES: readonly Tool[] = ['line', 'arrow', 'rect', 'ellipse']
 
-const TOOLS: { key: Tool; icon: string; title: string; teacherOnly?: boolean }[] = [
+const lineIcon = (children: ReactNode) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block', margin: 'auto' }}>{children}</svg>
+)
+const PencilIcon = lineIcon(<>
+  <path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 0l.5.5a2.1 2.1 0 0 1 0 3L8.5 19 4 20z" />
+  <path d="M14.5 6l3.5 3.5" />
+</>)
+const EraserIcon = lineIcon(<>
+  <path d="M8 20l-4.3-4.3a1.8 1.8 0 0 1 0-2.5L13.2 3.7a1.8 1.8 0 0 1 2.5 0l4.6 4.6a1.8 1.8 0 0 1 0 2.5L11 20H8z" />
+  <path d="M8.5 8.5l7 7" />
+  <path d="M8 20h12" />
+</>)
+
+const TOOLS: { key: Tool; icon: ReactNode; title: string; teacherOnly?: boolean }[] = [
   { key: 'select', icon: '↖', title: 'Выбрать и двигать (Delete — удалить)' },
-  { key: 'pen', icon: '✏', title: 'Карандаш' },
+  { key: 'pen', icon: PencilIcon, title: 'Карандаш' },
   { key: 'marker', icon: '🖍', title: 'Маркер: полупрозрачный, для выделения', teacherOnly: true },
-  { key: 'eraser', icon: '⌫', title: 'Ластик: проведите по тому, что нужно стереть' },
+  { key: 'eraser', icon: EraserIcon, title: 'Ластик: проведите по тому, что нужно стереть' },
   { key: 'line', icon: '╱', title: 'Линия' },
   { key: 'arrow', icon: '→', title: 'Стрелка', teacherOnly: true },
   { key: 'rect', icon: '▭', title: 'Прямоугольник' },
