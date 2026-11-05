@@ -1,0 +1,17 @@
+name: Deploy landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/deploy-landing.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy landing page
+        run: rsync -a --delete landing/ ~/co-learn/landing/
