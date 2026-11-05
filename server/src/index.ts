@@ -389,6 +389,8 @@ const bookings = new Map<string, BookingRecord>();
 const DEMO_SOLO_MS = envNumber('DEMO_SOLO_MINUTES', 30) * MINUTE_MS;
 const DEMO_SOLO_ABSENT_MS = envNumber('DEMO_SOLO_ABSENT_MINUTES', 2) * MINUTE_MS;
 const DEMO_SOLO_NO_TEACHER_MS = envNumber('DEMO_SOLO_NO_TEACHER_MINUTES', 1) * MINUTE_MS;
+// Started and never joined is what a script does, the page joins by itself. Repeating that mustn't hold places.
+const DEMO_SOLO_EMPTY_BAR_MS = envNumber('DEMO_SOLO_EMPTY_BAR_MINUTES', 10) * MINUTE_MS;
 const DEMO_SOLO_MAX = envNumber('DEMO_SOLO_MAX', 50);
 const DEMO_SOLO_PER_IP = envNumber('DEMO_SOLO_PER_IP', 3); // a school shares one address
 const SOLO_STAGES = ['waiting', 'group', 'individual', 'pairs', 'fours'];
@@ -1495,6 +1497,9 @@ app.post('/demo/solo', async (req, res) => {
   const throttled = demoThrottle.attempt(ipHash);
   if (!throttled.ok) { refuseDemo(res, 429, ipHash, 'slow down', throttled.retryAfterMs); return; }
   if (!hasDemo) { res.status(503).json({ error: 'demo unavailable' }); return; }
+  const barred = Math.max(0, ...[...demos.values()]
+    .filter(d => d.ipHash === ipHash && d.endReason === 'teacher never came').map(d => d.cooldownUntil - Date.now()));
+  if (barred > 0) { refuseDemo(res, 429, ipHash, 'barred', barred); return; }
   const running = [...demos.values()].filter(d => d.videoMode === 'solo' && d.endedAt === null);
   if (running.length >= DEMO_SOLO_MAX) { refuseDemo(res, 503, ipHash, 'busy', MINUTE_MS); return; }
   if (running.filter(d => d.ipHash === ipHash).length >= DEMO_SOLO_PER_IP) { refuseDemo(res, 429, ipHash, 'ip busy', MINUTE_MS); return; }
@@ -1665,6 +1670,8 @@ function demoTick() {
     // A request alone doesn't hold a place: without this, a few addresses could fill the pool for free
     if (demo.videoMode === 'solo' && !lessons.has(code) && now - Math.max(demo.createdAt, serverStartedAt) >= DEMO_SOLO_NO_TEACHER_MS) {
       closeDemo(code, 'teacher never came');
+      demo.cooldownUntil = now + DEMO_SOLO_EMPTY_BAR_MS;
+      saveDemoLater(demo);
       continue;
     }
     const reason = now >= demo.endsAt ? 'time is up'

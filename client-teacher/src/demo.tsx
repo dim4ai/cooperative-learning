@@ -156,6 +156,7 @@ export async function startSolo(): Promise<{ code: string; token: string } | { e
     const body = await res.json().catch(() => ({}));
     if (res.ok && body.token) return { code: body.code, token: body.token };
     if (body.error === 'slow down') return { error: 'Слишком много попыток, подождите немного' };
+    if (body.error === 'barred') return { error: `С этого адреса был запуск без входа в урок. Попробуйте через ${Math.ceil((Number(body.retryAfterSeconds) || 60) / 60)} мин` };
     if (body.error === 'ip busy' || body.error === 'busy') return { error: 'Сейчас слишком много пробных уроков, попробуйте через минуту' };
     return { error: 'Не удалось начать, попробуйте ещё раз' };
   } catch {
