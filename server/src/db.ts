@@ -110,6 +110,7 @@ export async function migrate(): Promise<void> {
       cooldown_until timestamptz,
       slot_free_at timestamptz
     )`);
+    await pool.query(`ALTER TABLE demo_lessons ADD COLUMN IF NOT EXISTS reached text`);
     await pool.query(`CREATE TABLE IF NOT EXISTS demo_feedback (
       code text PRIMARY KEY,
       rating int NOT NULL CHECK (rating BETWEEN 1 AND 5),
@@ -246,7 +247,7 @@ export async function deleteLesson(code: string): Promise<void> {
 export interface DemoRecord {
   code: string;
   ipHash: string;
-  videoMode: 'teacher' | 'none';
+  videoMode: 'teacher' | 'none' | 'solo'; // solo: the teacher alone with bots, no media
   createdAt: number;
   endsAt: number;
   firstStudentAt: number | null;
@@ -255,6 +256,7 @@ export interface DemoRecord {
   endReason: string | null;
   cooldownUntil: number;
   slotFreeAt: number;
+  reached?: string | null; // solo: the furthest stage the teacher got to
 }
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
@@ -262,12 +264,12 @@ const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 export async function saveDemo(d: DemoRecord): Promise<void> {
   await pool.query(
     `INSERT INTO demo_lessons (code, ip_hash, video_mode, created_at, ends_at, first_student_at, peak_students,
-       ended_at, end_reason, cooldown_until, slot_free_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ended_at, end_reason, cooldown_until, slot_free_at, reached)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (code) DO UPDATE SET first_student_at = $6, peak_students = $7,
-       ended_at = $8, end_reason = $9, cooldown_until = $10, slot_free_at = $11`,
+       ended_at = $8, end_reason = $9, cooldown_until = $10, slot_free_at = $11, reached = $12`,
     [d.code, d.ipHash, d.videoMode, toDate(d.createdAt), toDate(d.endsAt), toDate(d.firstStudentAt), d.peakStudents,
-      toDate(d.endedAt), d.endReason, toDate(d.cooldownUntil), toDate(d.slotFreeAt)],
+      toDate(d.endedAt), d.endReason, toDate(d.cooldownUntil), toDate(d.slotFreeAt), d.reached ?? null],
   );
 }
 
@@ -282,7 +284,7 @@ export async function loadCurrentDemos(): Promise<DemoRecord[]> {
     createdAt: r.created_at.getTime(), endsAt: r.ends_at.getTime(),
     firstStudentAt: ms(r.first_student_at), peakStudents: r.peak_students,
     endedAt: ms(r.ended_at), endReason: r.end_reason,
-    cooldownUntil: ms(r.cooldown_until) ?? 0, slotFreeAt: ms(r.slot_free_at) ?? 0,
+    cooldownUntil: ms(r.cooldown_until) ?? 0, slotFreeAt: ms(r.slot_free_at) ?? 0, reached: r.reached,
   }));
 }
 

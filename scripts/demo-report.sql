@@ -15,6 +15,9 @@ SELECT video_mode, count(*) AS lessons, count(first_student_at) AS with_students
        round(avg(extract(epoch FROM ended_at - created_at)) / 60) AS avg_minutes
 FROM demo_lessons GROUP BY 1;
 
+\echo '== Solo demos: how far teachers got'
+SELECT reached, end_reason, count(*) FROM demo_lessons WHERE video_mode = 'solo' GROUP BY 1, 2 ORDER BY 3 DESC;
+
 \echo '== How they ended'
 SELECT end_reason, count(*) FROM demo_lessons WHERE ended_at IS NOT NULL GROUP BY 1 ORDER BY 2 DESC;
 

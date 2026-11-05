@@ -18,6 +18,7 @@ import {
 } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
+import { BOTS, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 
@@ -282,6 +283,7 @@ interface Participant {
   livekitRoom: string | null;
   uuid: string | null; // the student's profile in their browser; only teachers get to see it
   avatar: string | null; // id of a picture from the clients' built-in set (avatars/<id>.svg)
+  bot?: boolean; // a simulated student of the solo demo: no socket behind the id
 }
 
 // Seating
@@ -322,6 +324,7 @@ interface LessonRuntime {
   ended: boolean;                  // the lesson was ended — dropped from memory as soon as nobody is left
   afterUntil: number | null;       // after-lesson chat in fours (teacher gone) lasts until; then the lesson ends
   afterTimer: NodeJS.Timeout | null;
+  bots: BotRun | null;             // the solo demo's simulated class
 }
 
 const lessons = new Map<string, LessonRuntime>();
@@ -343,6 +346,8 @@ function holdsPlace(code: string, lesson: LessonRuntime): boolean {
   return !lesson.ended && (lesson.visited || !isEmpty(code, lesson));
 }
 
+const realPeople = (l: LessonRuntime) => [...l.participants.values()].filter(p => !p.bot);
+
 function realLessonRefusal(videoMode: VideoMode): 'server full' | 'video full' | null {
   const live = [...lessons.entries()].filter(([c, l]) => !demos.has(c) && holdsPlace(c, l)).map(([, l]) => l);
   if (live.length >= MAX_REAL_LESSONS) return 'server full';
@@ -353,11 +358,12 @@ function realLessonRefusal(videoMode: VideoMode): 'server full' | 'video full' |
 /** Why this person can't come in now, if so. Checked right before joining, with no await in between. */
 function joinRefusal(code: string, videoMode: VideoMode, role: Role, uuid: string | null): string | null {
   const lesson = lessons.get(code);
+  if (role !== 'teacher' && demos.get(code)?.videoMode === 'solo') return 'lesson full'; // the class is simulated
   if (role === 'board') return null;
   if (role === 'student') {
     const others = lesson ? [...lesson.participants.values()].filter(p => p.role === 'student' && (!uuid || p.uuid !== uuid)) : [];
     if (others.length >= MAX_STUDENTS_PER_LESSON) return 'lesson full';
-    const total = [...lessons.values()].reduce((n, l) => n + l.participants.size, 0);
+    const total = [...lessons.values()].reduce((n, l) => n + realPeople(l).length, 0);
     if (total >= MAX_PARTICIPANTS_TOTAL) return 'server full';
   }
   if (demos.has(code) || (lesson && holdsPlace(code, lesson))) return null;
@@ -380,6 +386,11 @@ const DEMO_SLOTS: Record<BookingMode, number> = { teacher: envNumber('DEMO_CAMER
 
 const demos = new Map<string, DemoRecord>();
 const bookings = new Map<string, BookingRecord>();
+const DEMO_SOLO_MS = envNumber('DEMO_SOLO_MINUTES', 30) * MINUTE_MS;
+const DEMO_SOLO_ABSENT_MS = envNumber('DEMO_SOLO_ABSENT_MINUTES', 2) * MINUTE_MS;
+const DEMO_SOLO_MAX = envNumber('DEMO_SOLO_MAX', 50);
+const DEMO_SOLO_PER_IP = envNumber('DEMO_SOLO_PER_IP', 3); // a school shares one address
+const SOLO_STAGES = ['waiting', 'group', 'individual', 'pairs', 'fours'];
 const demoThrottle = new Throttle();
 const demoIpCounts = new Map<string, { attempts: number; refused: number; penalties: number }>();
 
@@ -415,6 +426,12 @@ function openBooking(b: BookingRecord) {
 }
 
 /** Marks the demo as over; safe to call from every path that ends a lesson */
+function stopBots(lesson: LessonRuntime) {
+  lesson.bots?.stop();
+  lesson.bots = null;
+  for (const [id, p] of lesson.participants) if (p.bot) lesson.participants.delete(id);
+}
+
 function closeDemo(code: string, reason: string) {
   const demo = demos.get(code);
   if (!demo || demo.endedAt !== null) return;
@@ -435,6 +452,40 @@ function closeDemo(code: string, reason: string) {
 
 function demoEndInfo(demo: DemoRecord) {
   return { reason: demo.endReason };
+}
+
+/** The simulated class comes in by itself: nothing here is connected to anybody */
+function startBots(code: string, lesson: LessonRuntime) {
+  createSeats(lesson, BOTS.length);
+  broadcastSeats(code, lesson);
+  const bots = new BotRun({
+    seat(i) {
+      const { name, avatar } = BOTS[i];
+      const id = `bot:${i}`;
+      lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: null, avatar, bot: true });
+      const seat = lesson.seats.find(s => !s.occupant);
+      if (seat) seat.occupant = name;
+      broadcastSeats(code, lesson);
+      broadcastState(code, lesson);
+    },
+    rooms: () => [...new Set(realBotRooms(lesson))].sort(),
+    write: (room, obj) => applyBoardOp(lesson, room, { t: 'add', obj }, 'Ученик', false, ''),
+    call(room, note) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note });
+    },
+  });
+  lesson.bots = bots;
+  bots.seatEveryone();
+}
+
+const realBotRooms = (lesson: LessonRuntime) =>
+  [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom).map(p => p.livekitRoom!);
+
+function soloReached(code: string, stage: string) {
+  const demo = demos.get(code);
+  if (demo?.videoMode !== 'solo' || SOLO_STAGES.indexOf(stage) <= SOLO_STAGES.indexOf(demo.reached ?? 'waiting')) return;
+  demo.reached = stage;
+  saveDemoLater(demo);
 }
 
 const demoStart = (demo: DemoRecord) => demo.endsAt - DEMO_LESSON_MS;
@@ -462,13 +513,14 @@ const MAX_OPEN_LESSONS_PER_TEACHER = Number(process.env.MAX_OPEN_LESSONS_PER_TEA
 
 /** Nobody connected, including sockets still in the middle of joining */
 function isEmpty(code: string, lesson: LessonRuntime): boolean {
-  return lesson.participants.size === 0 && lesson.boardConnections.size === 0 && !io.sockets.adapter.rooms.get(code)?.size;
+  return realPeople(lesson).length === 0 && lesson.boardConnections.size === 0 && !io.sockets.adapter.rooms.get(code)?.size;
 }
 
 function dropLesson(code: string, why: string) {
   const lesson = lessons.get(code);
   if (!lesson) return;
   closeDemo(code, why);
+  stopBots(lesson);
   lesson.relay.dispose();
   if (lesson.afterTimer) clearTimeout(lesson.afterTimer);
   lessons.delete(code);
@@ -509,6 +561,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     ended: false,
     afterUntil: null,
     afterTimer: null,
+    bots: null,
   };
   lessons.set(code, lesson);
   return lesson;
@@ -579,7 +632,7 @@ function pollResults(lesson: LessonRuntime) {
 function demoState(code: string) {
   const demo = demos.get(code);
   if (!demo || demo.endedAt !== null) return null;
-  return { endsAt: demo.endsAt, noStudentsAt: demo.firstStudentAt === null ? demoStart(demo) + DEMO_NO_STUDENTS_MS : null };
+  return { endsAt: demo.endsAt, solo: demo.videoMode === 'solo', noStudentsAt: demo.firstStudentAt === null ? demoStart(demo) + DEMO_NO_STUDENTS_MS : null };
 }
 
 function broadcastState(code: string, lesson: LessonRuntime) {
@@ -609,6 +662,7 @@ function socketsOf(lesson: LessonRuntime, role: Role): string[] {
  *  forgotten, students are told and sent away; once nobody is left the lesson leaves memory. */
 function endLesson(code: string, lesson: LessonRuntime, why: string) {
   closeDemo(code, why);
+  stopBots(lesson);
   lesson.ended = true;
   lesson.stage = 'waiting';
   lesson.timerEndsAt = null;
@@ -791,10 +845,16 @@ async function makeLivekitToken(identity: string, room: string, video = true): P
   return await token.toJwt();
 }
 
+// LiveKit makes a room by itself when someone joins; the solo demo has no one to wait for it
+async function prepareRoom(lesson: LessonRuntime, room: string) {
+  if (!lesson.bots) await livekit.createRoom({ name: room }).catch(() => {});
+}
+
 async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string, room: string) {
+  const participant = lesson.participants.get(socketId);
+  if (participant?.bot) { participant.livekitRoom = room; return; }
   const socket = io.sockets.sockets.get(socketId);
   if (!socket) return;
-  const participant = lesson.participants.get(socketId);
   if (!participant) return;
   const token = await makeLivekitToken(participant.name, room, canVideo(lesson, participant.role));
   socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room });
@@ -820,7 +880,7 @@ async function assignPairs(code: string, lesson: LessonRuntime) {
     }
     for (const [base, pairSeats] of pairMap) {
       const room = roomName(code, base);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (const seat of pairSeats) {
         const s = studentByName.get(seat.occupant!);
         if (s) await sendToRoom(code, lesson, s.id, room);
@@ -831,7 +891,7 @@ async function assignPairs(code: string, lesson: LessonRuntime) {
     const unseated = students.filter(s => !seated.has(s.name));
     for (let i = 0; i < unseated.length; i += 2) {
       const room = roomName(code, `pair-unseated-${Math.floor(i / 2) + 1}`);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (let j = i; j < Math.min(i + 2, unseated.length); j++) {
         await sendToRoom(code, lesson, unseated[j].id, room);
       }
@@ -839,7 +899,7 @@ async function assignPairs(code: string, lesson: LessonRuntime) {
   } else {
     for (let i = 0; i < students.length; i += 2) {
       const room = roomName(code, `pair-${Math.floor(i / 2) + 1}`);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (let j = i; j < Math.min(i + 2, students.length); j++) {
         await sendToRoom(code, lesson, students[j].id, room);
       }
@@ -860,7 +920,7 @@ async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours'
     }
     for (const [groupIndex, groupSeats] of groupMap) {
       const room = roomName(code, `${prefix}-${groupIndex + 1}`);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (const seat of groupSeats) {
         const s = studentByName.get(seat.occupant!);
         if (s) await sendToRoom(code, lesson, s.id, room);
@@ -870,7 +930,7 @@ async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours'
     const unseated = students.filter(s => !seated.has(s.name));
     for (let i = 0; i < unseated.length; i += 4) {
       const room = roomName(code, `${prefix}-unseated-${Math.floor(i / 4) + 1}`);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (let j = i; j < Math.min(i + 4, unseated.length); j++) {
         await sendToRoom(code, lesson, unseated[j].id, room);
       }
@@ -878,7 +938,7 @@ async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours'
   } else {
     for (let i = 0; i < students.length; i += 4) {
       const room = roomName(code, `${prefix}-${Math.floor(i / 4) + 1}`);
-      await livekit.createRoom({ name: room }).catch(() => {});
+      await prepareRoom(lesson, room);
       for (let j = i; j < Math.min(i + 4, students.length); j++) {
         await sendToRoom(code, lesson, students[j].id, room);
       }
@@ -890,7 +950,7 @@ async function assignIndividual(code: string, lesson: LessonRuntime) {
   const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
   for (const student of students) {
     const room = roomName(code, `individual-${student.name}`);
-    await livekit.createRoom({ name: room }).catch(() => {});
+    await prepareRoom(lesson, room);
     await sendToRoom(code, lesson, student.id, room);
   }
 }
@@ -898,7 +958,7 @@ async function assignIndividual(code: string, lesson: LessonRuntime) {
 async function sendAllToMain(code: string, lesson: LessonRuntime) {
   const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
   const room = roomName(code, 'main-room');
-  await livekit.createRoom({ name: room }).catch(() => {});
+  await prepareRoom(lesson, room);
   for (const student of students) {
     await sendToRoom(code, lesson, student.id, room);
   }
@@ -1122,6 +1182,7 @@ io.on('connection', async (socket) => {
       lesson.noTeacherSince = null;
       const booking = bookings.get(code);
       if (booking && !booking.teacherCame) { booking.teacherCame = true; saveBookingLater(booking); }
+      if (demos.get(code)?.videoMode === 'solo' && !lesson.bots) startBots(code, lesson);
     }
     if (role === 'teacher') {
       socket.emit('slides:material', teacherMaterial(lesson));
@@ -1207,6 +1268,8 @@ io.on('connection', async (socket) => {
       else if (stage === 'individual') await assignIndividual(code, lesson);
       else await sendAllToMain(code, lesson);
       broadcastState(code, lesson);
+      lesson.bots?.onStage(stage);
+      soloReached(code, stage);
     });
 
     socket.on('startTimer', (seconds: number) => {
@@ -1268,6 +1331,7 @@ io.on('connection', async (socket) => {
       await sendToRoom(code, lesson, socket.id, room);
       // Dismiss call indicator for this room on teacher side
       socket.emit('callTeacher', { room, calling: false });
+      lesson.bots?.onVisit(room);
       // Notify students in the pair room that teacher is coming
       for (const [id, p] of lesson.participants) {
         if (p.livekitRoom === room && p.role === 'student') {
@@ -1385,7 +1449,9 @@ const TEACHER_ABSENT_MS = (Number(process.env.TEACHER_ABSENT_MINUTES) || 15) * 6
 setInterval(() => {
   const now = Date.now();
   for (const [code, lesson] of lessons) {
-    if (lesson.ended || lesson.afterUntil || !lesson.noTeacherSince || now - lesson.noTeacherSince <= TEACHER_ABSENT_MS) continue;
+    if (lesson.ended || lesson.afterUntil || !lesson.noTeacherSince) continue;
+    const away = now - lesson.noTeacherSince;
+    if (away <= (demos.get(code)?.videoMode === 'solo' ? DEMO_SOLO_ABSENT_MS : TEACHER_ABSENT_MS)) continue;
     const booking = bookings.get(code);
     if (booking && now < booking.startsAt + DEMO_NO_SHOW_MS) continue; // the class gathers before the teacher is due
     if (isEmpty(code, lesson)) dropLesson(code, 'no teacher');
@@ -1419,6 +1485,40 @@ function bookingOf(req: Request): BookingRecord | null {
 const bookingView = (b: BookingRecord) => ({
   code: b.code, videoMode: b.videoMode, startsAt: b.startsAt, opensAt: opensAt(b.startsAt),
   endsAt: b.startsAt + DEMO_LESSON_MS, status: b.status, now: Date.now(),
+});
+
+// Trying it alone: at any moment, nothing to wait for and no media, so nothing that can run out
+app.post('/demo/solo', async (req, res) => {
+  const ipHash = hashIp(clientIpFromReq(req), JWT_SECRET);
+  countDemoIp(ipHash, 'attempts');
+  const throttled = demoThrottle.attempt(ipHash);
+  if (!throttled.ok) { refuseDemo(res, 429, ipHash, 'slow down', throttled.retryAfterMs); return; }
+  if (!hasDemo) { res.status(503).json({ error: 'demo unavailable' }); return; }
+  const running = [...demos.values()].filter(d => d.videoMode === 'solo' && d.endedAt === null);
+  if (running.length >= DEMO_SOLO_MAX) { refuseDemo(res, 503, ipHash, 'busy', MINUTE_MS); return; }
+  if (running.filter(d => d.ipHash === ipHash).length >= DEMO_SOLO_PER_IP) { refuseDemo(res, 429, ipHash, 'ip busy', MINUTE_MS); return; }
+
+  const now = Date.now();
+  const pendingKey = `pending:${crypto.randomUUID()}`;
+  const demo: DemoRecord = {
+    code: pendingKey, ipHash, videoMode: 'solo', createdAt: now, endsAt: now + DEMO_SOLO_MS, firstStudentAt: now,
+    peakStudents: BOTS.length, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0, reached: 'waiting',
+  };
+  demos.set(pendingKey, demo);
+  try {
+    const lesson = await createLesson(null, 'none');
+    demo.code = lesson.code;
+    demos.set(lesson.code, demo);
+    demos.delete(pendingKey);
+    await saveDemo(demo);
+    console.log(`[${lesson.code}] solo demo started, address ${ipHash}`);
+    res.json({ code: lesson.code, token: signDemoToken(lesson.code) });
+  } catch (e) {
+    console.error('!!! solo demo not created:', e);
+    demos.delete(pendingKey);
+    demos.delete(demo.code);
+    res.status(500).json({ error: 'failed to create lesson' });
+  }
 });
 
 app.get('/demo/slots', (_req, res) => {
@@ -1577,7 +1677,7 @@ setInterval(() => {
   const machine = sampleMachine();
   const now = Date.now();
   const all = [...lessons.entries()].filter(([c, l]) => holdsPlace(c, l));
-  const people = all.flatMap(([, l]) => [...l.participants.values()]);
+  const people = all.flatMap(([, l]) => realPeople(l));
   if (hasDemo) {
     saveLoadSample({
       cpuPct: machine?.cpuPct ?? null, memUsedMb: machine?.memUsedMb ?? null, rxPps: machine?.rxPps ?? null,
