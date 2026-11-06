@@ -155,14 +155,14 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean }) {
+function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
   }
 
   if (stage === 'group') {
     // Everyone is in the main room: a move takes effect when the next block splits the class
-    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove lessonCode={lessonCode} names={names} marks={marks} />;
+    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
     if (groupMode === 'board') return <>{slidesView}</>;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 15 }}>
@@ -176,11 +176,11 @@ function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRoo
   }
 
   if (stage === 'individual') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} />;
   }
 
   if (stage === 'pairs' || stage === 'fours') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} />;
   }
 
   return (
@@ -572,13 +572,14 @@ export default function App() {
 
   // Who is who, seen only here: name in the lesson (what classmates see) → name in the journal
   const lessonStudents = students.map(p => ({
-    name: teacherNames[p.name] ?? p.name, uuid: studentUuids[p.id] ?? null, seat: seats.find(s => s.occupant === p.name)?.id ?? null,
+    name: teacherNames[p.name] ?? p.name, uuid: studentUuids[p.id] ?? null, seat: seats.find(s => s.occupant === p.name && s.extra === undefined)?.id ?? null,
   }));
   const journalStudentOf = (uuid: string | null) => uuid ? currentClass?.students.find(s => s.uuids.includes(uuid)) : undefined;
   const seatNames: SeatNames = {
     journalName: occupant => journalStudentOf(studentUuids[students.find(p => p.name === occupant)?.id ?? ''] ?? null)?.name,
     reservedFor: seatId => currentClass?.students.find(s => s.seat === seatId)?.name,
   };
+  const waitingSeat = seats.length ? students.filter(p => !seats.some(s => s.occupant === p.name)).map(p => p.name) : [];
   const notInJournal = currentClass ? lessonStudents.filter(p => p.uuid && !journalStudentOf(p.uuid)).length : 0;
 
   const inner = (
@@ -610,7 +611,7 @@ export default function App() {
           {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
         </button>}
         {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
-          lesson={{ students: lessonStudents, capacity: seats.length }} onClose={() => setJournalOpen(false)} />}
+          lesson={{ students: lessonStudents, capacity: seats.filter(s => s.extra === undefined).length }} onClose={() => setJournalOpen(false)} />}
 
         {state.stage === 'waiting' && !demo?.solo && (
           <>
@@ -723,7 +724,7 @@ export default function App() {
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
-                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} />
+                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
           }
         </div>
       </div>

@@ -317,6 +317,7 @@ export interface Seat {
   col: number;   // 0 = левый, 1 = правый
   occupant: string | null;
   reserved: boolean; // kept by the seat plan for a certain student
+  extra?: number; // on an added desk (0, 1) for newcomers to a class with a saved seating
 }
 
 type UnderstoodMark = 'yes' | 'no';
@@ -609,6 +610,7 @@ function roomName(code: string, base: string): string {
 
 function createSeats(lesson: LessonRuntime, n: number) {
   const prev = new Map(lesson.seats.map(s => [s.id, s.occupant]));
+  const extras = lesson.seats.filter(s => s.extra !== undefined);
   const planned = new Set(lesson.seatPlan.values());
   lesson.seats = [];
   const numGroups = Math.floor(n / 4);
@@ -620,6 +622,66 @@ function createSeats(lesson: LessonRuntime, n: number) {
       }
     }
   }
+  for (const s of extras) lesson.seats.push({ ...s, groupIndex: numGroups + s.extra! });
+}
+
+// A class with a saved seating keeps its seats for its students. Anyone else goes to an added desk
+// until the teacher has talked to them and found them a place. Two desks at most: whoever comes
+// after that waits for a seat, so a crowd with the code can't take over the lesson.
+const MAX_EXTRA_DESKS = 2;
+
+function freeExtraSeat(lesson: LessonRuntime): Seat | undefined {
+  const free = lesson.seats.find(s => s.extra !== undefined && !s.occupant);
+  if (free) return free;
+  const desks = new Set(lesson.seats.filter(s => s.extra !== undefined).map(s => s.extra)).size;
+  if (desks >= MAX_EXTRA_DESKS) return undefined;
+  const groupIndex = Math.max(-1, ...lesson.seats.map(s => s.groupIndex)) + 1;
+  const added: Seat[] = [];
+  for (let row = 0; row < 2; row++) for (let col = 0; col < 2; col++) {
+    added.push({ id: `x${desks}r${row}c${col}`, groupIndex, row, col, occupant: null, reserved: false, extra: desks });
+  }
+  lesson.seats.push(...added);
+  return added[0];
+}
+
+function dropEmptyExtraDesks(lesson: LessonRuntime) {
+  for (let desk = MAX_EXTRA_DESKS - 1; desk >= 0; desk--) {
+    const seats = lesson.seats.filter(s => s.extra === desk);
+    if (seats.some(s => s.occupant)) return;
+    lesson.seats = lesson.seats.filter(s => s.extra !== desk);
+  }
+}
+
+/** Students of a work stage sit in the room of their seat */
+async function enterSeatRoom(code: string, lesson: LessonRuntime, p: Participant) {
+  const seat = lesson.seats.find(s => s.occupant === p.name);
+  if (!seat) return;
+  const base = lesson.stage === 'individual' ? `individual-${p.name}`
+    : lesson.stage === 'pairs' ? `pair-g${seat.groupIndex}-r${seat.row}`
+    : lesson.stage === 'fours' ? `fours-${seat.groupIndex + 1}` : null;
+  if (!base) return;
+  const room = roomName(code, base);
+  await prepareRoom(lesson, room);
+  await sendToRoom(code, lesson, p.id, room);
+}
+
+/** Seats changed or someone came: newcomers take the free places of the added desks, in order of arrival */
+async function settleSeats(code: string, lesson: LessonRuntime) {
+  const seated: Participant[] = [];
+  if (lesson.seatPlan.size) {
+    const taken = new Set(lesson.seats.map(s => s.occupant));
+    for (const p of lesson.participants.values()) {
+      if (p.role !== 'student' || taken.has(p.name)) continue;
+      const seat = freeExtraSeat(lesson);
+      if (!seat) break;
+      seat.occupant = p.name;
+      seated.push(p);
+    }
+  }
+  dropEmptyExtraDesks(lesson);
+  broadcastSeats(code, lesson);
+  for (const p of seated) await enterSeatRoom(code, lesson, p);
+  if (seated.length) broadcastState(code, lesson);
 }
 
 const MAX_CAPACITY = MAX_STUDENTS_PER_LESSON;
@@ -649,6 +711,14 @@ function applySeatPlan(lesson: LessonRuntime, capacity: unknown, plan: unknown) 
   const planned = new Set(lesson.seatPlan.values());
   for (const seat of lesson.seats) seat.reserved = planned.has(seat.id);
   for (const p of lesson.participants.values()) if (p.role === 'student') seatByPlan(lesson, p);
+}
+
+/** Students are told apart by uuid; one more "Кот" in the lesson becomes "Кот 2" */
+function uniqueName(lesson: LessonRuntime, name: string, uuid: string | null): string {
+  const taken = new Set([...lesson.participants.values()].filter(p => p.role === 'student' && (!uuid || p.uuid !== uuid)).map(p => p.name));
+  let unique = name;
+  for (let n = 2; taken.has(unique); n++) unique = `${name} ${n}`;
+  return unique;
 }
 
 function broadcastSeats(code: string, lesson: LessonRuntime) {
@@ -1297,7 +1367,7 @@ io.on('connection', async (socket) => {
         for (const seat of lesson.seats) {
           if (seat.occupant === effectiveName) seat.occupant = null;
         }
-        io.to(code).emit('seats', lesson.seats);
+        settleSeats(code, lesson).catch(e => console.error('seats not settled:', e));
       }
       console.log(`- [${code}] ${role}: ${effectiveName}`);
       broadcastState(code, lesson);
@@ -1307,7 +1377,7 @@ io.on('connection', async (socket) => {
     socket.on('seatPlan', ({ capacity, seats }: { capacity?: unknown; seats?: unknown } = {}) => {
       if (role !== 'teacher') return;
       applySeatPlan(lesson, capacity, seats);
-      broadcastSeats(code, lesson);
+      settleSeats(code, lesson).catch(e => console.error('seats not settled:', e));
     });
 
     if (role === 'teacher') socket.emit('joined'); // the lines above are listening now: the plan may come
@@ -1360,6 +1430,10 @@ io.on('connection', async (socket) => {
       socket.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(effectiveName, mainRoom), room: mainRoom });
     }
     await sendToRoom(code, lesson, socket.id, mainRoom);
+    if (role === 'student') {
+      await enterSeatRoom(code, lesson, participant); // back to their desk in the middle of work
+      await settleSeats(code, lesson);
+    }
 
     socket.on('setCapacity', (n: number) => {
       if (role !== 'teacher' || !Number.isInteger(n) || n < 0) return;
@@ -1370,7 +1444,7 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('claimSeat', (seatId: string) => {
-      if (role !== 'student') return;
+      if (role !== 'student' || lesson.seatPlan.size) return; // a saved seating isn't up to the students
       const target = lesson.seats.find(s => s.id === seatId);
       if (target && reservedForOther(lesson, target, uuid)) return; // stay where you are
       // Release current seat
@@ -1386,17 +1460,20 @@ io.on('connection', async (socket) => {
       const seat = lesson.seats.find(s => s.id === seatId);
       if (seat?.occupant) lesson.bots?.onUnseated(seat.occupant);
       if (seat) seat.occupant = null;
-      broadcastSeats(code, lesson);
+      settleSeats(code, lesson).catch(e => console.error('seats not settled:', e));
     });
 
-    socket.on('moveSeat', ({ studentName, toSeatId }: { studentName: string; toSeatId: string }) => {
+    socket.on('moveSeat', async ({ studentName, toSeatId }: { studentName: string; toSeatId: string }) => {
       if (role !== 'teacher') return;
       const from = lesson.seats.find(s => s.occupant === studentName);
       const to = lesson.seats.find(s => s.id === toSeatId);
       if (!to || to === from || (to.occupant && !from)) return;
       if (from) from.occupant = to.occupant; // into a taken seat they swap
       to.occupant = studentName;
-      broadcastSeats(code, lesson);
+      await settleSeats(code, lesson);
+      // Was waiting for a seat, and the others are at work already
+      const moved = [...lesson.participants.values()].find(p => p.name === studentName);
+      if (!from && moved) { await enterSeatRoom(code, lesson, moved); broadcastState(code, lesson); }
     });
 
     socket.on('setStage', async (stage: Stage) => {
@@ -1577,7 +1654,9 @@ io.on('connection', async (socket) => {
 
   }
 
-  await finishJoin(name);
+  const effectiveName = role === 'student' ? uniqueName(lesson, name, uuid) : name;
+  if (effectiveName !== name) socket.emit('myName', effectiveName);
+  await finishJoin(effectiveName);
 });
 
 cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});

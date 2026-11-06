@@ -63,6 +63,7 @@ export interface Seat {
   col: number;
   occupant: string | null;
   reserved?: boolean;
+  extra?: number; // an added desk for newcomers to a class with a saved seating
 }
 
 /** From the journal; only the teacher's browser knows these names */
@@ -84,7 +85,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [] }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[] }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -124,6 +125,17 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
         }
       `}</style>
       {showSelf && <SelfPreview />}
+      {waiting.length > 0 && (
+        <div data-testid="seat-waiting" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 13, color: '#555' }}>
+          Ждут место:
+          {waiting.map(name => (
+            <button key={name} data-testid="seat-waiting-name" title="Выберите, потом кликните свободное место" onClick={() => setSelected(s => s === name ? null : name)} style={{
+              padding: '4px 10px', borderRadius: 14, cursor: 'pointer', fontSize: 13,
+              border: selected === name ? '2px solid #4a90e2' : '1px solid #bbb', background: '#fff', color: '#222',
+            }}><StudentName identity={name} /></button>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignContent: 'flex-start' }}>
       {Array.from({ length: numGroups }, (_, g) => {
         const groupSeats = seats.filter(s => s.groupIndex === g);
@@ -132,7 +144,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
         const isGroupCalling = callingRooms?.has(foursRoom) ?? false;
         const groupLost = allLost(groupSeats, marks, 3);
         return (
-          <div key={g} data-testid={groupLost ? 'four-lost' : undefined} style={{
+          <div key={g} data-testid={groupLost ? 'four-lost' : groupSeats[0]?.extra !== undefined ? 'extra-desk' : undefined} style={{
             border: `${groupLost ? 6 : 3}px solid ${isGroupCalling ? '#f39c12' : groupLost ? NOT_UNDERSTOOD : color}`,
             borderRadius: 10,
             padding: 8,
@@ -142,6 +154,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
             position: 'relative',
             animation: isGroupCalling ? 'pairPulse 1.2s infinite' : 'none',
           }}>
+            {groupSeats[0]?.extra !== undefined && <div style={{ fontSize: 12, color: '#777', marginBottom: -4 }}>Новые ученики</div>}
             {isGroupCalling && (
               <div
                 onClick={() => onJoinPair?.(foursRoom)}
@@ -175,7 +188,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               if (!seat) return null;
               const seatNum = row * 2 + col + 1;
               const isSelected = !!selected && seat.occupant === selected;
-              const isTarget = !!selected && seat.occupant !== selected;
+              const isTarget = !!selected && seat.occupant !== selected && (!seat.occupant || (!readOnly && !waiting.includes(selected)));
               const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
               const joinRoom = joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
@@ -184,6 +197,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                 <div key={seat.id}
                   onClick={() => {
                     if (!readOnly) { if (seat.occupant) handleOccupiedClick(seat.occupant, seat.id); else handleEmptyClick(seat.id); return; }
+                    if (selected && !seat.occupant) { handleEmptyClick(seat.id); return; }
                     // During work the teacher can walk up to anyone, called or not
                     if (seat.occupant && joinRoom) onJoinPair?.(joinRoom);
                   }}

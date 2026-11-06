@@ -11,6 +11,7 @@ export interface Seat {
   col: number;
   occupant: string | null;
   reserved?: boolean; // kept for a student from the teacher's journal
+  extra?: number; // an added desk for newcomers
 }
 
 const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63'];
@@ -52,16 +53,19 @@ export function SeatingMap({ seats }: { seats: Seat[] }) {
 
   const numGroups = Math.max(...seats.map(s => s.groupIndex)) + 1;
   const mySeat = seats.find(s => s.occupant === myName);
+  const planned = seats.some(s => s.reserved); // a saved seating: the teacher places students
 
   function handleClick(seat: Seat) {
-    if (seat.occupant || seat.reserved) return;
+    if (seat.occupant || planned) return;
     socket.emit('claimSeat', seat.id);
   }
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: '200px 16px 16px', boxSizing: 'border-box' }}>
       <div style={{ marginBottom: 12, fontSize: 15, color: '#555' }}>
-        {mySeat ? `Вы сидите в группе ${mySeat.groupIndex + 1}, место ${mySeat.row * 2 + mySeat.col + 1}` : 'Выберите место'}
+        {mySeat?.extra !== undefined ? 'Вы за дополнительным столом: учитель определит ваше место'
+          : mySeat ? `Вы сидите в группе ${mySeat.groupIndex + 1}, место ${mySeat.row * 2 + mySeat.col + 1}`
+          : planned ? 'Свободных мест пока нет. Подождите: учитель посадит вас' : 'Выберите место'}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
         {Array.from({ length: numGroups }, (_, g) => {
@@ -104,7 +108,7 @@ export function SeatingMap({ seats }: { seats: Seat[] }) {
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontSize: 12,
-                      cursor: isTaken || (isFree && seat.reserved) ? 'default' : 'pointer',
+                      cursor: isTaken || (isFree && planned) ? 'default' : 'pointer',
                       border: isMe ? `3px solid ${color}` : `1px solid ${isFree ? '#ddd' : color}`,
                       background: isTaken ? `${color}55` : isMe ? `${color}33` : '#f8f8f8',
                       color: isMe ? '#fff' : isTaken ? '#555' : '#aaa',
