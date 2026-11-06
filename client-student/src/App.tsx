@@ -173,7 +173,7 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
 function AvatarPreview({ avatar, nick }: { avatar: string | null; nick: string }) {
   return (
     <div data-testid="avatar-preview" title="Так вас увидят одноклассники" style={{
-      width: 124, height: 124, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: '#3498db55',
+      width: 124, height: 124, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: 'linear-gradient(#3498db55, #3498db55), #fff',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 11,
     }}>
       <img src={(avatar && AVATARS[avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 64, marginBottom: 2 }} />
@@ -211,7 +211,7 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
   const [nick, setNick] = useState(myName);
   return (
-    <div style={{
+    <div className="setup-page" style={{
       height: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start',
       justifyContent: 'center', gap: '24px 128px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
     }}>
@@ -242,9 +242,9 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
         <AvatarPreview avatar={avatar} nick={nick} />
         <ProfileNames onNick={setNick} />
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Аватарка <span style={{ color: '#888' }}>— её увидят одноклассники, когда у вас нет видео</span></div>
+      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Аватарка <span style={{ color: 'var(--hint)' }}>— её увидят одноклассники, когда у вас нет видео</span></div>
       <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(ownName, id); }} />
-      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Доска для разминки <span style={{ color: '#888' }}>— порисуйте, пока ждёте урок</span></div>
+      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Доска для разминки <span style={{ color: 'var(--hint)' }}>— порисуйте, пока ждёте урок</span></div>
       <div style={{ width: '100%', height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Board />
       </div>
@@ -448,7 +448,7 @@ export default function App() {
 
   return (<AvatarProvider participants={lessonState.participants}>
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '8px 16px', background: '#ece2d2', display: 'flex', gap: 16, alignItems: 'center' }}>
+      <div style={{ padding: '8px 16px', background: '#f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
         <span style={{ color: connected ? 'green' : 'red', fontWeight: 'bold' }}>
           {connected ? '●' : '○'}
         </span>

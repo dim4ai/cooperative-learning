@@ -141,7 +141,7 @@ export function MediaCheck({ prefs, onChange }: { prefs: MediaPrefs; onChange: (
       </div>
 
       <div>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 3 }}>
+        <div style={{ fontSize: 11, color: 'var(--hint, #888)', marginBottom: 3 }}>
           {prefs.micOn ? 'Скажите что-нибудь — полоска должна двигаться' : 'Микрофон выключен'}
         </div>
         <div style={{ width: '100%', height: 8, borderRadius: 4, background: '#eee', overflow: 'hidden' }}>
