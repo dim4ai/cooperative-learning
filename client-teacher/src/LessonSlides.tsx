@@ -280,7 +280,7 @@ export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { 
       {canAsk && !understood.asking && (
         <button data-testid="understood-ask" onClick={() => socket.emit('understood:ask')} style={panelBtn}>Всем понятно?</button>
       )}
-      {hasResult && canAsk && (
+      {canAsk && !understood.asking && (
         <button data-testid="understood-map" onClick={onToggleMap} style={{ ...panelBtn, background: '#eef1f5', color: '#333' }}>{mapOpen ? '← К слайду' : 'Карта класса'}</button>
       )}
       {hasResult && answers.length > 0 && (

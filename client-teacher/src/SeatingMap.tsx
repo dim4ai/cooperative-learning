@@ -83,7 +83,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -218,7 +218,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                       )}
                       {!readOnly && (
                         <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
-                          <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>
+                          {!noRemove && <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>}
                           {onMute && <div onClick={e => { e.stopPropagation(); onMute(seat.occupant!); }} style={{ fontSize: 13, cursor: 'pointer' }} title="Заглушить">🔇</div>}
                         </div>
                       )}
