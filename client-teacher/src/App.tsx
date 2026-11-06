@@ -7,7 +7,6 @@ import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Marks, Seat, SeatNames } from './SeatingMap';
-import { SharedBoard } from './SharedBoard';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, MaterialPanel, UnderstoodPanel } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
