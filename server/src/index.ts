@@ -248,7 +248,8 @@ const MAX_MATERIALS_PER_TEACHER = 3;
 const MAX_MATERIALS_TOTAL_BYTES = 300 * 1024 * 1024;
 
 async function ownLesson(req: AuthedRequest, res: Response): Promise<string | null> {
-  const dbLesson = await getLessonByCode(String(req.params.code)).catch(() => null);
+  const given = String(req.params.code);
+  const dbLesson = await getLessonByCode(joinAliases.get(given) ?? given).catch(() => null);
   if (!dbLesson) { res.status(404).json({ error: 'lesson not found' }); return null; }
   const owner = demos.has(dbLesson.code) ? req.demoCode === dbLesson.code
     : !req.demoCode && (dbLesson.teacherId === null || dbLesson.teacherId === req.teacherId);
@@ -305,6 +306,7 @@ interface Participant {
   livekitRoom: string | null;
   uuid: string | null; // the student's profile in their browser; only teachers get to see it
   avatar: string | null; // id of a picture from the clients' built-in set (avatars/<id>.svg)
+  newcomer?: boolean; // not let into the class yet: seen and heard by the teacher only
   teacherName?: string; // a student's name for the teacher; never sent to classmates
   bot?: boolean; // a simulated student of the solo demo: no socket behind the id
 }
@@ -343,6 +345,9 @@ interface LessonRuntime {
   currentPoll: Poll | null;
   material: Material | null;
   slides: SlidesState;
+  closed: boolean;                 // no new students: only those who have been here get back in
+  seen: Set<string>;               // uuids of the students who have been in this lesson
+  joinCode: string | null;         // replaced by the teacher: the code newcomers need now
   block: string | null;            // the lesson block running now (null: no lesson file, or not started)
   marks: Map<string, UnderstoodMark>; // the last "всем понятно?": student name → their answer
   vote: NodeJS.Timeout | null;     // while the question is on the students' screens
@@ -556,6 +561,7 @@ function dropLesson(code: string, why: string) {
   stopBots(lesson);
   lesson.relay.dispose();
   if (lesson.afterTimer) clearTimeout(lesson.afterTimer);
+  if (lesson.joinCode) joinAliases.delete(lesson.joinCode);
   lessons.delete(code);
   console.log(`[${code}] dropped from memory (${why})`);
 }
@@ -587,6 +593,9 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     currentPoll: null,
     material: null,
     slides: emptySlidesState(),
+    closed: false,
+    seen: new Set(),
+    joinCode: null,
     block: null,
     marks: new Map(),
     vote: null,
@@ -652,22 +661,31 @@ function dropEmptyExtraDesks(lesson: LessonRuntime) {
   }
 }
 
-/** Students of a work stage sit in the room of their seat */
-async function enterSeatRoom(code: string, lesson: LessonRuntime, p: Participant) {
+/** Where this student belongs now. A newcomer has a room of their own, where only the teacher comes */
+function roomOf(code: string, lesson: LessonRuntime, p: Participant): string {
   const seat = lesson.seats.find(s => s.occupant === p.name);
-  if (!seat) return;
-  const base = lesson.stage === 'individual' ? `individual-${p.name}`
-    : lesson.stage === 'pairs' ? `pair-g${seat.groupIndex}-r${seat.row}`
-    : lesson.stage === 'fours' ? `fours-${seat.groupIndex + 1}` : null;
-  if (!base) return;
-  const room = roomName(code, base);
+  const base = isNewcomer(lesson, p) || lesson.stage === 'individual' ? `individual-${p.name}`
+    : lesson.stage === 'pairs' && seat ? `pair-g${seat.groupIndex}-r${seat.row}`
+    : lesson.stage === 'fours' && seat ? `fours-${seat.groupIndex + 1}` : 'main-room';
+  return roomName(code, base);
+}
+
+async function placeStudent(code: string, lesson: LessonRuntime, p: Participant) {
+  const room = roomOf(code, lesson, p);
+  if (p.livekitRoom === room) return;
   await prepareRoom(lesson, room);
   await sendToRoom(code, lesson, p.id, room);
 }
 
+/** Camera for the teacher's map, through the main room: not for someone the class mustn't see yet */
+async function sendMonitor(code: string, lesson: LessonRuntime, p: Participant) {
+  if (lesson.videoMode === 'teacherSees' || !canVideo(lesson, p.role) || isNewcomer(lesson, p)) return;
+  const mainRoom = roomName(code, 'main-room');
+  io.sockets.sockets.get(p.id)?.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(p.name, mainRoom), room: mainRoom });
+}
+
 /** Seats changed or someone came: newcomers take the free places of the added desks, in order of arrival */
 async function settleSeats(code: string, lesson: LessonRuntime) {
-  const seated: Participant[] = [];
   if (lesson.seatPlan.size) {
     const taken = new Set(lesson.seats.map(s => s.occupant));
     for (const p of lesson.participants.values()) {
@@ -675,13 +693,18 @@ async function settleSeats(code: string, lesson: LessonRuntime) {
       const seat = freeExtraSeat(lesson);
       if (!seat) break;
       seat.occupant = p.name;
-      seated.push(p);
     }
   }
   dropEmptyExtraDesks(lesson);
   broadcastSeats(code, lesson);
-  for (const p of seated) await enterSeatRoom(code, lesson, p);
-  if (seated.length) broadcastState(code, lesson);
+  // Taken to a seat of the class, or a seating came and they aren't in it: they change sides
+  const changed = [...lesson.participants.values()].filter(p => p.role === 'student' && !p.bot && !!p.newcomer !== isNewcomer(lesson, p));
+  for (const p of changed) {
+    p.newcomer = isNewcomer(lesson, p);
+    await placeStudent(code, lesson, p);
+    await sendMonitor(code, lesson, p);
+  }
+  if (changed.length) broadcastState(code, lesson);
 }
 
 const MAX_CAPACITY = MAX_STUDENTS_PER_LESSON;
@@ -721,9 +744,21 @@ function uniqueName(lesson: LessonRuntime, name: string, uuid: string | null): s
   return unique;
 }
 
-function broadcastSeats(code: string, lesson: LessonRuntime) {
-  io.to(code).emit('seats', lesson.seats);
+/** Added desks are the teacher's business; a student there sees only their own seat */
+function seatsFor(lesson: LessonRuntime, p: Participant): Seat[] {
+  return p.role === 'teacher' ? lesson.seats : lesson.seats.filter(s => s.extra === undefined || s.occupant === p.name);
 }
+
+function broadcastSeats(code: string, lesson: LessonRuntime) {
+  for (const p of lesson.participants.values()) io.sockets.sockets.get(p.id)?.emit('seats', seatsFor(lesson, p));
+}
+
+/** A class with a saved seating lets in only those on a seat of the class */
+function isNewcomer(lesson: LessonRuntime, p: Participant): boolean {
+  return p.role === 'student' && lesson.seatPlan.size > 0 && !lesson.seats.some(s => s.occupant === p.name && s.extra === undefined);
+}
+
+const inClass = (lesson: LessonRuntime) => Array.from(lesson.participants.values()).filter(p => p.role === 'student' && !isNewcomer(lesson, p));
 
 function pollResults(lesson: LessonRuntime) {
   if (!lesson.currentPoll) return null;
@@ -741,17 +776,25 @@ function demoState(code: string) {
 }
 
 function broadcastState(code: string, lesson: LessonRuntime) {
-  io.to(code).emit('state', {
+  const state = {
     stage: lesson.stage,
     videoMode: lesson.videoMode,
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
     demo: demoState(code),
     now: Date.now(), // the clients' clocks may be off; the demo's times are the server's
-    participants: Array.from(lesson.participants.values()).map(p => ({
-      id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, avatar: p.avatar,
-    })),
-  });
+  };
+  const everyone = Array.from(lesson.participants.values()).map(p => ({
+    id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, avatar: p.avatar,
+  }));
+  const newcomers = new Set(Array.from(lesson.participants.values()).filter(p => isNewcomer(lesson, p)).map(p => p.id));
+  for (const p of lesson.participants.values()) {
+    const seen = p.role === 'teacher' ? everyone : everyone.filter(o => !newcomers.has(o.id) || o.id === p.id);
+    io.sockets.sockets.get(p.id)?.emit('state', { ...state, participants: seen });
+  }
+  for (const id of lesson.boardConnections.keys()) {
+    io.sockets.sockets.get(id)?.emit('state', { ...state, participants: everyone.filter(o => !newcomers.has(o.id)) });
+  }
   // Only for the teacher: a student's uuid is what seats them, classmates must not learn it
   const uuids = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.uuid).map(p => [p.id, p.uuid]));
   const names = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.teacherName).map(p => [p.name, p.teacherName]));
@@ -913,6 +956,25 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
 }
 
+// ---------- who may come in ----------
+// The lesson's own code stays (its rooms are named by it); a replaced code is only another way in.
+// In memory, like the lesson itself: a server restart brings back the original code.
+const joinAliases = new Map<string, string>(); // current replacement code → lesson code
+
+async function unusedCode(): Promise<string> {
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  for (;;) {
+    const code = Array.from(crypto.randomBytes(10), b => alphabet[b % alphabet.length]).join('');
+    if (!joinAliases.has(code) && !await getLessonByCode(code).catch(() => null)) return code;
+  }
+}
+
+function sendEntry(code: string, lesson: LessonRuntime, to?: Socket) {
+  const payload = { roomCode: code, joinCode: lesson.joinCode ?? code, closed: lesson.closed };
+  if (to) { to.emit('entry', payload); return; }
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('entry', payload);
+}
+
 // ---------- "всем понятно?" at the end of an explanation ----------
 const VOTE_SECONDS = 5;
 const VOTE_GRACE_MS = 700; // an answer pressed at the last moment is still on its way
@@ -1072,14 +1134,14 @@ async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string,
 
 // Assign by seating if seats exist, otherwise fallback to index-based
 async function assignPairs(code: string, lesson: LessonRuntime) {
-  const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
+  const students = inClass(lesson);
   const studentByName = new Map(students.map(s => [s.name, s]));
 
   if (lesson.seats.length > 0) {
     // Group by (groupIndex, row) → pair room
     const pairMap = new Map<string, Seat[]>();
     for (const seat of lesson.seats) {
-      if (!seat.occupant) continue;
+      if (!seat.occupant || seat.extra !== undefined) continue;
       const key = `pair-g${seat.groupIndex}-r${seat.row}`;
       if (!pairMap.has(key)) pairMap.set(key, []);
       pairMap.get(key)!.push(seat);
@@ -1114,13 +1176,13 @@ async function assignPairs(code: string, lesson: LessonRuntime) {
 }
 
 async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours') {
-  const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
+  const students = inClass(lesson);
   const studentByName = new Map(students.map(s => [s.name, s]));
 
   if (lesson.seats.length > 0) {
     const groupMap = new Map<number, Seat[]>();
     for (const seat of lesson.seats) {
-      if (!seat.occupant) continue;
+      if (!seat.occupant || seat.extra !== undefined) continue;
       if (!groupMap.has(seat.groupIndex)) groupMap.set(seat.groupIndex, []);
       groupMap.get(seat.groupIndex)!.push(seat);
     }
@@ -1153,7 +1215,7 @@ async function assignFours(code: string, lesson: LessonRuntime, prefix = 'fours'
 }
 
 async function assignIndividual(code: string, lesson: LessonRuntime) {
-  const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
+  const students = inClass(lesson);
   for (const student of students) {
     const room = roomName(code, `individual-${student.name}`);
     await prepareRoom(lesson, room);
@@ -1162,7 +1224,7 @@ async function assignIndividual(code: string, lesson: LessonRuntime) {
 }
 
 async function sendAllToMain(code: string, lesson: LessonRuntime) {
-  const students = Array.from(lesson.participants.values()).filter(p => p.role === 'student');
+  const students = inClass(lesson);
   const room = roomName(code, 'main-room');
   await prepareRoom(lesson, room);
   for (const student of students) {
@@ -1252,7 +1314,7 @@ io.on('connection', async (socket) => {
   }
   if (refuseIfDemoOver(lessonId)) return;
 
-  const dbLesson = await getLessonByCode(lessonId).catch(() => null);
+  const dbLesson = await getLessonByCode(joinAliases.get(lessonId) ?? lessonId).catch(() => null);
   if (refuseIfDemoOver(lessonId)) return;
   if (!dbLesson) {
     recordFailedAttempt(codeAttempts, ip);
@@ -1295,6 +1357,16 @@ io.on('connection', async (socket) => {
   }
 
   const code = dbLesson.code;
+  // Only those who have been here get past a closed door or an old code
+  const entry = lessons.get(code);
+  if (entry && role !== 'teacher' && !(uuid && entry.seen.has(uuid))) {
+    const refusal = entry.joinCode && lessonId !== entry.joinCode ? 'code changed' : entry.closed ? 'entry closed' : null;
+    if (refusal) {
+      socket.emit('lessonError', { error: refusal });
+      socket.disconnect(true);
+      return;
+    }
+  }
   // After-lesson chat: the teacher stays out (students were told so); students who drop out don't come back
   const after = lessons.get(code)?.afterUntil;
   if (after) {
@@ -1354,6 +1426,7 @@ io.on('connection', async (socket) => {
     lesson.visited = true;
     const demo = demos.get(code);
     if (demo && role === 'student') demoStudentCame(demo, socketsOf(lesson, 'student').length);
+    if (uuid && role === 'student') lesson.seen.add(uuid);
     if (seatByPlan(lesson, participant)) broadcastSeats(code, lesson);
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
@@ -1382,7 +1455,7 @@ io.on('connection', async (socket) => {
 
     if (role === 'teacher') socket.emit('joined'); // the lines above are listening now: the plan may come
     broadcastState(code, lesson);
-    socket.emit('seats', lesson.seats);
+    socket.emit('seats', seatsFor(lesson, participant));
 
     lesson.emptySince = null;
     lesson.ended = false; // someone came (back) — it's a live lesson again
@@ -1396,6 +1469,7 @@ io.on('connection', async (socket) => {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
       sendMarks(lesson, socket);
+      sendEntry(code, lesson, socket);
     } else {
       socket.emit('slides:view', studentSlidesView(lesson));
     }
@@ -1426,13 +1500,15 @@ io.on('connection', async (socket) => {
       } else if (role === 'student') {
         socket.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(effectiveName, camsRoom), room: camsRoom });
       }
-    } else if (role === 'student' && canVideo(lesson, role)) {
-      socket.emit('monitor', { url: LIVEKIT_WS_URL, token: await makeCameraOnlyToken(effectiveName, mainRoom), room: mainRoom });
     }
-    await sendToRoom(code, lesson, socket.id, mainRoom);
     if (role === 'student') {
-      await enterSeatRoom(code, lesson, participant); // back to their desk in the middle of work
-      await settleSeats(code, lesson);
+      await settleSeats(code, lesson); // first of all: a newcomer must not show up in the class even for a moment
+      participant.newcomer = isNewcomer(lesson, participant);
+      await sendMonitor(code, lesson, participant);
+      await placeStudent(code, lesson, participant);
+      broadcastState(code, lesson);
+    } else {
+      await sendToRoom(code, lesson, socket.id, mainRoom);
     }
 
     socket.on('setCapacity', (n: number) => {
@@ -1473,7 +1549,7 @@ io.on('connection', async (socket) => {
       await settleSeats(code, lesson);
       // Was waiting for a seat, and the others are at work already
       const moved = [...lesson.participants.values()].find(p => p.name === studentName);
-      if (!from && moved) { await enterSeatRoom(code, lesson, moved); broadcastState(code, lesson); }
+      if (!from && moved) { await placeStudent(code, lesson, moved); broadcastState(code, lesson); }
     });
 
     socket.on('setStage', async (stage: Stage) => {
@@ -1485,6 +1561,24 @@ io.on('connection', async (socket) => {
     socket.on('block:start', async ({ blockId }: { blockId: string }) => {
       if (role !== 'teacher') return;
       await startBlock(code, lesson, blockId);
+    });
+
+    // Everyone is here: nobody new gets in. Those who dropped out still can
+    socket.on('entry:close', ({ closed }: { closed?: unknown } = {}) => {
+      if (role !== 'teacher' || demos.has(code)) return;
+      lesson.closed = closed === true;
+      sendEntry(code, lesson);
+    });
+
+    // The code got out: a new one for those still to come, those here carry on
+    socket.on('entry:newCode', async () => {
+      if (role !== 'teacher' || demos.has(code)) return;
+      const next = await unusedCode();
+      if (lesson.joinCode) joinAliases.delete(lesson.joinCode);
+      lesson.joinCode = next;
+      joinAliases.set(next, code);
+      console.log(`[${code}] join code replaced`);
+      sendEntry(code, lesson);
     });
 
     socket.on('understood:ask', () => {

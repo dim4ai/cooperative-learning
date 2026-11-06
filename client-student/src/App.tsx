@@ -325,6 +325,12 @@ export default function App() {
       } else if (error === 'too many open lessons') {
         setJoined(false);
         setJoinError('Занятие сейчас не открыть: у учителя слишком много занятий одновременно');
+      } else if (error === 'entry closed') {
+        setJoined(false);
+        setJoinError('Учитель закрыл вход на этот урок');
+      } else if (error === 'code changed') {
+        setJoined(false);
+        setJoinError('Код занятия изменился. Спросите новый у учителя');
       } else if (error === 'lesson full') {
         setJoined(false);
         setJoinError('В классе нет свободных мест');
@@ -378,6 +384,9 @@ export default function App() {
   const showFours = livekit && lessonState.stage === 'fours';
   const showGroup = livekit && lessonState.stage === 'group';
   const showIndividual = livekit && lessonState.stage === 'individual';
+  // A saved seating without this student in it
+  const newcomer = !!livekit && seats.some(s => s.reserved) && !seats.some(s => s.occupant === myName && s.extra === undefined)
+    && livekit.room.split(':')[1]?.startsWith('individual-');
   const myGroupIndex = seats.find(s => s.occupant === myName)?.groupIndex ?? -1;
   const groupSeats = seats.filter(s => s.groupIndex === myGroupIndex);
 
@@ -574,7 +583,14 @@ export default function App() {
             <RoomAudioRenderer />
             <MicControl enabled={micOn} />
             <LocalMediaSync camOn={media.camOn && camInClass} />
-            {lessonState.stage === 'waiting'
+            {newcomer
+              ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <div data-testid="newcomer" style={{ padding: 12, textAlign: 'center', background: '#fdf1d6', color: '#8a5a00', fontSize: 15 }}>
+                    Вы пока не в классе: вас видит и слышит только учитель. Он подойдёт и определит ваше место
+                  </div>
+                  <div style={{ flex: 1, minHeight: 0 }}><IndividualLayout room={livekit.room} /></div>
+                </div>
+              : lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>
                   <SelfPreview />
                   <SeatingMap seats={seats} />
