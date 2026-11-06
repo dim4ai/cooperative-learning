@@ -579,6 +579,10 @@ export default function App() {
                   <SelfPreview />
                   <SeatingMap seats={seats} />
                 </div>
+              : !showGroup && livekit.room.endsWith(':main-room') && !seats.some(s => s.occupant === myName)
+                ? <div data-testid="waiting-seat" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: '#666', fontSize: 16 }}>
+                    Класс уже работает. Подождите: учитель посадит вас за стол
+                  </div>
               : showGroup
                 ? <GroupView slides={slides} />
                 : showIndividual

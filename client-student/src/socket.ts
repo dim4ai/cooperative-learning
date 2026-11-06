@@ -45,3 +45,6 @@ export const socket = io(import.meta.env.VITE_API_URL, {
   auth,
   autoConnect: false,
 });
+
+// Someone in the lesson already goes by this nick
+socket.on('myName', (name: string) => { myName = name; });
