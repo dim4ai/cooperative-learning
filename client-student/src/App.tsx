@@ -448,7 +448,7 @@ export default function App() {
 
   return (<AvatarProvider participants={lessonState.participants}>
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '8px 16px', background: '#f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
+      <div style={{ padding: '8px 16px', background: '#ece2d2', display: 'flex', gap: 16, alignItems: 'center' }}>
         <span style={{ color: connected ? 'green' : 'red', fontWeight: 'bold' }}>
           {connected ? '●' : '○'}
         </span>
