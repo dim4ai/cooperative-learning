@@ -162,7 +162,7 @@ export function MediaCheck({ prefs, onChange }: { prefs: MediaPrefs; onChange: (
       </div>
 
       {cams.length > 1 && (
-        <label style={{ fontSize: 12, color: '#666' }}>
+        <label style={{ fontSize: 12, color: 'var(--text-h)' }}>
           Камера
           <select value={activeCamId} onChange={e => onChange({ ...prefs, camId: e.target.value })} style={selectStyle}>
             {cams.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Камера ${i + 1}`}</option>)}
@@ -170,7 +170,7 @@ export function MediaCheck({ prefs, onChange }: { prefs: MediaPrefs; onChange: (
         </label>
       )}
       {mics.length > 1 && (
-        <label style={{ fontSize: 12, color: '#666' }}>
+        <label style={{ fontSize: 12, color: 'var(--text-h)' }}>
           Микрофон
           <select value={activeMicId} onChange={e => onChange({ ...prefs, micId: e.target.value })} style={selectStyle}>
             {mics.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Микрофон ${i + 1}`}</option>)}
