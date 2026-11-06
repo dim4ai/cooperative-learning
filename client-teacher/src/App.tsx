@@ -15,6 +15,7 @@ import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEn
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
+import { PasswordInput } from './PasswordInput';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
 import { derivePasswordKeys } from './journalCrypto';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
@@ -281,11 +282,10 @@ function LoginForm({ onLogin, onDemo }: { onLogin: (teacher: Teacher, token: str
         autoCapitalize="none"
         style={formInputStyle}
       />
-      <input
+      <PasswordInput
         value={password}
         onChange={e => setPassword(e.target.value)}
         placeholder="Пароль"
-        type="password"
         onKeyDown={e => { if (e.key === 'Enter') submit(); }}
         style={formInputStyle}
       />
