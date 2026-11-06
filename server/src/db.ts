@@ -368,6 +368,13 @@ export async function saveJournal(teacherId: number, baseVersion: number, data: 
 }
 
 /** The journal's key is wrapped by the password, so the new hash and the rewrapped journal go in together */
+/** Is this the teacher's password? For actions that are final when it's mistyped */
+export async function checkPassword(teacherId: number, authKey: string): Promise<boolean> {
+  const { rows } = await pool.query('SELECT password_hash FROM teachers WHERE id = $1', [teacherId]);
+  const stored: string | undefined = rows[0]?.password_hash;
+  return !!stored?.startsWith(AUTH_V2) && bcrypt.compare(authKey, stored.slice(AUTH_V2.length));
+}
+
 export async function changePassword(
   teacherId: number, currentAuthKey: string, newAuthKey: string, journal: JournalRecord | null,
 ): Promise<'ok' | 'wrong password' | 'conflict'> {

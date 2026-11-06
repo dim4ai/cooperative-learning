@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { Server, type Socket } from 'socket.io';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import {
-  verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
+  verifyTeacher, checkPassword, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
   isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
   hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveBooking, loadCurrentBookings, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
   type DemoRecord,
@@ -217,6 +217,26 @@ app.post('/password', requireAuth, async (req: AuthedRequest, res) => {
   }
   if (result === 'conflict') { res.status(409).json({ error: 'journal has changed' }); return; }
   if (result === null) { res.status(500).json({ error: 'failed to change password' }); return; }
+  clearAttempts(loginAttempts, ip);
+  res.json({ ok: true });
+});
+
+// A journal is encrypted by the password as typed: a typo there would lock it for good
+app.post('/password/check', requireAuth, async (req: AuthedRequest, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(loginAttempts, ip)) {
+    res.status(429).json({ error: 'too many attempts' });
+    return;
+  }
+  const { authKey } = req.body ?? {};
+  if (!isAuthKey(authKey)) { res.status(400).json({ error: 'authKey is required' }); return; }
+  const ok = await checkPassword(req.teacherId!, authKey).catch(() => null);
+  if (ok === null) { res.status(500).json({ error: 'failed to check password' }); return; }
+  if (!ok) {
+    recordFailedAttempt(loginAttempts, ip);
+    res.status(401).json({ error: 'wrong password' });
+    return;
+  }
   clearAttempts(loginAttempts, ip);
   res.json({ ok: true });
 });

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  JournalConflict, WrongPassword, changePassword, createJournal, newId, unlockJournal, updateJournal, useJournal,
+  JournalConflict, WeakPassword, WrongPassword, changePassword, createJournal, newId, unlockJournal, updateJournal, useJournal,
 } from './journal';
 import type { JournalClass, JournalStudent } from './journal';
 import { MIN_PASSWORD_LENGTH, passwordProblem } from './passwordStrength';
+import { PasswordInput } from './PasswordInput';
 
 const FORGOT_WARNING = 'Журнал зашифрован вашим паролем, и прочитать его можете только вы. Восстановления пароля пока нет: если его забыть, журнал не открыть — никто, включая нас, не сможет этого сделать.';
 
@@ -58,11 +59,13 @@ function CreateJournal({ email, onChangePassword }: { email: string; onChangePas
     setError('');
     setWeak(false);
     try {
-      const problem = await passwordProblem(password, email);
-      if (problem) { setError(`${problem}. Сначала смените пароль`); setWeak(true); return; }
-      await createJournal(email, password);
-    } catch {
-      setError('Не удалось создать журнал');
+      await createJournal(email, password, async () => {
+        const problem = await passwordProblem(password, email);
+        if (problem) throw new WeakPassword(problem);
+      });
+    } catch (e) {
+      if (e instanceof WeakPassword) { setError(`${e.message}. Сначала смените пароль`); setWeak(true); }
+      else setError(e instanceof WrongPassword ? 'Неверный пароль: нужен тот же, с которым вы входите' : 'Не удалось создать журнал');
     } finally {
       setBusy(false);
     }
@@ -70,7 +73,7 @@ function CreateJournal({ email, onChangePassword }: { email: string; onChangePas
 
   return (<>
     <div style={hint}>{FORGOT_WARNING}</div>
-    <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль"
+    <PasswordInput value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль"
       autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter' && password) create(); }} style={input} />
     {error && <div style={errorText}>{error}</div>}
     {weak && <button onClick={onChangePassword} style={{ ...plainBtn, alignSelf: 'flex-start', color: '#4a90e2' }}>Сменить пароль</button>}
@@ -97,7 +100,7 @@ function Unlock({ email }: { email: string }) {
 
   return (<>
     <div style={hint}>Журнал закрыт: после обновления страницы или долгого простоя нужен пароль.</div>
-    <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль"
+    <PasswordInput value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль"
       autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter' && password) open(); }} style={input} />
     {error && <div style={errorText}>{error}</div>}
     <button onClick={open} disabled={busy || !password} style={mainBtn}>{busy ? 'Открываем…' : 'Открыть журнал'}</button>
@@ -133,9 +136,9 @@ function ChangePassword({ email, onDone }: { email: string; onDone: () => void }
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid #eee', paddingTop: 12 }}>
       <strong style={{ fontSize: 14 }}>Смена пароля</strong>
       <div style={hint}>Не меньше {MIN_PASSWORD_LENGTH} символов. Лучше всего — несколько случайных слов.</div>
-      <input type="password" value={current} onChange={e => setCurrent(e.target.value)} placeholder="Текущий пароль" autoComplete="current-password" style={input} />
-      <input type="password" value={next} onChange={e => setNext(e.target.value)} placeholder="Новый пароль" autoComplete="new-password" style={input} />
-      <input type="password" value={repeat} onChange={e => setRepeat(e.target.value)} placeholder="Новый пароль ещё раз" autoComplete="new-password"
+      <PasswordInput value={current} onChange={e => setCurrent(e.target.value)} placeholder="Текущий пароль" autoComplete="current-password" style={input} />
+      <PasswordInput value={next} onChange={e => setNext(e.target.value)} placeholder="Новый пароль" autoComplete="new-password" style={input} />
+      <PasswordInput value={repeat} onChange={e => setRepeat(e.target.value)} placeholder="Новый пароль ещё раз" autoComplete="new-password"
         onKeyDown={e => { if (e.key === 'Enter') submit(); }} style={input} />
       {error && <div style={errorText}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>

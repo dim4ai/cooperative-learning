@@ -31,6 +31,7 @@ export type JournalStatus =
   | 'unavailable'; // no connection, or the server has no journal table
 
 export class WrongPassword extends Error {}
+export class WeakPassword extends Error {}
 export class JournalConflict extends Error {}
 
 const API = import.meta.env.VITE_API_URL;
@@ -134,8 +135,14 @@ async function put(baseVersion: number, next: Envelope) {
   envelope = next;
 }
 
-export async function createJournal(email: string, password: string) {
-  const { wrapKey: key } = await derivePasswordKeys(email, password);
+/** `vet` runs once the password is known to be right: it is the moment to refuse a weak one */
+export async function createJournal(email: string, password: string, vet: () => Promise<void>) {
+  const { wrapKey: key, authKey } = await derivePasswordKeys(email, password);
+  // The journal gets locked by exactly what was typed, so a typo must not get through
+  const check = await request('/password/check', 'POST', { authKey });
+  if (check.status === 401) throw new WrongPassword();
+  if (!check.ok) throw new Error(`password check: ${check.status}`);
+  await vet();
   const fresh = await generateJournalKey();
   const data: JournalData = { classes: [] };
   await put(0, { v: 1, key: await wrapJournalKey(fresh, key), body: await encryptBody(data, fresh) });
