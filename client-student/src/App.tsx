@@ -173,11 +173,11 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
 function AvatarPreview({ avatar, nick }: { avatar: string | null; nick: string }) {
   return (
     <div data-testid="avatar-preview" title="Так вас увидят одноклассники" style={{
-      width: 160, height: 120, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: '#3498db55',
+      width: 124, height: 124, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: '#3498db55',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 11,
     }}>
-      <img src={(avatar && AVATARS[avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 52, marginBottom: 2 }} />
-      <div style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nick}</div>
+      <img src={(avatar && AVATARS[avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 64, marginBottom: 2 }} />
+      <div style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nick}</div>
     </div>
   );
 }
@@ -193,12 +193,12 @@ function ProfileNames({ onNick }: { onNick: (nick: string) => void }) {
   }
   const field: React.CSSProperties = { fontSize: 15, padding: 8, borderRadius: 6, border: '1px solid #ccc', width: '100%', boxSizing: 'border-box' };
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-      <label style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13, color: 'var(--text-h)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <label style={{ fontSize: 13, color: 'var(--text-h)', display: 'flex', flexDirection: 'column', gap: 3 }}>
         Имя для учителя
         <input data-testid="teacher-name" value={names.teacherName} maxLength={60} onChange={e => change('teacherName', e.target.value)} style={field} />
       </label>
-      <label style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13, color: 'var(--text-h)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <label style={{ fontSize: 13, color: 'var(--text-h)', display: 'flex', flexDirection: 'column', gap: 3 }}>
         Ник для одноклассников
         <input data-testid="nick" value={names.nick} maxLength={60} onChange={e => change('nick', e.target.value)} style={field} />
       </label>
@@ -238,14 +238,12 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
         </button>
       </div>
       {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
-      <ProfileNames onNick={setNick} />
-      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Аватарка <span style={{ color: '#888' }}>— её увидят одноклассники, когда у вас нет видео</span></div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <AvatarPreview avatar={avatar} nick={nick} />
-        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-          <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(ownName, id); }} />
-        </div>
+        <ProfileNames onNick={setNick} />
       </div>
+      <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Аватарка <span style={{ color: '#888' }}>— её увидят одноклассники, когда у вас нет видео</span></div>
+      <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(ownName, id); }} />
       <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Доска для разминки <span style={{ color: '#888' }}>— порисуйте, пока ждёте урок</span></div>
       <div style={{ width: '100%', height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Board />
