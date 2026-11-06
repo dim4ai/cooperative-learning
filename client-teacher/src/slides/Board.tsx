@@ -402,7 +402,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
   return (
     <div className="live-board" tabIndex={-1} onKeyDown={onKeyDown}
       onPointerDown={e => { if ((e.target as HTMLElement).tagName !== 'TEXTAREA') e.currentTarget.focus({ preventScroll: true }) }}
-      style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#e9ecef', outline: 'none', boxSizing: 'border-box' }}>
+      style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--board-margin, #e9ecef)', outline: 'none', boxSizing: 'border-box' }}>
       {!readOnly && (
         <div data-testid="board-toolbar" style={bar}>
           {TOOLS.filter(t => (role === 'teacher' || !t.teacherOnly) && (hasUnderlay || !t.onSlide)).map(t => (
