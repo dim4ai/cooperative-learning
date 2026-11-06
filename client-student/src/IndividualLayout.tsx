@@ -3,15 +3,18 @@ import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlacehold
 import { NameCard, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
 import { socket, ownName } from './socket';
+import { WorkBoard, type StudentSlides } from './LessonSlides';
 
 interface Props {
   room: string;
+  /** The work and its board; a newcomer has none yet and only talks to the teacher */
+  slides?: StudentSlides;
 }
 
-function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: string }) {
+function CamBox({ track, label, width = 200 }: { track: TrackReferenceOrPlaceholder; label: string; width?: number | string }) {
   const hasVideo = !!track.publication && !track.publication.isMuted;
   return (
-    <div style={{ width: 200, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', position: 'relative', flexShrink: 0 }}>
+    <div style={{ width, aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden', background: '#222', position: 'relative', flexShrink: 0 }}>
       {hasVideo && isTrackReference(track)
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : <NameCard name={label} identity={track.participant.identity} />}
@@ -23,7 +26,7 @@ function CamBox({ track, label }: { track: TrackReferenceOrPlaceholder; label: s
   );
 }
 
-export function IndividualLayout({ room }: Props) {
+export function IndividualLayout({ room, slides }: Props) {
   const [calling, setCalling] = useState(false);
   const allTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
   const subscribedTracks = allTracks;
@@ -41,25 +44,45 @@ export function IndividualLayout({ room }: Props) {
     socket.emit(next ? 'callTeacher' : 'dismissCall', { room });
   }
 
+  const bell = (
+    <button
+      onClick={toggleCall}
+      title={calling ? 'Отменить вызов' : 'Позвать учителя'}
+      style={{
+        width: 60, height: 60, borderRadius: '50%', border: 'none', cursor: 'pointer', fontSize: 28,
+        background: calling ? '#f39c12' : '#2e2e3e',
+        boxShadow: calling ? '0 0 0 4px #f39c1255' : 'none',
+        transition: 'all 0.2s',
+        animation: calling ? 'callPulse 1.2s infinite' : 'none',
+      }}
+    >
+      🔔
+    </button>
+  );
+  const pulse = `
+    @keyframes callPulse {
+      0%, 100% { box-shadow: 0 0 0 4px #f39c1255; }
+      50% { box-shadow: 0 0 0 12px #f39c1200; }
+    }
+  `;
+
+  if (slides) return (
+    <div data-testid="individual-work" style={{ height: '100%', display: 'flex', gap: 8, padding: 8, boxSizing: 'border-box' }}>
+      <div style={{ width: 180, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {localTrack && <CamBox track={localTrack} label={ownName} width="100%" />}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{bell}</div>
+        {teacher && <CamBox track={teacher} label="Учитель" width="100%" />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}><WorkBoard slides={slides} /></div>
+      <style>{pulse}</style>
+    </div>
+  );
+
   return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, background: '#111', padding: 16, boxSizing: 'border-box' }}>
       {localTrack && <CamBox track={localTrack} label={ownName} />}
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <button
-          onClick={toggleCall}
-          title={calling ? 'Отменить вызов' : 'Позвать учителя'}
-          style={{
-            width: 60, height: 60, borderRadius: '50%', border: 'none', cursor: 'pointer', fontSize: 28,
-            background: calling ? '#f39c12' : '#2e2e3e',
-            boxShadow: calling ? '0 0 0 4px #f39c1255' : 'none',
-            transition: 'all 0.2s',
-            animation: calling ? 'callPulse 1.2s infinite' : 'none',
-          }}
-        >
-          🔔
-        </button>
-      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>{bell}</div>
 
       {teacher
         ? <CamBox track={teacher} label="Учитель" />
@@ -68,12 +91,7 @@ export function IndividualLayout({ room }: Props) {
           </div>
       }
 
-      <style>{`
-        @keyframes callPulse {
-          0%, 100% { box-shadow: 0 0 0 4px #f39c1255; }
-          50% { box-shadow: 0 0 0 12px #f39c1200; }
-        }
-      `}</style>
+      <style>{pulse}</style>
     </div>
   );
 }

@@ -602,11 +602,11 @@ export default function App() {
               : showGroup
                 ? <GroupView slides={slides} />
                 : showIndividual
-                  ? <IndividualLayout room={livekit.room} />
+                  ? <IndividualLayout room={livekit.room} slides={slides} />
                   : showFours
-                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} noTeacher={afterLeft !== null} />
+                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} slides={slides} noTeacher={afterLeft !== null} />
                   : showDesk
-                    ? <DeskLayout room={livekit.room} />
+                    ? <DeskLayout room={livekit.room} slides={slides} />
                     : <VideoRoom />
             }
           </LiveKitRoom>

@@ -67,14 +67,26 @@ export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDele
         </button>
       </div>
 
-      <Field label="Слайды">
+      <Field label={hasTask ? 'Лист ученика' : 'Слайды'}>
         <SlidesSection
+          sheet={hasTask}
           slides={block.slides ?? []}
           media={media}
           onAddMedia={onAddMedia}
           onChange={(fn: (s: Scene[]) => Scene[]) => onUpdate(b => ({ ...b, slides: fn(b.slides ?? []) }))}
           onError={onError}
         />
+        {hasTask && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+            <input
+              data-testid="sheet-readonly"
+              type="checkbox"
+              checked={!!(block as any).sheetReadOnly}
+              onChange={e => onChange({ ...block, sheetReadOnly: e.target.checked } as LessonBlock)}
+            />
+            Только для просмотра: ученики не пишут на этом листе
+          </label>
+        )}
       </Field>
 
       <div style={{ maxWidth: 680 }}>

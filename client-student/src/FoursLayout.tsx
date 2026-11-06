@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { SharedBoard } from './SharedBoard';
+import { WorkBoard, type StudentSlides } from './LessonSlides';
 import { shownName, socket } from './socket';
 import { NameCard, SpeakingRing } from './speaking';
 import type { Seat } from './SeatingMap';
@@ -9,6 +9,7 @@ import type { Seat } from './SeatingMap';
 interface Props {
   room: string;
   groupSeats: Seat[]; // 4 seats of this group, sorted by row/col
+  slides: StudentSlides;
   /** After-lesson chat: no teacher to call */
   noTeacher?: boolean;
 }
@@ -36,7 +37,7 @@ function CamTile({ identity, label }: { identity: string | null; label: string }
   );
 }
 
-export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
+export function FoursLayout({ room, groupSeats, slides, noTeacher }: Props) {
   const subscribedTracks = useTracks([Track.Source.Camera]);
   const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher');
   const [calling, setCalling] = useState(false);
@@ -80,8 +81,8 @@ export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
       </div>
 
       {/* Center: board */}
-      <div style={{ flex: 1 }}>
-        <SharedBoard room={room} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <WorkBoard slides={slides} />
       </div>
 
       {/* Right column: seats 2 (top), teacher (middle), seat 4 (bottom) */}

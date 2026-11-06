@@ -30,6 +30,8 @@ interface Props {
   onError: (text: string) => void
   /** New slides to insert right after this one (multi-page PDF) */
   onInsertSlides: (scenes: Scene[]) => void
+  /** A work block: mark the page as the student's sheet */
+  sheet?: boolean
 }
 
 const HISTORY_LIMIT = 100
@@ -1116,7 +1118,7 @@ export function SlideEditor(props: Props) {
           onDrop={e => { e.preventDefault(); setDropping(false); addFiles(Array.from(e.dataTransfer.files)) }}
           style={{
             maxWidth: '100%', borderRadius: 4, overflow: 'hidden', background: '#fff',
-            border: `1px solid ${dropping ? '#4a90e2' : '#d1d5db'}`, boxShadow: dropping ? '0 0 0 3px #bfdbfe' : undefined,
+            border: `1px solid ${dropping ? '#4a90e2' : '#d1d5db'}`, boxShadow: dropping ? '0 0 0 3px #bfdbfe' : props.sheet ? '0 0 0 3px #7c3aed' : undefined,
           }}
         />
       </div>

@@ -35,6 +35,10 @@ export interface Block {
   id: string;
   type: string;
   title: string;
+  /** what students read above the board (work blocks) */
+  task: string;
+  /** the sheet is only to look at: students can't write on it */
+  sheetReadOnly: boolean;
   slides: Scene[];
 }
 
@@ -99,7 +103,7 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
     const slides = (Array.isArray(raw.slides) ? raw.slides : [])
       .filter((s): s is Scene => !!s && typeof s === 'object' && Array.isArray((s as Scene).objects))
       .map(s => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
-    blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), slides });
+    blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), task: str(raw.task, 4000), sheetReadOnly: raw.sheetReadOnly === true, slides });
   }
 
   const used = new Set<string>();

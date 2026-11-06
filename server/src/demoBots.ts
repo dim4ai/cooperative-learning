@@ -103,7 +103,7 @@ export class BotRun {
     const n = this.written.get(room) ?? 0;
     this.written.set(room, n + 1);
     this.host.write(room, {
-      uid: `bot-${room}-${this.uid++}`, type: 'IText', text, left: 80, top: 60 + (n % 11) * 72,
+      uid: `bot-${room}-${this.uid++}`, type: 'IText', text, left: 860, top: 60 + (n % 11) * 72,
       originX: 'left', originY: 'top', fontSize: 40, fill: COLORS[n % COLORS.length], fontFamily: 'sans-serif',
     });
   }

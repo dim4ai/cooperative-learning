@@ -71,7 +71,7 @@ function PairCamOrName({ identity, name: shown }: { identity: string; name: stri
     : <NameCard name={name} identity={identity} />;
 }
 
-function TeacherPairContent({ onLeave, others }: { onLeave: () => void; others: string[] }) {
+function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; others: string[]; sheet: ReactNode }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
 
@@ -79,7 +79,7 @@ function TeacherPairContent({ onLeave, others }: { onLeave: () => void; others: 
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden', position: 'relative' }}>
       {/* Board */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        <SharedBoard />
+        {sheet}
       </div>
 
       {/* Right column: cameras + back button */}
@@ -735,7 +735,7 @@ export default function App() {
             const base = livekit?.room.split(':')[1] ?? '';
             return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
           })()
-            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} />
+            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} sheet={<ExplainBoard slides={slides} />} />
             : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
                 slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
           }

@@ -14,9 +14,12 @@ interface Props {
   /** Receives an updater: slides are edited asynchronously, always apply to the latest list */
   onChange: (update: (slides: Scene[]) => Scene[]) => void
   onError: (text: string) => void
+  /** A work block: these are sheets students write on, not slides to show */
+  sheet?: boolean
 }
 
-export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: Props) {
+export function SlidesSection({ slides, media, onAddMedia, onChange, onError, sheet }: Props) {
+  const word = sheet ? 'лист' : 'слайд'
   const [currentId, setCurrentId] = useState<string | null>(slides[0]?.id ?? null)
   const [preview, setPreview] = useState(false)
   const index = Math.max(0, slides.findIndex(s => s.id === currentId))
@@ -40,7 +43,7 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: 
   }
 
   function removeSlide(s: Scene) {
-    if (s.objects.length && !confirm('Удалить слайд вместе с содержимым?')) return
+    if (s.objects.length && !confirm(`Удалить ${word} вместе с содержимым?`)) return
     const i = slides.findIndex(x => x.id === s.id)
     const next = slides[i + 1] ?? slides[i - 1]
     onChange(list => list.filter(x => x.id !== s.id))
@@ -61,7 +64,7 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: 
   if (!current) {
     return (
       <button onClick={addSlide} style={dashedBtn}>
-        + Добавить слайд (текст, картинки, страницы PDF, фигуры — слоями)
+        + Добавить {word} (текст, картинки, страницы PDF, фигуры — слоями)
       </button>
     )
   }
@@ -71,7 +74,7 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: 
       <div data-testid="slide-strip" style={{ display: 'flex', gap: 8, alignItems: 'stretch', overflowX: 'auto', paddingBottom: 6, marginBottom: 8 }}>
         {slides.map((s, i) => (
           <div key={s.id} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <button onClick={() => setCurrentId(s.id)} title={`Слайд ${i + 1}`} aria-pressed={s.id === current.id} style={{
+            <button onClick={() => setCurrentId(s.id)} title={`${sheet ? 'Лист' : 'Слайд'} ${i + 1}`} aria-pressed={s.id === current.id} style={{
               padding: 0, borderRadius: 4, overflow: 'hidden', lineHeight: 0, background: '#fff',
               border: `2px solid ${s.id === current.id ? '#4a90e2' : '#e5e7eb'}`,
             }}>
@@ -83,14 +86,14 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: 
                 <>
                   <Mini title="Левее" disabled={i === 0} onClick={() => moveSlide(s, -1)}>←</Mini>
                   <Mini title="Правее" disabled={i === slides.length - 1} onClick={() => moveSlide(s, 1)}>→</Mini>
-                  <Mini title="Дублировать слайд" onClick={() => duplicateSlide(s)}>⧉</Mini>
-                  <Mini title="Удалить слайд" onClick={() => removeSlide(s)}>✕</Mini>
+                  <Mini title={`Дублировать ${word}`} onClick={() => duplicateSlide(s)}>⧉</Mini>
+                  <Mini title={`Удалить ${word}`} onClick={() => removeSlide(s)}>✕</Mini>
                 </>
               )}
             </div>
           </div>
         ))}
-        <button onClick={addSlide} title="Новый слайд" style={{ ...dashedBtn, width: 70, flexShrink: 0, fontSize: 20, textAlign: 'center' }}>+</button>
+        <button onClick={addSlide} title={sheet ? 'Новый лист' : 'Новый слайд'} style={{ ...dashedBtn, width: 70, flexShrink: 0, fontSize: 20, textAlign: 'center' }}>+</button>
         <span style={{ flex: 1 }} />
         <button onClick={() => setPreview(true)} title="Как увидят ученик и учитель" style={{
           alignSelf: 'flex-start', flexShrink: 0, padding: '6px 12px', borderRadius: 4, border: 'none',
@@ -98,8 +101,14 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError }: 
         }}>▶ Просмотр</button>
       </div>
 
+      {sheet && (
+        <div data-testid="sheet-hint" style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+          Фиолетовая рамка — лист ученика целиком, у всех он выглядит одинаково. Что вы положите, ученик не сможет стереть. Пустое место в рамке остаётся ему для записей.
+        </div>
+      )}
       <SlideEditor
         key={current.id}
+        sheet={sheet}
         scene={current}
         media={media}
         onAddMedia={onAddMedia}

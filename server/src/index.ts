@@ -888,8 +888,11 @@ function teacherSlidesState(lesson: LessonRuntime) {
 
 function studentSlidesView(lesson: LessonRuntime) {
   const s = studentScenes(lesson.material, lesson.slides);
-  if (!s) return { active: false };
+  const block = lesson.material?.blocks.find(b => b.id === lesson.block);
+  const work = block && block.type !== 'group' ? { task: block.task, readOnly: block.sheetReadOnly } : {};
+  if (!s) return { active: false, ...work };
   return {
+    ...work,
     active: true,
     index: lesson.slides.index,
     count: blockSlides(lesson.material, lesson.slides.blockId).length,
@@ -922,14 +925,15 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
     if (running) enterBlock(lesson, running);
   }
   broadcastSlides(lesson, { material: true });
-  pushMainBoard(lesson);
+  pushBoards(lesson);
 }
 
-/** Make a block the current one. In the explanation its slides are on the board, at once */
+/** Make a block the current one. Its slides are on the board at once: in the explanation for all
+ *  to see, in a work block as the sheet each group writes on */
 function enterBlock(lesson: LessonRuntime, block: Block) {
   const st = lesson.slides;
   if (block.id !== st.blockId) { st.blockId = block.id; st.index = 0; }
-  st.active = block.type === 'group' && block.slides.length > 0;
+  st.active = block.slides.length > 0;
   lesson.block = block.id;
 }
 
@@ -952,7 +956,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
   enterBlock(lesson, block);
   broadcastSlides(lesson);
-  pushMainBoard(lesson);
+  pushBoards(lesson);
   if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
 }
 
@@ -1023,9 +1027,9 @@ type BoardObject = Record<string, unknown> & { uid: string; type: string };
 const BOARD_MAX_OBJECTS = 3000;
 const BOARD_MAX_OP_BYTES = 256 * 1024;
 
-/** In the explanation each slide (or block without slides) keeps its own drawing */
+/** Each slide or sheet (or block without any) keeps its own drawing, per room */
 function boardKey(lesson: LessonRuntime, room: string): string {
-  if (!room.endsWith(':main-room') || !lesson.block) return room;
+  if (!lesson.block) return room;
   const scene = lesson.slides.active ? currentScene(lesson.material, lesson.slides) : null;
   return `${room}#${scene?.id ?? lesson.block}`;
 }
@@ -1034,13 +1038,13 @@ function boardState(lesson: LessonRuntime, room: string): BoardObject[] {
   return Array.from(lesson.boards.get(boardKey(lesson, room))?.values() ?? []);
 }
 
-/** The slide changed: everyone in the main room gets its drawing */
-function pushMainBoard(lesson: LessonRuntime) {
+/** The slide or sheet changed: everyone gets its drawing in their room */
+function pushBoards(lesson: LessonRuntime) {
   for (const [id, p] of lesson.participants) {
-    if (p.livekitRoom?.endsWith(':main-room')) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
+    if (p.livekitRoom) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
   }
   for (const [id, bc] of lesson.boardConnections) {
-    if (bc.room.endsWith(':main-room')) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, bc.room));
+    io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, bc.room));
   }
 }
 
@@ -1052,6 +1056,7 @@ function isBoardObject(o: unknown): o is BoardObject {
 
 function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author: string, isTeacher: boolean, fromSocket: string) {
   if (!raw || typeof raw !== 'object') return;
+  if (!isTeacher && lesson.material?.blocks.find(b => b.id === lesson.block)?.sheetReadOnly) return;
   const op = raw as { t?: unknown; obj?: unknown; uid?: unknown };
   const key = boardKey(lesson, room);
   let board = lesson.boards.get(key);
@@ -1703,7 +1708,7 @@ io.on('connection', async (socket) => {
       const count = blockSlides(lesson.material, lesson.slides.blockId).length;
       lesson.slides.index = Math.max(0, Math.min(count - 1, index));
       broadcastSlides(lesson);
-      pushMainBoard(lesson);
+      pushBoards(lesson);
     });
 
     socket.on('slides:reveal', ({ uid, on }: { uid: string; on: boolean }) => {
