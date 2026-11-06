@@ -21,6 +21,8 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
 }) {
   const { status, data, saveError } = useJournal();
   const [passwordOpen, setPasswordOpen] = useState(false);
+  // Looking through classes changes nothing: the class (and its seat plan) applies on «Выбрать»
+  const [draftId, setDraftId] = useState(classId);
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
@@ -38,11 +40,14 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
         {status === 'unavailable' && <div style={errorText}>Журнал сейчас недоступен. Проверьте связь и обновите страницу</div>}
         {status === 'none' && <CreateJournal email={email} onChangePassword={() => setPasswordOpen(true)} />}
         {status === 'locked' && <Unlock email={email} />}
-        {status === 'open' && data && <Classes classes={data.classes} classId={classId} onClassId={onClassId} lesson={lesson} />}
+        {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} />}
         {saveError && <div style={errorText}>{saveError}</div>}
         {(status === 'none' || status === 'open') && (passwordOpen
           ? <ChangePassword email={email} onDone={() => setPasswordOpen(false)} />
           : <button onClick={() => setPasswordOpen(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Сменить пароль</button>)}
+        {status === 'open' && data && (
+          <button data-testid="journal-choose" onClick={() => { onClassId(draftId); onClose(); }} style={mainBtn}>Выбрать</button>
+        )}
       </div>
     </div>
   );
