@@ -5,6 +5,7 @@ import { socket } from './socket';
 import { SpeakingRing } from './speaking';
 import { useAvatarUrl } from './avatars';
 import { ClassCamVideo, useClassCam } from './classCams';
+import { StudentName } from './studentNames';
 
 function SeatVideo({ identity }: { identity: string }) {
   const tracks = useTracks([Track.Source.Camera]);
@@ -208,8 +209,8 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                   {seat.occupant ? (
                     <>
                       {hasLivekit && <SeatVideo identity={seat.occupant} />}
-                      <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
-                        {seat.occupant}
+                      <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150 }} title={seat.occupant} data-testid="seat-name">
+                        <StudentName identity={seat.occupant} />
                       </div>
                       {names?.journalName(seat.occupant) && (
                         <div data-testid="seat-journal-name" style={{ position: 'relative', zIndex: 1, fontSize: 11, color: '#222', textShadow: '0 1px 3px rgba(255,255,255,0.8)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

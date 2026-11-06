@@ -305,6 +305,7 @@ interface Participant {
   livekitRoom: string | null;
   uuid: string | null; // the student's profile in their browser; only teachers get to see it
   avatar: string | null; // id of a picture from the clients' built-in set (avatars/<id>.svg)
+  teacherName?: string; // a student's name for the teacher; never sent to classmates
   bot?: boolean; // a simulated student of the solo demo: no socket behind the id
 }
 
@@ -683,7 +684,12 @@ function broadcastState(code: string, lesson: LessonRuntime) {
   });
   // Only for the teacher: a student's uuid is what seats them, classmates must not learn it
   const uuids = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.uuid).map(p => [p.id, p.uuid]));
-  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('studentUuids', uuids);
+  const names = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.teacherName).map(p => [p.name, p.teacherName]));
+  for (const id of socketsOf(lesson, 'teacher')) {
+    const sock = io.sockets.sockets.get(id);
+    sock?.emit('studentUuids', uuids);
+    sock?.emit('studentNames', names);
+  }
 }
 
 // ---------- slides ----------
@@ -1147,10 +1153,12 @@ function sweepAttempts(store: Map<string, AttemptEntry>) {
 }
 
 io.on('connection', async (socket) => {
-  const { name, role, lessonId, uuid: rawUuid, token, avatar: rawAvatar } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; uuid?: unknown; token?: string; avatar?: unknown };
+  const { name, role, lessonId, uuid: rawUuid, token, avatar: rawAvatar, teacherName: rawTeacherName } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; uuid?: unknown; teacherName?: unknown; token?: string; avatar?: unknown };
   // only an id from the built-in set travels — never a picture; clients ignore ids they don't know
   const avatar = typeof rawAvatar === 'string' && /^[a-z]{1,20}$/.test(rawAvatar) ? rawAvatar : null;
   const uuid = role === 'student' && isUuid(rawUuid) ? rawUuid : null;
+  // What the teacher calls this student. Goes to the teacher only: classmates see `name`, the nick
+  const teacherName = role === 'student' && typeof rawTeacherName === 'string' ? rawTeacherName.trim().slice(0, 60) : '';
   const ip = clientIp(socket);
 
   if (isLockedOut(codeAttempts, ip)) {
@@ -1271,7 +1279,7 @@ io.on('connection', async (socket) => {
 
   async function finishJoin(effectiveName: string) {
     if (socket.disconnected) return; // left while we were looking things up — nothing to add
-    const participant: Participant = { id: socket.id, name: effectiveName, role, livekitRoom: null, uuid, avatar };
+    const participant: Participant = { id: socket.id, name: effectiveName, role, livekitRoom: null, uuid, avatar, teacherName };
     lesson.participants.set(socket.id, participant);
     lesson.visited = true;
     const demo = demos.get(code);

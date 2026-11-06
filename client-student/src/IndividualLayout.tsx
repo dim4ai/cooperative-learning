@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import { NameCard, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
-import { socket, myName } from './socket';
+import { socket, ownName } from './socket';
 
 interface Props {
   room: string;
@@ -43,7 +43,7 @@ export function IndividualLayout({ room }: Props) {
 
   return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, background: '#111', padding: 16, boxSizing: 'border-box' }}>
-      {localTrack && <CamBox track={localTrack} label={myName} />}
+      {localTrack && <CamBox track={localTrack} label={ownName} />}
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <button
