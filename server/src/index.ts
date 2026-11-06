@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { Server } from 'socket.io';
+import { Server, type Socket } from 'socket.io';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import {
   verifyTeacher, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
@@ -16,6 +16,7 @@ import {
   parseMaterial, MaterialError, MAX_MATERIAL_JSON_BYTES, mediaCatalog, emptySlidesState, blockSlides, currentScene,
   studentScenes, scenesMedia, allowedHashes, type SlidesState, type Material,
 } from './slides';
+import type { Block } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
 import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
@@ -275,6 +276,7 @@ const io = new Server(httpServer, {
 
 type Role = 'teacher' | 'student' | 'board';
 type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
+const STAGES: readonly Stage[] = ['waiting', 'group', 'individual', 'pairs', 'fours'];
 
 interface Participant {
   id: string;
@@ -295,6 +297,8 @@ export interface Seat {
   occupant: string | null;
   reserved: boolean; // kept by the seat plan for a certain student
 }
+
+type UnderstoodMark = 'yes' | 'no';
 
 interface Poll {
   question: string;
@@ -317,6 +321,9 @@ interface LessonRuntime {
   currentPoll: Poll | null;
   material: Material | null;
   slides: SlidesState;
+  block: string | null;            // the lesson block running now (null: no lesson file, or not started)
+  marks: Map<string, UnderstoodMark>; // the last "всем понятно?": student name → their answer
+  vote: NodeJS.Timeout | null;     // while the question is on the students' screens
   relay: MediaRelay;
   emptySince: number | null;
   visited: boolean; // someone has been in: from then on it holds its place until it's over
@@ -558,6 +565,9 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     currentPoll: null,
     material: null,
     slides: emptySlidesState(),
+    block: null,
+    marks: new Map(),
+    vote: null,
     relay: new MediaRelay(io, code),
     emptySince: Date.now(),
     visited: false,
@@ -728,6 +738,7 @@ function teacherSlidesState(lesson: LessonRuntime) {
   const st = lesson.slides;
   const scene = currentScene(lesson.material, st);
   return {
+    block: lesson.block,
     active: st.active,
     blockId: st.blockId,
     index: st.index,
@@ -765,9 +776,86 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
   lesson.material = material;
   if (!keepState) {
     lesson.slides = emptySlidesState();
+    lesson.block = null;
     lesson.relay.setCatalog(mediaCatalog(material));
+    // Opened in the middle of the lesson: pick up from the first block of the stage already running
+    const running = material?.blocks.find(b => b.type === lesson.stage);
+    if (running) enterBlock(lesson, running);
   }
   broadcastSlides(lesson, { material: true });
+  pushMainBoard(lesson);
+}
+
+/** Make a block the current one. In the explanation its slides are on the board, at once */
+function enterBlock(lesson: LessonRuntime, block: Block) {
+  const st = lesson.slides;
+  if (block.id !== st.blockId) { st.blockId = block.id; st.index = 0; }
+  st.active = block.type === 'group' && block.slides.length > 0;
+  lesson.block = block.id;
+}
+
+async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
+  lesson.stage = stage;
+  console.log(`[${code}] stage -> ${stage}`);
+  if (stage === 'pairs') await assignPairs(code, lesson);
+  else if (stage === 'fours') await assignFours(code, lesson);
+  else if (stage === 'individual') await assignIndividual(code, lesson);
+  else await sendAllToMain(code, lesson);
+  broadcastState(code, lesson);
+  lesson.bots?.onStage(stage);
+  soloReached(code, stage);
+}
+
+async function startBlock(code: string, lesson: LessonRuntime, blockId: string) {
+  const block = lesson.material?.blocks.find(b => b.id === blockId);
+  if (!block || !STAGES.includes(block.type as Stage)) return;
+  // A new explanation is a new topic: last topic's marks would say nothing about it
+  if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
+  enterBlock(lesson, block);
+  broadcastSlides(lesson);
+  pushMainBoard(lesson);
+  if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
+}
+
+// ---------- "всем понятно?" at the end of an explanation ----------
+const VOTE_SECONDS = 5;
+const VOTE_GRACE_MS = 700; // an answer pressed at the last moment is still on its way
+
+function sendMarks(lesson: LessonRuntime, to?: Socket) {
+  const payload = { asking: !!lesson.vote, marks: Object.fromEntries(lesson.marks) };
+  if (to) { to.emit('understood', payload); return; }
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('understood', payload);
+}
+
+function clearMarks(lesson: LessonRuntime) {
+  if (lesson.vote) { clearTimeout(lesson.vote); lesson.vote = null; }
+  lesson.marks = new Map();
+  for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('understood:closed');
+  sendMarks(lesson);
+}
+
+/** The simulated class answers so that every picture of the map shows up: a whole desk, a pair, one student */
+function botAnswers(lesson: LessonRuntime) {
+  const desks = new Map<number, Seat[]>();
+  for (const seat of lesson.seats) {
+    if (!seat.occupant) continue;
+    desks.set(seat.groupIndex, [...(desks.get(seat.groupIndex) ?? []), seat]);
+  }
+  [...desks.keys()].sort((a, b) => a - b).forEach((g, d) => {
+    const seats = desks.get(g)!.sort((a, b) => a.row - b.row || a.col - b.col);
+    seats.forEach((seat, i) => {
+      const no = d === 0 || (d === 1 ? seat.row === seats[0].row : i === 0);
+      if (!no && seats.length > 2 && i === seats.length - 1) return; // at a full desk somebody stays silent
+      lesson.marks.set(seat.occupant!, no ? 'no' : 'yes');
+    });
+  });
+}
+
+function finishVote(lesson: LessonRuntime) {
+  lesson.vote = null;
+  if (lesson.bots) botAnswers(lesson);
+  for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('understood:closed');
+  sendMarks(lesson);
 }
 
 // ---------- shared board ----------
@@ -777,8 +865,25 @@ type BoardObject = Record<string, unknown> & { uid: string; type: string };
 const BOARD_MAX_OBJECTS = 3000;
 const BOARD_MAX_OP_BYTES = 256 * 1024;
 
+/** In the explanation each slide (or block without slides) keeps its own drawing */
+function boardKey(lesson: LessonRuntime, room: string): string {
+  if (!room.endsWith(':main-room') || !lesson.block) return room;
+  const scene = lesson.slides.active ? currentScene(lesson.material, lesson.slides) : null;
+  return `${room}#${scene?.id ?? lesson.block}`;
+}
+
 function boardState(lesson: LessonRuntime, room: string): BoardObject[] {
-  return Array.from(lesson.boards.get(room)?.values() ?? []);
+  return Array.from(lesson.boards.get(boardKey(lesson, room))?.values() ?? []);
+}
+
+/** The slide changed: everyone in the main room gets its drawing */
+function pushMainBoard(lesson: LessonRuntime) {
+  for (const [id, p] of lesson.participants) {
+    if (p.livekitRoom?.endsWith(':main-room')) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
+  }
+  for (const [id, bc] of lesson.boardConnections) {
+    if (bc.room.endsWith(':main-room')) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, bc.room));
+  }
 }
 
 function isBoardObject(o: unknown): o is BoardObject {
@@ -790,8 +895,9 @@ function isBoardObject(o: unknown): o is BoardObject {
 function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author: string, isTeacher: boolean, fromSocket: string) {
   if (!raw || typeof raw !== 'object') return;
   const op = raw as { t?: unknown; obj?: unknown; uid?: unknown };
-  let board = lesson.boards.get(room);
-  if (!board) { board = new Map(); lesson.boards.set(room, board); }
+  const key = boardKey(lesson, room);
+  let board = lesson.boards.get(key);
+  if (!board) { board = new Map(); lesson.boards.set(key, board); }
 
   let out: unknown;
   if (op.t === 'add' || op.t === 'mod') {
@@ -1191,6 +1297,7 @@ io.on('connection', async (socket) => {
     if (role === 'teacher') {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
+      sendMarks(lesson, socket);
     } else {
       socket.emit('slides:view', studentSlidesView(lesson));
     }
@@ -1265,16 +1372,32 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('setStage', async (stage: Stage) => {
+      if (role !== 'teacher' || !STAGES.includes(stage)) return;
+      await changeStage(code, lesson, stage);
+    });
+
+    // With a lesson file the teacher goes through its blocks; the stage follows the block
+    socket.on('block:start', async ({ blockId }: { blockId: string }) => {
       if (role !== 'teacher') return;
-      lesson.stage = stage;
-      console.log(`[${code}] stage -> ${stage}`);
-      if (stage === 'pairs') await assignPairs(code, lesson);
-      else if (stage === 'fours') await assignFours(code, lesson);
-      else if (stage === 'individual') await assignIndividual(code, lesson);
-      else await sendAllToMain(code, lesson);
-      broadcastState(code, lesson);
-      lesson.bots?.onStage(stage);
-      soloReached(code, stage);
+      await startBlock(code, lesson, blockId);
+    });
+
+    socket.on('understood:ask', () => {
+      if (role !== 'teacher' || lesson.stage !== 'group' || lesson.vote) return;
+      lesson.marks = new Map();
+      lesson.vote = setTimeout(() => finishVote(lesson), VOTE_SECONDS * 1000 + VOTE_GRACE_MS);
+      for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('understood:ask', { seconds: VOTE_SECONDS });
+      sendMarks(lesson);
+    });
+
+    socket.on('understood:answer', (answer: unknown) => {
+      const name = lesson.participants.get(socket.id)?.name;
+      if (role !== 'student' || !lesson.vote || !name || lesson.marks.has(name)) return;
+      if (answer === 'yes' || answer === 'no') lesson.marks.set(name, answer);
+    });
+
+    socket.on('understood:clear', () => {
+      if (role === 'teacher') clearMarks(lesson);
     });
 
     socket.on('startTimer', (seconds: number) => {
@@ -1375,29 +1498,13 @@ io.on('connection', async (socket) => {
       }
     });
 
-    // Teacher presents slides: open/close, navigate, reveal hidden objects, move ✋ objects.
-    socket.on('slides:open', ({ blockId }: { blockId?: string } = {}) => {
-      if (role !== 'teacher' || !lesson.material) return;
-      const st = lesson.slides;
-      const target = blockId ?? st.blockId ?? lesson.material.blocks.find(b => b.slides.length)?.id ?? null;
-      if (target !== st.blockId) { st.blockId = target; st.index = 0; }
-      st.active = blockSlides(lesson.material, st.blockId).length > 0;
-      broadcastSlides(lesson);
-    });
-
-    socket.on('slides:close', () => {
-      if (role !== 'teacher') return;
-      lesson.slides.active = false;
-      broadcastSlides(lesson);
-    });
-
-    socket.on('slides:goto', ({ blockId, index }: { blockId: string; index: number }) => {
-      if (role !== 'teacher') return;
-      const count = blockSlides(lesson.material, blockId).length;
-      if (!count || !Number.isInteger(index)) return;
-      lesson.slides.blockId = blockId;
+    // Teacher presents slides: navigate, reveal hidden objects, move ✋ objects.
+    socket.on('slides:goto', ({ index }: { index: number }) => {
+      if (role !== 'teacher' || !lesson.slides.active || !Number.isInteger(index)) return;
+      const count = blockSlides(lesson.material, lesson.slides.blockId).length;
       lesson.slides.index = Math.max(0, Math.min(count - 1, index));
       broadcastSlides(lesson);
+      pushMainBoard(lesson);
     });
 
     socket.on('slides:reveal', ({ uid, on }: { uid: string; on: boolean }) => {

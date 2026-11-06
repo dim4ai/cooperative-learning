@@ -5,6 +5,7 @@
 // A fixed 1600×900 page fitted into the available space, so everyone sees the same picture
 // whatever their screen. The toolbar sits above the page, never over it. Changes travel as
 // per-object operations (add / mod / del / clear) through a `link`; without one the board is local.
+// With an `underlay` (a slide) the page is transparent and the drawing lies on top of it.
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
@@ -32,7 +33,7 @@ export interface BoardLink {
 /** student — basic tools; teacher — also marker, arrow and clearing the whole board */
 export type BoardRole = 'student' | 'teacher'
 
-type Tool = 'select' | 'pen' | 'marker' | 'eraser' | 'line' | 'arrow' | 'rect' | 'triangle' | 'ellipse' | 'text'
+type Tool = 'slide' | 'select' | 'pen' | 'marker' | 'eraser' | 'line' | 'arrow' | 'rect' | 'triangle' | 'ellipse' | 'text'
 type ShapeTool = 'line' | 'arrow' | 'rect' | 'triangle' | 'ellipse'
 const SHAPES: readonly Tool[] = ['line', 'arrow', 'rect', 'triangle', 'ellipse']
 // The eraser paints the page's own colour: it takes part of a stroke, and undo and sync work as for any stroke
@@ -61,7 +62,8 @@ const RectIcon = lineIcon(<rect x="4.5" y="5.5" width="15" height="13" rx="0.5" 
 const SelectIcon = lineIcon(<path d="M20.5 20.5L3.5 3.5M3.5 13V3.5H13" />)
 const ArrowIcon = lineIcon(<path d="M2.5 12h19M15 5.5l6.5 6.5-6.5 6.5" />)
 
-const TOOLS: { key: Tool; icon: ReactNode; title: string; teacherOnly?: boolean }[] = [
+const TOOLS: { key: Tool; icon: ReactNode; title: string; teacherOnly?: boolean; onSlide?: boolean }[] = [
+  { key: 'slide', icon: '☝', title: 'Работа со слайдом: открыть скрытое, подвинуть объект', teacherOnly: true, onSlide: true },
   { key: 'select', icon: SelectIcon, title: 'Выбрать и двигать (Delete — удалить)' },
   { key: 'pen', icon: PencilIcon, title: 'Карандаш' },
   { key: 'marker', icon: '🖍', title: 'Маркер: полупрозрачный, для выделения', teacherOnly: true },
@@ -107,9 +109,11 @@ interface Props {
   readOnly?: boolean
   /** Shared board transport; omitted — a local board nobody else sees */
   link?: BoardLink
+  /** What lies under the drawing, at the page's width in pixels */
+  underlay?: (width: number) => ReactNode
 }
 
-export function Board({ role = 'student', readOnly = false, link }: Props) {
+export function Board({ role = 'student', readOnly = false, link, underlay }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const fcRef = useRef<Canvas | null>(null)
@@ -117,8 +121,10 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
   const [color, setColor] = useState(COLORS[0])
   const [width, setWidth] = useState(WIDTHS[0])
   const [hist, setHist] = useState({ undo: 0, redo: 0 })
-  const live = useRef({ tool, color, width, readOnly, link })
-  live.current = { tool, color, width, readOnly, link }
+  const [pageWidth, setPageWidth] = useState(0)
+  const hasUnderlay = !!underlay
+  const live = useRef({ tool, color, width, readOnly, link, hasUnderlay })
+  live.current = { tool, color, width, readOnly, link, hasUnderlay }
 
   // The last synced JSON of every object (for undo of moves/deletes) and local undo/redo stacks
   const known = useRef(new Map<string, BoardObject>())
@@ -252,6 +258,10 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
         if (tool !== 'select') fc.discardActiveObject()
         fc.isDrawingMode = !readOnly && (tool === 'pen' || tool === 'marker' || tool === 'eraser')
         fc.selection = !readOnly && tool === 'select'
+        fc.backgroundColor = live.current.hasUnderlay ? '' : '#ffffff'
+        // ☝ and viewers: the pointer goes through to the slide underneath
+        const through = live.current.hasUnderlay && (readOnly || tool === 'slide')
+        if (fc.elements?.container) fc.elements.container.style.pointerEvents = through ? 'none' : 'auto' // the host never takes them
         fc.skipTargetFind = readOnly || tool !== 'select'
         fc.defaultCursor = readOnly ? 'default' : tool === 'text' ? 'text' : tool === 'select' ? 'default' : 'crosshair'
         if (fc.isDrawingMode) {
@@ -266,7 +276,12 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
     }
 
     // ---- local input ----
-    fc.on('path:created', e => added((e as unknown as { path: FabricObject }).path))
+    fc.on('path:created', e => {
+      const path = (e as unknown as { path: FabricObject }).path
+      // On a slide white paint would cover the slide: there the eraser removes the ink itself
+      if (live.current.hasUnderlay && path.stroke === ERASER_COLOR) path.set({ globalCompositeOperation: 'destination-out' })
+      added(path)
+    })
 
     let start: { x: number; y: number } | null = null
     let preview: FabricObject | null = null
@@ -357,6 +372,7 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
       const k = Math.max(0.05, Math.min(stage.clientWidth / W, stage.clientHeight / H))
       fc.setDimensions({ width: Math.floor(W * k), height: Math.floor(H * k) })
       fc.setZoom(k)
+      setPageWidth(Math.floor(W * k))
     }
     fit()
     const ro = new ResizeObserver(fit)
@@ -370,7 +386,10 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
     }
   }, [])
 
-  useEffect(() => api.current.restyle(), [tool, color, width, readOnly])
+  useEffect(() => {
+    if (!hasUnderlay && tool === 'slide') setTool('pen')
+    api.current.restyle()
+  }, [tool, color, width, readOnly, hasUnderlay])
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (readOnly || (e.target as HTMLElement).tagName === 'TEXTAREA') return
@@ -385,7 +404,7 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: '#e9ecef', outline: 'none', boxSizing: 'border-box' }}>
       {!readOnly && (
         <div data-testid="board-toolbar" style={bar}>
-          {TOOLS.filter(t => role === 'teacher' || !t.teacherOnly).map(t => (
+          {TOOLS.filter(t => (role === 'teacher' || !t.teacherOnly) && (hasUnderlay || !t.onSlide)).map(t => (
             <Btn key={t.key} on={tool === t.key} title={t.title} onClick={() => setTool(t.key)} testId={`tool-${t.key}`}>{t.icon}</Btn>
           ))}
           <Sep />
@@ -410,7 +429,10 @@ export function Board({ role = 'student', readOnly = false, link }: Props) {
       )}
       <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div ref={hostRef} data-testid="board" style={{ lineHeight: 0, boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }} />
+          <div style={{ position: 'relative', lineHeight: 0, boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
+            {underlay && pageWidth > 0 && <div style={{ position: 'absolute', left: 0, top: 0 }}>{underlay(pageWidth)}</div>}
+            <div ref={hostRef} data-testid="board" style={{ position: 'relative', lineHeight: 0, pointerEvents: 'none' }} />
+          </div>
         </div>
       </div>
     </div>

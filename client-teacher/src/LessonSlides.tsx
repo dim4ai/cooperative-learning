@@ -6,7 +6,7 @@ import type { CSSProperties } from 'react';
 import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from './slides/model';
+import { SharedBoard } from './SharedBoard';
 import {
   readLesson, releaseLesson, lessonForServer, storedLessonFile, storeLessonFile, forgetLessonFile,
   NotALessonError, type LocalLesson,
@@ -15,10 +15,12 @@ import { serveMedia } from './mediaShare';
 
 const API = import.meta.env.VITE_API_URL;
 
-export interface MaterialBlock { id: string; type: string; title: string; slides?: Scene[] }
+export interface MaterialBlock { id: string; type: string; title: string; slides?: Scene[]; teacherNote?: string; task?: string; duration?: number | null }
 /** The lesson as the server knows it */
 export interface Material { id: string; title: string; blocks: MaterialBlock[] }
 export interface SlidesState {
+  /** the lesson block running now */
+  block: string | null;
   active: boolean;
   blockId: string | null;
   index: number;
@@ -26,7 +28,11 @@ export interface SlidesState {
   positions: Record<string, { left: number; top: number }>;
 }
 
-const INITIAL: SlidesState = { active: false, blockId: null, index: 0, revealed: [], positions: {} };
+export type UnderstoodMark = 'yes' | 'no';
+export interface Understood { asking: boolean; marks: Record<string, UnderstoodMark> }
+const NO_MARKS: Understood = { asking: false, marks: {} };
+
+const INITIAL: SlidesState = { block: null, active: false, blockId: null, index: 0, revealed: [], positions: {} };
 
 export interface TeacherSlides {
   /** what the server has (null — no lesson loaded) */
@@ -34,6 +40,7 @@ export interface TeacherSlides {
   /** the lesson file opened in this browser, if it is the one the server has */
   local: LocalLesson | null;
   state: SlidesState;
+  understood: Understood;
   setState: (fn: (s: SlidesState) => SlidesState) => void;
   busy: boolean;
   error: string;
@@ -56,6 +63,7 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
   const [known, setKnown] = useState(false); // got the server's answer about the material at least once
   const [file, setFile] = useState<LocalLesson | null>(null);
   const [state, setState] = useState<SlidesState>(INITIAL);
+  const [understood, setUnderstood] = useState<Understood>(NO_MARKS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<LocalLesson | null>(null);
@@ -70,16 +78,18 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
     // another teacher tab moved something
     const onMove = ({ uid, left, top }: { uid: string; left: number; top: number }) =>
       setState(s => ({ ...s, positions: { ...s.positions, [uid]: { left, top } } }));
+    socket.on('understood', setUnderstood);
     socket.on('slides:material', onMaterial);
     socket.on('slides:state', onState);
     socket.on('slides:move', onMove);
     const stopServing = serveMedia(socket, hash => fileRef.current?.byHash.get(hash));
     return () => {
+      socket.off('understood', setUnderstood);
       socket.off('slides:material', onMaterial);
       socket.off('slides:state', onState);
       socket.off('slides:move', onMove);
       stopServing();
-      setMaterial(null); setKnown(false); setState(INITIAL);
+      setMaterial(null); setKnown(false); setState(INITIAL); setUnderstood(NO_MARKS);
     };
   }, [lessonCode]);
 
@@ -151,7 +161,7 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
   }, [forget, lessonCode]);
 
   const local = file && material?.id === file.id ? file : null;
-  return { material, local, state, setState, busy, error, open, remove, forget };
+  return { material, local, state, understood, setState, busy, error, open, remove, forget };
 }
 
 // ---------- sidebar: open / remove ----------
@@ -197,42 +207,114 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
   );
 }
 
-// ---------- group stage: presenting ----------
+// ---------- the lesson plan and the teacher's notes ----------
 
-export function SlidesPresenter({ slides: teacherSlides }: { slides: TeacherSlides }) {
+const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки' };
+
+/** Left panel: the lesson's blocks, in order. The stage follows the block */
+export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: string }) {
+  const blocks: MaterialBlock[] = slides.local?.blocks ?? slides.material?.blocks ?? [];
+  const current = stage === 'waiting' ? null : slides.state.block;
+  return (
+    <div data-testid="lesson-plan" style={{ flex: 1, minHeight: 60, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
+      {blocks.map(b => {
+        const on = b.id === current;
+        return (
+          <button key={b.id} data-testid="plan-block" data-current={on || undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
+            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
+            background: on ? '#4a90e2' : '#2e2e3e', color: on ? '#fff' : '#ccc',
+          }}>
+            <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
+            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#888' }}>
+              {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Right panel: what this block asks of the teacher */
+export function BlockNotes({ slides }: { slides: TeacherSlides }) {
+  const { local, material, state } = slides;
+  if (!material || !state.block) return null;
+  const block = local?.blocks.find(b => b.id === state.block);
+  if (!local) return <div style={{ fontSize: 12, color: '#b57600' }}>Заметки лежат в файле урока: откройте его в этом браузере.</div>;
+  if (!block) return null;
+  return (
+    <div data-testid="block-notes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {block.task && <div>
+        <div style={noteLabel}>Задание</div>
+        <div data-testid="block-task" style={noteText}>{block.task}</div>
+      </div>}
+      <div>
+        <div style={noteLabel}>Заметка учителю</div>
+        <div data-testid="block-note" style={noteText}>{block.teacherNote || 'В этом блоке заметки нет.'}</div>
+      </div>
+    </div>
+  );
+}
+
+const noteLabel: CSSProperties = { fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 };
+const noteText: CSSProperties = { whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.45, color: '#222' };
+
+/** End of an explanation: ask the class, see the answers, drop the marks when they're of no more use */
+export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; mapOpen: boolean; onToggleMap: () => void }) {
+  const answers = Object.values(understood.marks);
+  const yes = answers.filter(a => a === 'yes').length;
+  const no = answers.length - yes;
+  const [asked, setAsked] = useState(false);
+  useEffect(() => { if (understood.asking) setAsked(true); }, [understood.asking]);
+  const hasResult = !understood.asking && (answers.length > 0 || (asked && canAsk));
+
+  return (
+    <div data-testid="understood-panel" style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid #e5e5e5', paddingTop: 10 }}>
+      {understood.asking && <div style={{ fontSize: 13, color: '#666' }}>Ученики отвечают…</div>}
+      {hasResult && (
+        <div data-testid="understood-result" style={{ fontSize: 13, color: '#333' }}>
+          {no === 0 && <div>Вопросов нет</div>}
+          {answers.length > 0 && <><span style={{ color: '#1e8e4e' }}>Понятно: {yes}</span> · <span style={{ color: '#d00000' }}>Не понятно: {no}</span></>}
+        </div>
+      )}
+      {canAsk && !understood.asking && (
+        <button data-testid="understood-ask" onClick={() => socket.emit('understood:ask')} style={panelBtn}>Всем понятно?</button>
+      )}
+      {hasResult && canAsk && (
+        <button data-testid="understood-map" onClick={onToggleMap} style={{ ...panelBtn, background: '#eef1f5', color: '#333' }}>{mapOpen ? '← К слайду' : 'Карта класса'}</button>
+      )}
+      {hasResult && answers.length > 0 && (
+        <button data-testid="understood-clear" onClick={() => { setAsked(false); socket.emit('understood:clear'); }} style={{ ...panelBtn, background: 'transparent', color: '#777', border: '1px solid #ddd' }}>Сбросить отметки</button>
+      )}
+    </div>
+  );
+}
+
+const panelBtn: CSSProperties = { padding: '8px 10px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', fontSize: 13, cursor: 'pointer' };
+
+// ---------- group stage: the board with the slide under it ----------
+
+export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides }) {
   const { local, state, setState } = teacherSlides;
   // Without the file here the slides can still be navigated, just without pictures
-  const material: { title: string; blocks: MaterialBlock[] } | null = local ?? teacherSlides.material;
-  const hostRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 800, h: 450 });
-  useEffect(() => {
-    const el = hostRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const decks = material?.blocks.filter(b => (b.slides?.length ?? 0) > 0) ?? [];
-  const deck = decks.find(b => b.id === state.blockId) ?? decks[0];
-  const slides = deck?.slides ?? [];
-  const index = deck?.id === state.blockId ? state.index : 0;
+  const material: { blocks: MaterialBlock[] } | null = local ?? teacherSlides.material;
+  const slides = (state.active && material?.blocks.find(b => b.id === state.blockId)?.slides) || [];
+  const index = state.index;
   const scene = slides[index];
 
-  const goto = useCallback((blockId: string, i: number) => {
-    socket.emit('slides:goto', { blockId, index: i });
-  }, []);
+  const goto = useCallback((i: number) => { socket.emit('slides:goto', { index: i }); }, []);
 
   // ←/→ (PageUp/PageDown — presentation clickers) switch slides
   useEffect(() => {
+    if (!slides.length) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!deck || (e.target as HTMLElement).closest('input, textarea, select, .live-board')) return;
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); if (index < slides.length - 1) goto(deck.id, index + 1); }
-      if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); if (index > 0) goto(deck.id, index - 1); }
+      if ((e.target as HTMLElement).closest('input, textarea, select')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); if (index < slides.length - 1) goto(index + 1); }
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); if (index > 0) goto(index - 1); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [deck, index, slides.length, goto]);
+  }, [index, slides.length, goto]);
 
   // Moves: show locally at once, send at most every 40 ms (+ the final position)
   const lastSent = useRef(0);
@@ -247,70 +329,40 @@ export function SlidesPresenter({ slides: teacherSlides }: { slides: TeacherSlid
 
   const revealed = useMemo(() => new Set(state.revealed), [state.revealed]);
   const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
-  const width = Math.max(200, Math.floor(Math.min(box.w - 32, ((box.h - 16) * SLIDE_WIDTH) / SLIDE_HEIGHT)));
   const hiddenLeft = scene ? scene.objects.filter(o => o.studentHidden && !revealed.has(o.uid)).length : 0;
 
-  if (!material) {
-    return <Centered>Откройте урок из редактора (слева, «Открыть урок…»), чтобы показывать слайды</Centered>;
-  }
-  if (!deck) {
-    return <Centered>В уроке «{material.title}» нет слайдов</Centered>;
-  }
+  if (!scene) return <SharedBoard />;
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#2b2b36' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', color: '#ddd', fontSize: 13, background: '#23232c' }}>
-        {decks.length > 1 ? (
-          <select value={deck.id} onChange={e => goto(e.target.value, 0)} style={{ fontSize: 13, padding: '3px 6px', borderRadius: 4 }}>
-            {decks.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
-          </select>
-        ) : <span>{deck.title}</span>}
-        <button onClick={() => goto(deck.id, index - 1)} disabled={index === 0} style={navBtn} title="Предыдущий (←)">←</button>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', color: '#444', fontSize: 13, background: '#f1f3f5', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
+        <button onClick={() => goto(index - 1)} disabled={index === 0} style={navBtn} title="Предыдущий (←)">←</button>
         <span data-testid="slide-counter">{index + 1} / {slides.length}</span>
-        <button onClick={() => goto(deck.id, index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
-        <span style={{ color: '#999', fontSize: 12, marginLeft: 8 }}>
-          {hiddenLeft > 0 ? `Скрыто от учеников: ${hiddenLeft} (бледные) — клик открывает` : ''}
-        </span>
-        <span style={{ flex: 1 }} />
-        {!state.active && (
-          <button onClick={() => socket.emit('slides:open', { blockId: deck.id })} style={{ ...navBtn, background: '#2ecc71', color: '#fff', border: 'none' }}>
-            Показать классу
-          </button>
-        )}
-        {state.active && <span style={{ color: '#2ecc71', fontSize: 12 }}>● ученики видят</span>}
+        <button onClick={() => goto(index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
+        {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
-      <div ref={hostRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {scene && (
-          <div style={{ boxShadow: '0 6px 24px rgba(0,0,0,.4)' }}>
-            <SlidePlayer
-              key={`${scene.id}:${local ? 'local' : 'none'}`}
-              scene={scene}
-              resolveMedia={resolve}
-              role="teacher"
-              revealed={revealed}
-              positions={state.positions as Positions}
-              canDrag
-              onToggleReveal={uid => socket.emit('slides:reveal', { uid, on: !revealed.has(uid) })}
-              onMove={onMove}
-              width={width}
-            />
-          </div>
-        )}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <SharedBoard underlay={width => (
+          <SlidePlayer
+            key={`${scene.id}:${local ? 'local' : 'none'}`}
+            scene={scene}
+            resolveMedia={resolve}
+            role="teacher"
+            revealed={revealed}
+            positions={state.positions as Positions}
+            canDrag
+            onToggleReveal={uid => socket.emit('slides:reveal', { uid, on: !revealed.has(uid) })}
+            onMove={onMove}
+            width={width}
+          />
+        )} />
       </div>
-    </div>
-  );
-}
-
-function Centered({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 14, padding: 24, textAlign: 'center' }}>
-      {children}
     </div>
   );
 }
 
 const navBtn: CSSProperties = {
-  padding: '3px 10px', borderRadius: 4, border: '1px solid #444', background: '#2e2e3e', color: '#ddd', cursor: 'pointer', fontSize: 13,
+  padding: '2px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#333', cursor: 'pointer', fontSize: 13,
 };
 const miniBtn: CSSProperties = {
   padding: '0 4px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12,
