@@ -12,8 +12,8 @@ import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
 import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
-import { forgetProfile, profiles, saveProfileAvatar, enterProfile } from './profiles';
-import { socket, myName, lessonId, isBoardOnly, myBoardRoom, setName, setLessonId } from './socket';
+import { forgetProfile, profileNames, profiles, saveProfileAvatar, saveProfileNames, enterProfile } from './profiles';
+import { socket, myName, ownName, lessonId, isBoardOnly, myBoardRoom, refreshNick, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
@@ -50,7 +50,7 @@ function SelfPreview() {
             {selfAvatar && <img src={selfAvatar} alt="" data-testid="self-avatar" style={{ height: '62%' }} />}
           </div>}
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
-        {myName}
+        {ownName}
       </div>
     </div>
   );
@@ -170,14 +170,38 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
 }
 
 /** The chosen avatar on a seat tile of the same size and look as in the lesson */
-function AvatarPreview({ avatar }: { avatar: string | null }) {
+function AvatarPreview({ avatar, nick }: { avatar: string | null; nick: string }) {
   return (
     <div data-testid="avatar-preview" title="Так вас увидят одноклассники" style={{
       width: 160, height: 120, flexShrink: 0, borderRadius: 8, boxSizing: 'border-box', border: '1px solid #3498db', background: '#3498db55',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 11,
     }}>
       <img src={(avatar && AVATARS[avatar]) || DEFAULT_AVATAR} alt="" style={{ height: 52, marginBottom: 2 }} />
-      <div style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{myName}</div>
+      <div style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nick}</div>
+    </div>
+  );
+}
+
+/** What the teacher and classmates call this student */
+function ProfileNames({ onNick }: { onNick: (nick: string) => void }) {
+  const [names, setNames] = useState(() => profileNames(ownName));
+  function change(field: 'teacherName' | 'nick', value: string) {
+    setNames(n => ({ ...n, [field]: value }));
+    saveProfileNames(ownName, { [field]: value });
+    refreshNick();
+    onNick(myName);
+  }
+  const field: React.CSSProperties = { fontSize: 15, padding: 8, borderRadius: 6, border: '1px solid #ccc', width: '100%', boxSizing: 'border-box' };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+      <label style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        Имя для учителя
+        <input data-testid="teacher-name" value={names.teacherName} maxLength={60} onChange={e => change('teacherName', e.target.value)} style={field} />
+      </label>
+      <label style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13, color: '#666', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        Ник для одноклассников
+        <input data-testid="nick" value={names.nick} maxLength={60} onChange={e => change('nick', e.target.value)} style={field} />
+      </label>
     </div>
   );
 }
@@ -185,6 +209,7 @@ function AvatarPreview({ avatar }: { avatar: string | null }) {
 function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: string; earlyCode: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState(earlyCode); // came too early: no need to type it again
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
+  const [nick, setNick] = useState(myName);
   return (
     <div style={{
       height: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start',
@@ -213,11 +238,12 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
         </button>
       </div>
       {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+      <ProfileNames onNick={setNick} />
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Аватарка — её увидят одноклассники, когда у вас нет видео</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', justifyContent: 'center' }}>
-        <AvatarPreview avatar={avatar} />
+        <AvatarPreview avatar={avatar} nick={nick} />
         <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-          <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(myName, id); }} />
+          <AvatarPicker value={avatar} onChange={id => { setAvatar(id); saveAvatar(id); saveProfileAvatar(ownName, id); }} />
         </div>
       </div>
       <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Доска для разминки — порисуйте, пока ждёте урок</div>

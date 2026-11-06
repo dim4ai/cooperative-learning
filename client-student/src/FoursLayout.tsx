@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { SharedBoard } from './SharedBoard';
-import { socket } from './socket';
+import { shownName, socket } from './socket';
 import { NameCard, SpeakingRing } from './speaking';
 import type { Seat } from './SeatingMap';
 
@@ -61,7 +61,7 @@ export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
 
       {/* Left column: seats 1 (top) and 3 (bottom) + call button */}
       <div style={{ width: 160, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <CamTile identity={seat(0, 0)?.occupant ?? null} label={seat(0, 0)?.occupant ?? '—'} />
+        <CamTile identity={seat(0, 0)?.occupant ?? null} label={shownName(seat(0, 0)?.occupant ?? '—')} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {!noTeacher && <button
             ref={callBtnRef}
@@ -76,7 +76,7 @@ export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
           >🔔</button>}
           <style>{`@keyframes callPulse { 0%,100% { box-shadow: 0 0 0 4px #f39c1255 } 50% { box-shadow: 0 0 0 10px #f39c1200 } }`}</style>
         </div>
-        <CamTile identity={seat(1, 0)?.occupant ?? null} label={seat(1, 0)?.occupant ?? '—'} />
+        <CamTile identity={seat(1, 0)?.occupant ?? null} label={shownName(seat(1, 0)?.occupant ?? '—')} />
       </div>
 
       {/* Center: board */}
@@ -86,7 +86,7 @@ export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
 
       {/* Right column: seats 2 (top), teacher (middle), seat 4 (bottom) */}
       <div style={{ width: 160, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <CamTile identity={seat(0, 1)?.occupant ?? null} label={seat(0, 1)?.occupant ?? '—'} />
+        <CamTile identity={seat(0, 1)?.occupant ?? null} label={shownName(seat(0, 1)?.occupant ?? '—')} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', minHeight: 0 }}>
           {teacher
             ? <div style={{ width: '100%', flexShrink: 0, position: 'relative', background: '#222', borderRadius: 6, overflow: 'hidden', aspectRatio: '4/3' }}>
@@ -96,7 +96,7 @@ export function FoursLayout({ room, groupSeats, noTeacher }: Props) {
             : null
           }
         </div>
-        <CamTile identity={seat(1, 1)?.occupant ?? null} label={seat(1, 1)?.occupant ?? '—'} />
+        <CamTile identity={seat(1, 1)?.occupant ?? null} label={shownName(seat(1, 1)?.occupant ?? '—')} />
       </div>
 
     </div>

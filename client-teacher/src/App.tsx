@@ -16,6 +16,7 @@ import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { PasswordInput } from './PasswordInput';
+import { StudentName, StudentNames, useStudentName } from './studentNames';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
 import { derivePasswordKeys } from './journalCrypto';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
@@ -58,8 +59,10 @@ const LESSON_STAGES: { value: Stage; label: string }[] = [
 ];
 
 /** A student's camera in the teacherSees mode comes from another room than the pair's */
-function PairCamOrName({ identity, name }: { identity: string; name: string }) {
+function PairCamOrName({ identity, name: shown }: { identity: string; name: string }) {
   const cam = useClassCam(identity);
+  const student = useStudentName(shown);
+  const name = shown === 'Учитель' ? shown : student;
   return cam
     ? <ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
     : <NameCard name={name} identity={identity} />;
@@ -85,7 +88,7 @@ function TeacherPairContent({ onLeave, others }: { onLeave: () => void; others: 
               : <PairCamOrName identity={t.participant.identity} name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
             <SpeakingRing identity={t.participant.identity} />
             <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
-              {t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)}
+              {t.participant.isLocal ? 'Учитель' : <StudentName identity={t.participant.name || t.participant.identity} />}
             </div>
           </div>
         ))}
@@ -300,7 +303,8 @@ function LoginForm({ onLogin, onDemo }: { onLogin: (teacher: Teacher, token: str
   );
 }
 
-function StudentTile({ name, color }: { name: string; color?: string }) {
+function StudentTile({ name: identity, color }: { name: string; color?: string }) {
+  const name = useStudentName(identity);
   return (
     <div style={{
       width: 90,
@@ -383,6 +387,7 @@ export default function App() {
   }
   const currentClass = journal.data?.classes.find(c => c.id === classId) ?? null;
   const [studentUuids, setStudentUuids] = useState<Record<string, string>>({});
+  const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
 
   // After a page reload there's a token but no key: the journal stays locked until asked for
   useEffect(() => {
@@ -491,6 +496,7 @@ export default function App() {
     socket.on('demoEnded', finishDemo);
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
+    socket.on('studentNames', setTeacherNames);
     socket.on('joined', () => setJoins(n => n + 1));
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
@@ -566,11 +572,11 @@ export default function App() {
 
   // Who is who, seen only here: name in the lesson (what classmates see) → name in the journal
   const lessonStudents = students.map(p => ({
-    name: p.name, uuid: studentUuids[p.id] ?? null, seat: seats.find(s => s.occupant === p.name)?.id ?? null,
+    name: teacherNames[p.name] ?? p.name, uuid: studentUuids[p.id] ?? null, seat: seats.find(s => s.occupant === p.name)?.id ?? null,
   }));
   const journalStudentOf = (uuid: string | null) => uuid ? currentClass?.students.find(s => s.uuids.includes(uuid)) : undefined;
   const seatNames: SeatNames = {
-    journalName: occupant => journalStudentOf(lessonStudents.find(p => p.name === occupant)?.uuid ?? null)?.name,
+    journalName: occupant => journalStudentOf(studentUuids[students.find(p => p.name === occupant)?.id ?? ''] ?? null)?.name,
     reservedFor: seatId => currentClass?.students.find(s => s.seat === seatId)?.name,
   };
   const notInJournal = currentClass ? lessonStudents.filter(p => p.uuid && !journalStudentOf(p.uuid)).length : 0;
@@ -739,9 +745,9 @@ export default function App() {
     </div>
   );
 
-  if (!livekit) return <AvatarProvider participants={state.participants}><ClassCams.Provider value={classCams}>{inner}</ClassCams.Provider></AvatarProvider>;
+  if (!livekit) return <AvatarProvider participants={state.participants}><StudentNames.Provider value={teacherNames}><ClassCams.Provider value={classCams}>{inner}</ClassCams.Provider></StudentNames.Provider></AvatarProvider>;
 
-  return (<AvatarProvider participants={state.participants}><ClassCams.Provider value={classCams}>
+  return (<AvatarProvider participants={state.participants}><StudentNames.Provider value={teacherNames}><ClassCams.Provider value={classCams}>
     <LiveKitRoom
       key={livekit.room}
       serverUrl={livekit.url}
@@ -756,5 +762,5 @@ export default function App() {
       <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn && !demo?.solo} />
       {inner}
     </LiveKitRoom>
-  </ClassCams.Provider></AvatarProvider>);
+  </ClassCams.Provider></StudentNames.Provider></AvatarProvider>);
 }

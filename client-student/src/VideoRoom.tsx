@@ -1,3 +1,4 @@
+import { shownName } from './socket';
 import { useEffect, useRef } from 'react';
 import { useTracks } from '@livekit/components-react';
 import { Track } from 'livekit-client';
@@ -17,7 +18,7 @@ function VideoTile({ track }: { track: ReturnType<typeof useTracks>[0] }) {
     <div style={{ position: 'relative', background: '#222', borderRadius: 8, overflow: 'hidden', aspectRatio: '4/3' }}>
       <video ref={ref} autoPlay muted={track.participant.isLocal} playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       <div style={{ position: 'absolute', bottom: 4, left: 8, color: '#fff', fontSize: 12 }}>
-        {track.participant.name || track.participant.identity}
+        {shownName(track.participant.name || track.participant.identity)}
       </div>
     </div>
   );

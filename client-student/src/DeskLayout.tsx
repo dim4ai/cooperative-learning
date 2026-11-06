@@ -3,7 +3,7 @@ import { useTracks, type TrackReferenceOrPlaceholder } from '@livekit/components
 import { Track } from 'livekit-client';
 import { SharedBoard } from './SharedBoard';
 import { NameCard, SpeakingRing } from './speaking';
-import { socket } from './socket';
+import { shownName, socket } from './socket';
 
 function VideoTile({ track }: { track: TrackReferenceOrPlaceholder }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -16,7 +16,7 @@ function VideoTile({ track }: { track: TrackReferenceOrPlaceholder }) {
     }
   }, [track.publication?.track]);
 
-  const name = track.participant.name || track.participant.identity;
+  const name = shownName(track.participant.name || track.participant.identity);
   const hasVideo = !!track.publication?.track && !track.publication.isMuted;
   return (
     <div style={{ position: 'relative', background: '#222', borderRadius: 8, overflow: 'hidden', aspectRatio: '4/3', width: '100%' }}>

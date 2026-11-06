@@ -1,12 +1,15 @@
 // Who has used this browser: a list of profiles in localStorage. No logins, nothing about them is
 // stored on the server. The uuid goes to the lesson; the teacher links it to a line in their
-// journal, and from then on the student lands on their seat. The name is what classmates see.
+// journal, and from then on the student lands on their seat. The student sees themselves by the
+// profile's name, the teacher by `teacherName`, classmates by `nick`; both default to the name.
 import { saveAvatar } from './avatars';
 
 export interface Profile {
   uuid: string;
   name: string;
   avatar: string | null;
+  teacherName?: string;
+  nick?: string;
 }
 
 const KEY = 'profiles';
@@ -52,6 +55,16 @@ export function enterProfile(name: string) {
 
 export function profileUuid(name: string): string | null {
   return name ? profileOf(name).uuid : null;
+}
+
+/** Empty fields fall back to the profile's name */
+export function profileNames(name: string): { teacherName: string; nick: string } {
+  const p = profiles().find(x => x.name === name);
+  return { teacherName: p?.teacherName?.trim() || name, nick: p?.nick?.trim() || name };
+}
+
+export function saveProfileNames(name: string, names: { teacherName?: string; nick?: string }) {
+  save(profiles().map(p => p.name === name ? { ...p, ...names } : p));
 }
 
 export function saveProfileAvatar(name: string, avatar: string | null) {
