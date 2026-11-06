@@ -115,8 +115,8 @@ code {
 
 /* The student's setup page: camera, names, avatar */
 .setup-page {
-  background: #f3e4cc;
-  --board-margin: #e5d2b2;
+  background: #f6efe4;
+  --board-margin: #e8decd;
   --hint: #6e6150;
 }
 
