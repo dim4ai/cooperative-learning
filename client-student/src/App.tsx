@@ -211,33 +211,33 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
   const [avatar, setAvatar] = useState<string | null>(loadAvatar);
   const [nick, setNick] = useState(myName);
   return (
-    <div className="setup-page" style={{
-      height: '100vh', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', alignContent: 'flex-start',
-      justifyContent: 'center', gap: '24px 128px', fontFamily: 'sans-serif', padding: 24, boxSizing: 'border-box', overflow: 'auto',
-    }}>
-      <div style={{ width: 320, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <h3 style={{ margin: 0, color: 'var(--text-h)' }}>Камера и микрофон</h3>
-        <MediaCheck prefs={media} onChange={onMedia} />
+    <div className="setup-page">
+      <div className="setup-left">
+        <div style={{ width: 320, maxWidth: '100%', margin: '5vh auto auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h3 style={{ margin: 0, color: 'var(--text-h)', textAlign: 'center' }}>Камера и микрофон</h3>
+          <MediaCheck prefs={media} onChange={onMedia} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 96 }}>
+            <input
+              value={code}
+              onChange={e => setCode(e.target.value)}
+              placeholder="Код занятия"
+              onKeyDown={e => { if (e.key === 'Enter' && code.trim()) onJoin(code.trim().toLowerCase()); }}
+              style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', width: 150, flexShrink: 0, boxSizing: 'border-box', letterSpacing: 1 }}
+            />
+            <button
+              onClick={() => code.trim() && onJoin(code.trim().toLowerCase())}
+              disabled={!code.trim()}
+              style={{ flex: 1, minWidth: 0, fontSize: 16, padding: '10px 8px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer' }}
+            >
+              Войти в класс
+            </button>
+          </div>
+          {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+        </div>
       </div>
 
-      <div style={{ flex: '1 1 420px', maxWidth: 640, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <input
-          value={code}
-          onChange={e => setCode(e.target.value)}
-          placeholder="Код занятия"
-          onKeyDown={e => { if (e.key === 'Enter' && code.trim()) onJoin(code.trim().toLowerCase()); }}
-          style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box', letterSpacing: 1 }}
-        />
-        <button
-          onClick={() => code.trim() && onJoin(code.trim().toLowerCase())}
-          disabled={!code.trim()}
-          style={{ fontSize: 16, padding: '10px 20px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer' }}
-        >
-          Войти в класс
-        </button>
-      </div>
-      {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+      <div className="setup-right">
+      <div style={{ maxWidth: 640, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <AvatarPreview avatar={avatar} nick={nick} />
         <ProfileNames onNick={setNick} />
@@ -247,6 +247,7 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
       <div style={{ fontSize: 13, color: 'var(--text-h)', marginTop: 4 }}>Доска для разминки <span style={{ color: 'var(--hint)' }}>— порисуйте, пока ждёте урок</span></div>
       <div style={{ width: '100%', height: 420, flexShrink: 0, border: '1px solid #ccc', borderRadius: 8, overflow: 'hidden' }}>
         <Board />
+      </div>
       </div>
       </div>
     </div>

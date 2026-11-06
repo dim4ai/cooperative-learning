@@ -115,9 +115,42 @@ code {
 
 /* The student's setup page: camera, names, avatar */
 .setup-page {
+  display: flex;
+  height: 100vh;
+  overflow: auto;
+  font-family: sans-serif;
   background: #f6efe4;
   --board-margin: #e8decd;
   --hint: #6e6150;
+}
+
+.setup-left,
+.setup-right {
+  flex: 1 1 50%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 24px;
+}
+
+.setup-left {
+  display: flex;
+  overflow-y: auto;
+}
+
+.setup-right {
+  overflow-y: auto;
+}
+
+@media (max-width: 860px) {
+  .setup-page {
+    flex-direction: column;
+  }
+
+  .setup-left,
+  .setup-right {
+    flex: none;
+    overflow: visible;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

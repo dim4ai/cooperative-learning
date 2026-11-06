@@ -75,7 +75,7 @@ const TOOLS: { key: Tool; icon: ReactNode; title: string; teacherOnly?: boolean;
   { key: 'ellipse', icon: EllipseIcon, title: 'Овал' },
   { key: 'text', icon: TextIcon, title: 'Текст: кликните, где писать' },
 ]
-const COLORS = ['#1e1e1e', '#e03131', '#1971c2', '#2f9e44', '#f08c00', '#9c36b5']
+const COLORS = ['#1e1e1e', '#e03131', '#1971c2', '#2f9e44', '#f08c00', '#fcc419', '#8b5a2b', '#9c36b5']
 const WIDTHS = [3, 6, 12]
 
 let uidCounter = 0
