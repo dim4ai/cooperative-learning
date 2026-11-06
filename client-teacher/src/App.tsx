@@ -157,7 +157,8 @@ function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRoo
   }
 
   if (stage === 'group') {
-    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly lessonCode={lessonCode} names={names} marks={marks} />;
+    // Everyone is in the main room: a move takes effect when the next block splits the class
+    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove lessonCode={lessonCode} names={names} marks={marks} />;
     if (groupMode === 'board') return <>{slidesView}</>;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 15 }}>
