@@ -132,7 +132,7 @@ export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDele
         </Field>
       )}
 
-      <Field label="Заметка учителя (только вам)">
+      <Field label={block.slides?.length ? 'Общая заметка к блоку (только вам)' : 'Заметка учителя (только вам)'}>
         <textarea
           value={block.teacherNote}
           onChange={e => onChange({ ...block, teacherNote: e.target.value })}
@@ -140,6 +140,11 @@ export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDele
           placeholder="Что сказать, на что обратить внимание..."
           style={{ ...inputStyle, resize: 'vertical', color: '#92400e', background: '#fffbeb', borderColor: '#fcd34d' }}
         />
+        {!!block.slides?.length && (
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+            На уроке видна там, где у {hasTask ? 'листа' : 'слайда'} нет своей заметки.
+          </div>
+        )}
       </Field>
 
       <Field label="Прикреплённые файлы">

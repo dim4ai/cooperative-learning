@@ -81,7 +81,7 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError, sh
               <Thumb scene={s} media={media} />
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 11, color: '#6b7280' }}>
-              <span style={{ marginRight: 'auto' }}>{i + 1}</span>
+              <span style={{ marginRight: 'auto' }}>{i + 1}{s.note ? <span title="Есть заметка" style={{ marginLeft: 4, color: '#b45309' }}>✎</span> : null}</span>
               {s.id === current.id && (
                 <>
                   <Mini title="Левее" disabled={i === 0} onClick={() => moveSlide(s, -1)}>←</Mini>
@@ -112,10 +112,29 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError, sh
         scene={current}
         media={media}
         onAddMedia={onAddMedia}
-        onChange={scene => onChange(list => list.map(s => (s.id === scene.id ? scene : s)))}
+        // The editor rebuilds a scene from its canvas and knows nothing of the note
+        onChange={scene => onChange(list => list.map(s => (s.id === scene.id ? { ...scene, note: s.note } : s)))}
         onError={onError}
         onInsertSlides={fresh => insertAfter(current.id, fresh, false)}
       />
+
+      <label style={{ display: 'block', marginTop: 12, fontSize: 12, fontWeight: 600, color: '#6b7280' }}>
+        Заметка к {sheet ? 'листу' : 'слайду'} {index + 1} (только вам)
+        <textarea
+          data-testid="slide-note"
+          value={current.note ?? ''}
+          onChange={e => {
+            const note = e.target.value || undefined
+            onChange(list => list.map(s => (s.id === current.id ? { ...s, note } : s)))
+          }}
+          rows={3}
+          placeholder="Что сказать на этом шаге, на что обратить внимание..."
+          style={{
+            display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 5, outline: 'none', resize: 'vertical',
+            fontSize: 14, fontWeight: 400, color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+          }}
+        />
+      </label>
 
       {preview && <PreviewOverlay slides={slides} media={media} start={index} onClose={() => setPreview(false)} />}
     </div>
