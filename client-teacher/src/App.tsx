@@ -47,6 +47,9 @@ interface LessonState {
   participants: Participant[];
 }
 
+const entryBtn: CSSProperties = {
+  padding: '3px 6px', borderRadius: 5, border: '1px solid #444', background: 'transparent', color: '#aaa', fontSize: 11, cursor: 'pointer', textAlign: 'left',
+};
 const backToSeats: CSSProperties = {
   marginTop: 6, padding: '6px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2e2e3e', color: '#888', fontSize: 11, textAlign: 'left', flexShrink: 0,
 };
@@ -157,12 +160,12 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
 
 function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
   }
 
   if (stage === 'group') {
     // Everyone is in the main room: a move takes effect when the next block splits the class
-    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
+    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove callingRooms={callingRooms} onJoinPair={onJoinPair} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
     if (groupMode === 'board') return <>{slidesView}</>;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 15 }}>
@@ -388,6 +391,7 @@ export default function App() {
   const currentClass = journal.data?.classes.find(c => c.id === classId) ?? null;
   const [studentUuids, setStudentUuids] = useState<Record<string, string>>({});
   const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
+  const [entry, setEntry] = useState<{ roomCode: string; joinCode: string; closed: boolean } | null>(null);
 
   // After a page reload there's a token but no key: the journal stays locked until asked for
   useEffect(() => {
@@ -497,6 +501,7 @@ export default function App() {
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
     socket.on('studentNames', setTeacherNames);
+    socket.on('entry', setEntry);
     socket.on('joined', () => setJoins(n => n + 1));
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
@@ -596,8 +601,16 @@ export default function App() {
 
         <div style={{ fontSize: 10, color: '#666' }}>Код занятия</div>
         <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#fff' }}>
-          {lessonCode || '…'}
+          {entry?.joinCode ?? (lessonCode || '…')}
         </div>
+        {!demo && state.stage !== 'waiting' && entry && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 }}>
+            <button data-testid="entry-close" onClick={() => socket.emit('entry:close', { closed: !entry.closed })} style={{ ...entryBtn, color: entry.closed ? '#f0c36d' : '#aaa' }}>
+              {entry.closed ? '🔒 Вход закрыт, открыть' : 'Закрыть вход'}
+            </button>
+            <button data-testid="entry-new-code" onClick={() => socket.emit('entry:newCode')} title="Кто уже был на уроке, вернётся и со старым" style={entryBtn}>Сменить код</button>
+          </div>
+        )}
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#f0c36d', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
@@ -723,7 +736,7 @@ export default function App() {
             return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} />
-            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={lessonCode}
+            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
                 slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
           }
         </div>

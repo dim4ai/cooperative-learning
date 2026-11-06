@@ -132,7 +132,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
             <button key={name} data-testid="seat-waiting-name" title="Выберите, потом кликните свободное место" onClick={() => setSelected(s => s === name ? null : name)} style={{
               padding: '4px 10px', borderRadius: 14, cursor: 'pointer', fontSize: 13,
               border: selected === name ? '2px solid #4a90e2' : '1px solid #bbb', background: '#fff', color: '#222',
-            }}><StudentName identity={name} /></button>
+            }}><StudentName identity={name} />{onJoinPair && <span data-testid="newcomer-talk" title="Поговорить" onClick={e => { e.stopPropagation(); onJoinPair(`${lessonCode}:individual-${name}`); }} style={{ marginLeft: 6 }}>💬</span>}</button>
           ))}
         </div>
       )}
@@ -191,7 +191,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const isTarget = !!selected && seat.occupant !== selected && (!seat.occupant || (!readOnly && !waiting.includes(selected)));
               const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
-              const joinRoom = joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
+              const joinRoom = seat.extra !== undefined || joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
               const mark = seat.occupant ? marks?.[seat.occupant] : undefined;
               return (
                 <div key={seat.id}
@@ -236,6 +236,10 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                           {!noRemove && <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>}
                           {onMute && <div onClick={e => { e.stopPropagation(); onMute(seat.occupant!); }} style={{ fontSize: 13, cursor: 'pointer' }} title="Заглушить">🔇</div>}
                         </div>
+                      )}
+                      {seat.extra !== undefined && !isSeatCalling && onJoinPair && (
+                        <div data-testid="newcomer-talk" onClick={e => { e.stopPropagation(); onJoinPair(individualRoom!); }} title="Поговорить"
+                          style={{ position: 'absolute', right: 4, top: 4, fontSize: 18, zIndex: 3, cursor: 'pointer' }}>💬</div>
                       )}
                       {isSeatCalling && (
                         <div
