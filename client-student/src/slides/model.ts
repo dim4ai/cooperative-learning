@@ -20,6 +20,8 @@ export interface Scene {
   /** Layers bottom → top. Objects are kept sorted by layer (array order = drawing order) */
   layers?: SlideLayer[]
   objects: SceneObject[]
+  /** The teacher's own note for this step; stays in the lesson file and the teacher's browser */
+  note?: string
 }
 
 /**

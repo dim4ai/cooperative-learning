@@ -242,6 +242,7 @@ export function BlockNotes({ slides }: { slides: TeacherSlides }) {
   const block = local?.blocks.find(b => b.id === state.block);
   if (!local) return <div style={{ fontSize: 12, color: '#b57600' }}>Заметки лежат в файле урока: откройте его в этом браузере.</div>;
   if (!block) return null;
+  const stepNote = (state.blockId === block.id ? block.slides[state.index]?.note : undefined)?.trim();
   return (
     <div data-testid="block-notes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {block.type !== 'group' && block.slides.length > 1 && <div data-testid="sheet-nav" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#444' }}>
@@ -256,7 +257,7 @@ export function BlockNotes({ slides }: { slides: TeacherSlides }) {
       </div>}
       <div>
         <div style={noteLabel}>Заметка учителю</div>
-        <div data-testid="block-note" style={noteText}>{block.teacherNote || 'В этом блоке заметки нет.'}</div>
+        <div data-testid="block-note" style={noteText}>{stepNote || block.teacherNote || 'Здесь заметки нет.'}</div>
       </div>
     </div>
   );

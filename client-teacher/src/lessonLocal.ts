@@ -90,7 +90,10 @@ export function releaseLesson(l: LocalLesson | null) {
 
 /** What the server gets: structure and catalog, no media */
 export function lessonForServer(l: LocalLesson) {
-  const blocks = l.blocks.map(({ id, type, title, task, sheetReadOnly, slides }) => ({ id, type, title, task, sheetReadOnly, slides }));
+  const blocks = l.blocks.map(({ id, type, title, task, sheetReadOnly, slides }) => ({
+    id, type, title, task, sheetReadOnly,
+    slides: slides.map(({ note: _note, ...scene }) => scene), // notes are the teacher's own
+  }));
   return { id: l.id, title: l.title, blocks, media: l.catalog };
 }
 

@@ -102,7 +102,8 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
     if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string') continue;
     const slides = (Array.isArray(raw.slides) ? raw.slides : [])
       .filter((s): s is Scene => !!s && typeof s === 'object' && Array.isArray((s as Scene).objects))
-      .map(s => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
+      // `note` is the teacher's own: students get scenes as they are here, so it must not stay
+      .map(({ note: _note, ...s }: Scene & { note?: unknown }) => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
     blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), task: str(raw.task, 4000), sheetReadOnly: raw.sheetReadOnly === true, slides });
   }
 
