@@ -52,17 +52,20 @@ export interface GroupBlock extends BlockBase {
 export interface IndividualBlock extends BlockBase {
   type: 'individual'
   task: string
+  sheetReadOnly?: boolean
 }
 
 export interface PairsBlock extends BlockBase {
   type: 'pairs'
   task: string
+  sheetReadOnly?: boolean
   technique: string
 }
 
 export interface FoursBlock extends BlockBase {
   type: 'fours'
   task: string
+  sheetReadOnly?: boolean
   technique: string
 }
 

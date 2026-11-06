@@ -4,6 +4,7 @@
 // or from a classmate who already has them; once here, we can pass them on to others too.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { socket } from './socket';
+import { SharedBoard } from './SharedBoard';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
 import { sceneMediaNames } from './slides/model';
@@ -11,9 +12,15 @@ import { serveMedia } from './mediaShare';
 
 export interface MediaInfo { hash: string; size: number; type: string }
 
-export type SlidesView =
+export type SlidesView = (
   | { active: false }
-  | { active: true; index: number; count: number; scene: Scene; next: Scene | null; media: Record<string, MediaInfo> };
+  | { active: true; index: number; count: number; scene: Scene; next: Scene | null; media: Record<string, MediaInfo> }
+) & {
+  /** work blocks: what to do, shown above the board */
+  task?: string;
+  /** work blocks: the sheet is only to look at */
+  readOnly?: boolean;
+};
 
 export interface StudentSlides {
   view: SlidesView;
@@ -147,6 +154,24 @@ export function useStudentSlides(joined: boolean): StudentSlides {
   return { view, positions, resolve, loading, readyKey };
 }
 
+/** A work block's board: the task above it, the sheet under what the group writes */
+export function WorkBoard({ slides }: { slides: StudentSlides }) {
+  const { view } = slides;
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {view.task && (
+        <div data-testid="work-task" style={{
+          flexShrink: 0, maxHeight: '30%', overflowY: 'auto', padding: '8px 12px', whiteSpace: 'pre-wrap',
+          fontSize: 15, lineHeight: 1.4, color: '#222', background: '#f1f5fb', borderRadius: 6,
+        }}>{view.task}</div>
+      )}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <SharedBoard readOnly={view.readOnly} underlay={view.active ? width => <SlideUnderlay slides={slides} width={width} /> : undefined} />
+      </div>
+    </div>
+  );
+}
+
 /** The current slide under the teacher's drawing, at the board's page width */
 export function SlideUnderlay({ slides, width }: { slides: StudentSlides; width: number }) {
   const { view } = slides;
@@ -163,9 +188,9 @@ export function SlideUnderlay({ slides, width }: { slides: StudentSlides; width:
         canDrag={false}
         width={width}
       />
-      <div style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
+      {view.count > 1 && <div style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
         {view.index + 1} / {view.count}
-      </div>
+      </div>}
       {slides.loading !== null && (
         <div data-testid="slide-loading" style={{ position: 'absolute', bottom: 6, left: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
           загружаются картинки… {Math.round(slides.loading * 100)}%

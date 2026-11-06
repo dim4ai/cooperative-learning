@@ -244,6 +244,12 @@ export function BlockNotes({ slides }: { slides: TeacherSlides }) {
   if (!block) return null;
   return (
     <div data-testid="block-notes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {block.type !== 'group' && block.slides.length > 1 && <div data-testid="sheet-nav" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#444' }}>
+        <span>Лист</span>
+        <button onClick={() => socket.emit('slides:goto', { index: state.index - 1 })} disabled={state.index === 0} style={navBtn} title="Предыдущий лист">←</button>
+        <span data-testid="sheet-counter">{state.index + 1} / {block.slides.length}</span>
+        <button onClick={() => socket.emit('slides:goto', { index: state.index + 1 })} disabled={state.index >= block.slides.length - 1} style={navBtn} title="Следующий лист">→</button>
+      </div>}
       {block.task && <div>
         <div style={noteLabel}>Задание</div>
         <div data-testid="block-task" style={noteText}>{block.task}</div>

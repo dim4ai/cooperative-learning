@@ -12,6 +12,7 @@ export interface LocalBlock {
   /** The teacher's own: never leave this browser */
   teacherNote: string;
   task: string;
+  sheetReadOnly: boolean;
   duration: number | null;
 }
 
@@ -58,6 +59,7 @@ export async function readLesson(file: Blob): Promise<LocalLesson> {
     id: String(b.id), type: String(b.type ?? ''), title: String(b.title ?? ''),
     teacherNote: typeof b.teacherNote === 'string' ? b.teacherNote : '',
     task: typeof b.task === 'string' ? b.task : '',
+    sheetReadOnly: b.sheetReadOnly === true,
     duration: typeof b.duration === 'number' ? b.duration : null,
     // layer flags baked into objects: the presenter and the server work per object
     slides: [...(b.slides ?? []), ...(b.scene ? [b.scene] : [])].filter(s => s && Array.isArray(s.objects)).map(bakeLayers),
@@ -88,7 +90,7 @@ export function releaseLesson(l: LocalLesson | null) {
 
 /** What the server gets: structure and catalog, no media */
 export function lessonForServer(l: LocalLesson) {
-  const blocks = l.blocks.map(({ id, type, title, slides }) => ({ id, type, title, slides }));
+  const blocks = l.blocks.map(({ id, type, title, task, sheetReadOnly, slides }) => ({ id, type, title, task, sheetReadOnly, slides }));
   return { id: l.id, title: l.title, blocks, media: l.catalog };
 }
 

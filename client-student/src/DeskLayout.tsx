@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTracks, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { SharedBoard } from './SharedBoard';
+import { WorkBoard, type StudentSlides } from './LessonSlides';
 import { NameCard, SpeakingRing } from './speaking';
 import { shownName, socket } from './socket';
 
@@ -32,7 +32,7 @@ function VideoTile({ track }: { track: TrackReferenceOrPlaceholder }) {
   );
 }
 
-export function DeskLayout({ room }: { room: string }) {
+export function DeskLayout({ room, slides }: { room: string; slides: StudentSlides }) {
   // with placeholders: someone without video (lesson without video, camera off) still gets a tile
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
   const self = tracks.filter(t => t.participant.isLocal);
@@ -81,8 +81,8 @@ export function DeskLayout({ room }: { room: string }) {
       </div>
 
       {/* Center: shared board */}
-      <div style={{ flex: 1 }}>
-        <SharedBoard room={room} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <WorkBoard slides={slides} />
       </div>
 
       {/* Right: partners top, teacher middle */}
