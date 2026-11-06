@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
-import { SLIDE_HEIGHT, SLIDE_WIDTH, sceneMediaNames } from './slides/model';
+import { sceneMediaNames } from './slides/model';
 import { serveMedia } from './mediaShare';
 
 export interface MediaInfo { hash: string; size: number; type: string }
@@ -147,48 +147,28 @@ export function useStudentSlides(joined: boolean): StudentSlides {
   return { view, positions, resolve, loading, readyKey };
 }
 
-/** The current slide, fitted into the available space */
-export function SlideStage({ slides }: { slides: StudentSlides }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 800, h: 450 });
-  useEffect(() => {
-    const el = hostRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
+/** The current slide under the teacher's drawing, at the board's page width */
+export function SlideUnderlay({ slides, width }: { slides: StudentSlides; width: number }) {
   const { view } = slides;
-  // GroupView overlays the cameras on the right (teacher 200px, self 160px) — keep the slide clear of them
-  const CAMERA_COLUMN = 232;
-  const width = Math.max(200, Math.floor(Math.min(box.w - 32 - CAMERA_COLUMN, ((box.h - 48) * SLIDE_WIDTH) / SLIDE_HEIGHT)));
-
+  if (!view.active) return null;
   return (
-    <div ref={hostRef} data-testid="student-slides" style={{
-      width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#2b2b36',
-      paddingRight: 232, boxSizing: 'border-box',
-    }}>
-      {view.active && (
-        <div style={{ position: 'relative', boxShadow: '0 6px 24px rgba(0,0,0,.4)' }}>
-          <SlidePlayer
-            key={`${view.scene.id}:${slides.readyKey}`}
-            scene={view.scene}
-            resolveMedia={slides.resolve}
-            role="student"
-            revealed={NO_REVEALED}
-            positions={slides.positions}
-            canDrag={false}
-            width={width}
-          />
-          <div style={{ position: 'absolute', bottom: -22, right: 0, fontSize: 12, color: '#999' }}>
-            {view.index + 1} / {view.count}
-          </div>
-          {slides.loading !== null && (
-            <div data-testid="slide-loading" style={{ position: 'absolute', bottom: -22, left: 0, fontSize: 12, color: '#999' }}>
-              загружаются картинки… {Math.round(slides.loading * 100)}%
-            </div>
-          )}
+    <div data-testid="student-slides" style={{ position: 'relative', width }}>
+      <SlidePlayer
+        key={`${view.scene.id}:${slides.readyKey}`}
+        scene={view.scene}
+        resolveMedia={slides.resolve}
+        role="student"
+        revealed={NO_REVEALED}
+        positions={slides.positions}
+        canDrag={false}
+        width={width}
+      />
+      <div style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
+        {view.index + 1} / {view.count}
+      </div>
+      {slides.loading !== null && (
+        <div data-testid="slide-loading" style={{ position: 'absolute', bottom: 6, left: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
+          загружаются картинки… {Math.round(slides.loading * 100)}%
         </div>
       )}
     </div>

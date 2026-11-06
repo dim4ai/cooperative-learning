@@ -7,7 +7,13 @@ import { bakeLayers, sceneMediaNames, type Scene } from './slides/model';
 
 export interface MediaInfo { hash: string; size: number; type: string }
 
-export interface LocalBlock { id: string; type: string; title: string; slides: Scene[] }
+export interface LocalBlock {
+  id: string; type: string; title: string; slides: Scene[];
+  /** The teacher's own: never leave this browser */
+  teacherNote: string;
+  task: string;
+  duration: number | null;
+}
 
 export interface LocalLesson {
   /** SHA-256 of lesson.json — tells "the same file" apart from another one */
@@ -50,6 +56,9 @@ export async function readLesson(file: Blob): Promise<LocalLesson> {
   // Same normalization as the editor: old single 'scene' → slides[]
   const blocks: LocalBlock[] = raw.blocks.map(b => ({
     id: String(b.id), type: String(b.type ?? ''), title: String(b.title ?? ''),
+    teacherNote: typeof b.teacherNote === 'string' ? b.teacherNote : '',
+    task: typeof b.task === 'string' ? b.task : '',
+    duration: typeof b.duration === 'number' ? b.duration : null,
     // layer flags baked into objects: the presenter and the server work per object
     slides: [...(b.slides ?? []), ...(b.scene ? [b.scene] : [])].filter(s => s && Array.isArray(s.objects)).map(bakeLayers),
   }));
@@ -79,7 +88,8 @@ export function releaseLesson(l: LocalLesson | null) {
 
 /** What the server gets: structure and catalog, no media */
 export function lessonForServer(l: LocalLesson) {
-  return { id: l.id, title: l.title, blocks: l.blocks, media: l.catalog };
+  const blocks = l.blocks.map(({ id, type, title, slides }) => ({ id, type, title, slides }));
+  return { id: l.id, title: l.title, blocks, media: l.catalog };
 }
 
 // ---------- kept across page reloads ----------

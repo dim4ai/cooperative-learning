@@ -172,9 +172,10 @@ const GUIDE: Record<string, { title: string; steps: string[] }> = {
     'Когда все будут на местах, нажмите слева «Начать урок».',
   ] },
   group: { title: 'Объяснение', steps: [
-    'Сверху выберите «Слайды»: урок уже загружен. Его видят все ученики.',
-    'Листайте стрелками. Скрытые ответы открывайте по одному, когда ученики подумают.',
-    'Здесь можно и просто писать на доске. Затем слева выберите «Индивидуально».',
+    'Слайд уже на доске, его видят все ученики. Рисуйте прямо поверх него и листайте стрелками.',
+    'Скрытый ответ откройте инструментом ☝, когда ученики подумают.',
+    'В конце нажмите «Всем понятно?». Красные рамки покажут, кто не понял, и останутся на карте.',
+    'Затем выберите следующий блок в плане слева.',
   ] },
   individual: { title: 'Индивидуальная работа', steps: [
     'Каждый думает сам, у каждого своя доска. Вы не прерываете класс.',
@@ -197,10 +198,7 @@ const GUIDE: Record<string, { title: string; steps: string[] }> = {
 export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) {
   const part = GUIDE[stage] ?? GUIDE.waiting;
   return (
-    <div data-testid="solo-guide" style={{
-      width: 'min(250px, 22vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
-      background: '#fbfbfd', fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10,
-    }}>
+    <div data-testid="solo-guide" style={{ fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
       <b style={{ fontSize: 15 }}>{part.title}</b>
       {part.steps.map(step => <div key={step}>{step}</div>)}

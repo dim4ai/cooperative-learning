@@ -53,6 +53,8 @@ function SelfPreview() {
   );
 }
 
+export type Marks = Record<string, 'yes' | 'no'>;
+
 export interface Seat {
   id: string;
   groupIndex: number;
@@ -72,7 +74,16 @@ const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e
 const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames }) {
+const NOT_UNDERSTOOD = '#d00000';
+const UNDERSTOOD = '#4cae6e';
+
+/** Everyone sitting here said they did not understand */
+const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
+  const taken = seats.filter(s => s.occupant);
+  return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
+};
+
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -118,9 +129,10 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
         const color = groupColor(g);
         const foursRoom = `${lessonCode}:fours-${g + 1}`;
         const isGroupCalling = callingRooms?.has(foursRoom) ?? false;
+        const groupLost = allLost(groupSeats, marks, 3);
         return (
-          <div key={g} style={{
-            border: `3px solid ${isGroupCalling ? '#f39c12' : color}`,
+          <div key={g} data-testid={groupLost ? 'four-lost' : undefined} style={{
+            border: `${groupLost ? 6 : 3}px solid ${isGroupCalling ? '#f39c12' : groupLost ? NOT_UNDERSTOOD : color}`,
             borderRadius: 10,
             padding: 8,
             display: 'flex',
@@ -145,11 +157,13 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
             {[0, 1].map(row => {
               const pairRoom = `${lessonCode}:pair-g${g}-r${row}`;
               const isCalling = callingRooms?.has(pairRoom) ?? false;
+              const pairLost = allLost(groupSeats.filter(s => s.row === row), marks, 2);
               return (
-              <div key={row} style={{
+              <div key={row} data-testid={pairLost ? 'pair-lost' : undefined} style={{
                 display: 'flex',
                 gap: 6,
-                border: `1px solid ${isCalling ? '#f39c12' : color}`,
+                background: pairLost ? '#fde3e3' : 'transparent',
+                border: `${pairLost ? 2 : 1}px solid ${isCalling ? '#f39c12' : pairLost ? NOT_UNDERSTOOD : color}`,
                 borderRadius: 6,
                 padding: 6,
                 position: 'relative',
@@ -163,9 +177,15 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const isTarget = !!selected && seat.occupant !== selected;
               const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
+              const joinRoom = joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
+              const mark = seat.occupant ? marks?.[seat.occupant] : undefined;
               return (
                 <div key={seat.id}
-                  onClick={() => readOnly ? undefined : seat.occupant ? handleOccupiedClick(seat.occupant, seat.id) : handleEmptyClick(seat.id)}
+                  onClick={() => {
+                    if (!readOnly) { if (seat.occupant) handleOccupiedClick(seat.occupant, seat.id); else handleEmptyClick(seat.id); return; }
+                    // During work the teacher can walk up to anyone, called or not
+                    if (seat.occupant && joinRoom) onJoinPair?.(joinRoom);
+                  }}
                   style={{
                     width: 160, height: 120,
                     background: '#f5f5f5',
@@ -175,12 +195,16 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                     position: 'relative', overflow: 'hidden',
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center',
-                    cursor: !readOnly && (seat.occupant || isTarget) ? 'pointer' : 'default',
+                    cursor: readOnly ? (seat.occupant && joinRoom && onJoinPair ? 'pointer' : 'default') : seat.occupant || isTarget ? 'pointer' : 'default',
                     transition: 'all 0.15s',
                     fontSize: 12, color: '#555',
                     animation: isSeatCalling ? 'pairPulse 1.2s infinite' : 'none',
                   }}
                 >
+                  {mark && <div data-testid={`mark-${mark}`} style={{
+                    position: 'absolute', inset: 0, borderRadius: 5, zIndex: 2, pointerEvents: 'none',
+                    border: `${mark === 'no' ? 4 : 3}px solid ${mark === 'no' ? NOT_UNDERSTOOD : UNDERSTOOD}`,
+                  }} />}
                   {seat.occupant ? (
                     <>
                       {hasLivekit && <SeatVideo identity={seat.occupant} />}
