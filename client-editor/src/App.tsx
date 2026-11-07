@@ -266,7 +266,7 @@ export default function App() {
       </div>
 
       {/* Right: editor area */}
-      <div style={{ flex: 1, overflow: 'auto', background: '#f5f5f5' }}>
+      <div style={{ flex: 1, overflow: 'auto', background: '#f6efe4' }}>
         {selected
           ? <BlockCard key={selected.id} block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onUpdate={fn => updateBlockWith(selected.id, fn)} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
           : <MetaPanel meta={meta} onChange={m => { setMeta(m); setDirty(true) }} />

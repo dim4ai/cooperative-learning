@@ -18,12 +18,15 @@ export function SpeakingRing({ identity }: { identity: string | null | undefined
 }
 
 /** What a tile shows instead of video: the avatar (if chosen) and the name */
+/** Same blue as a seat on the map; the white under it keeps it clean on any background */
+export const NAME_CARD_BG = 'linear-gradient(#3498db55, #3498db55), #fff';
+
 export function NameCard({ name, identity }: { name: string; identity?: string | null }) {
   const avatar = useAvatarUrl(identity);
   return (
     <div style={{
       width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
-      color: '#ddd', fontSize: 16, fontWeight: 'bold', textAlign: 'center', padding: 6, boxSizing: 'border-box',
+      background: NAME_CARD_BG, color: '#444', fontSize: 16, fontWeight: 'bold', textAlign: 'center', padding: 6, boxSizing: 'border-box',
     }}>
       {avatar && <img src={avatar} alt="" data-testid="avatar" style={{ height: '55%', maxWidth: '80%', objectFit: 'contain' }} />}
       <span style={avatar ? { fontSize: 12 } : undefined}>{name}</span>

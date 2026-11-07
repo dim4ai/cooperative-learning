@@ -69,7 +69,7 @@ export function GroupView({ slides }: { slides: StudentSlides }) {
 
 
   return (
-    <div style={{ height: '100%', position: 'relative', background: '#f8f8f8' }}>
+    <div style={{ height: '100%', position: 'relative', background: 'var(--bg)' }}>
       {/* Main area: screen share or board */}
       <div style={{ position: 'absolute', inset: 0, paddingRight: teacherCamera || myCamera ? 232 : 0, boxSizing: 'border-box' }}>
         {teacherScreen ? (
