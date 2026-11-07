@@ -6,6 +6,7 @@ import {
   decryptBody, derivePasswordKeys, encryptBody, generateJournalKey, unwrapJournalKey, wrapJournalKey,
 } from './journalCrypto';
 import type { Envelope } from './journalCrypto';
+import type { TeacherProfile } from './teacherProfile';
 
 export interface JournalStudent {
   id: string;
@@ -18,9 +19,11 @@ export interface JournalClass {
   name: string;
   capacity: number; // 0 — seating wasn't saved yet
   students: JournalStudent[];
+  lastCode?: string; // the class comes in by the same code from lesson to lesson
 }
 export interface JournalData {
   classes: JournalClass[];
+  profile?: TeacherProfile; // how students see the teacher; the photo is safe here
 }
 
 export type JournalStatus =
@@ -164,8 +167,8 @@ export function updateJournal(change: (data: JournalData) => JournalData) {
       if (state.saveError) set({ saveError: '' });
     } catch (e) {
       set({ saveError: e instanceof JournalConflict
-        ? 'Журнал изменён в другом окне. Обновите страницу, эти изменения не сохранились'
-        : 'Не удалось сохранить журнал. Изменения сохранятся со следующим действием' });
+        ? 'Профиль изменён в другом окне. Обновите страницу, эти изменения не сохранились'
+        : 'Не удалось сохранить профиль. Изменения сохранятся со следующим действием' });
     }
   });
 }

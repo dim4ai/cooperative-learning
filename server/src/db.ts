@@ -238,6 +238,14 @@ export async function cleanupExpiredLessons(): Promise<number> {
   return rowCount ?? 0;
 }
 
+/** A class's lesson used again: it takes the video mode chosen this time */
+export async function setLessonVideoMode(code: string, videoMode: VideoMode): Promise<VideoMode> {
+  if (!hasVideoMode) return 'all';
+  if (videoMode === 'teacherSees' && !hasTeacherSees) videoMode = 'teacher';
+  await pool.query('UPDATE lessons SET video_mode = $2, last_active_at = now() WHERE code = $1', [code, videoMode]);
+  return videoMode;
+}
+
 export async function deleteLesson(code: string): Promise<void> {
   await pool.query('DELETE FROM lessons WHERE code = $1', [code]);
 }

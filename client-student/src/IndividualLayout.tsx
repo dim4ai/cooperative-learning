@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
-import { NameCard, NAME_CARD_BG, SpeakingRing } from './speaking';
+import { NameCard, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
 import { socket, ownName } from './socket';
 import { WorkBoard, type StudentSlides } from './LessonSlides';
 import { Board } from './slides/Board';
+import { useTeacherTitle } from './avatars';
 
 interface Props {
   room: string;
@@ -36,6 +37,7 @@ export function IndividualLayout({ room, slides, mediaControls, leaveButton }: P
   const subscribedTracks = allTracks;
   const localTrack = allTracks.find(t => t.participant.isLocal);
   const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher');
+  const teacherTitle = useTeacherTitle();
 
   useEffect(() => {
     socket.on('teacherJoined', () => setCalling(false));
@@ -75,7 +77,7 @@ export function IndividualLayout({ room, slides, mediaControls, leaveButton }: P
       <div style={{ width: 180, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {localTrack && <CamBox track={localTrack} label={ownName} width="100%" />}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{bell}</div>
-        {teacher && <CamBox track={teacher} label="Учитель" width="100%" />}
+        {teacher && <CamBox track={teacher} label={teacherTitle} width="100%" />}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}><WorkBoard slides={slides} /></div>
       <style>{pulse}</style>
@@ -92,9 +94,9 @@ export function IndividualLayout({ room, slides, mediaControls, leaveButton }: P
           <div style={{ width: '100%' }}>{localTrack && <CamBox track={localTrack} label={ownName} width="100%" />}</div>
           <div style={{ width: '100%' }}>
             {teacher
-              ? <CamBox track={teacher} label="Учитель" width="100%" />
-              : <div style={{ width: '100%', aspectRatio: '4/3', borderRadius: 8, background: NAME_CARD_BG, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 13 }}>
-                  Учитель
+              ? <CamBox track={teacher} label={teacherTitle} width="100%" />
+              : <div style={{ width: '100%', aspectRatio: '4/3', borderRadius: 8, overflow: 'hidden' }}>
+                  <NameCard name={teacherTitle} identity="Teacher" />
                 </div>
             }
           </div>

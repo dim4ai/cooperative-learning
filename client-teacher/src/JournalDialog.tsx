@@ -7,7 +7,7 @@ import type { JournalClass, JournalStudent } from './journal';
 import { MIN_PASSWORD_LENGTH, passwordProblem } from './passwordStrength';
 import { PasswordInput } from './PasswordInput';
 
-const FORGOT_WARNING = 'Журнал зашифрован вашим паролем, и прочитать его можете только вы. Восстановления пароля пока нет: если его забыть, журнал не открыть — никто, включая нас, не сможет этого сделать.';
+const FORGOT_WARNING = 'В профиле — журналы классов, ваше имя и фото для учеников. Он зашифрован вашим паролем, и прочитать его можете только вы. Восстановления пароля пока нет: если его забыть, профиль не открыть — никто, включая нас, не сможет этого сделать.';
 
 /** Someone in the lesson now, as the journal needs them */
 export interface LessonStudent { name: string; uuid: string | null; seat: string | null }
@@ -28,16 +28,16 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }}>
-      <div role="dialog" aria-label="Журнал" data-testid="journal" onClick={e => e.stopPropagation()} style={{
+      <div role="dialog" aria-label="Профиль" data-testid="journal" onClick={e => e.stopPropagation()} style={{
         background: '#fff', color: '#222', borderRadius: 10, padding: 20, width: 460, maxWidth: '100%', maxHeight: '90vh',
         overflow: 'auto', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif',
       }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, flex: 1 }}>Журнал</h3>
+          <h3 style={{ margin: 0, flex: 1 }}>Профиль</h3>
           <button onClick={onClose} aria-label="Закрыть" style={{ ...plainBtn, fontSize: 18 }}>✕</button>
         </div>
         {status === 'loading' && <div style={hint}>Загружаем…</div>}
-        {status === 'unavailable' && <div style={errorText}>Журнал сейчас недоступен. Проверьте связь и обновите страницу</div>}
+        {status === 'unavailable' && <div style={errorText}>Профиль сейчас недоступен. Проверьте связь и обновите страницу</div>}
         {status === 'none' && <CreateJournal email={email} onChangePassword={() => setPasswordOpen(true)} />}
         {status === 'locked' && <Unlock email={email} />}
         {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} />}
@@ -70,7 +70,7 @@ function CreateJournal({ email, onChangePassword }: { email: string; onChangePas
       });
     } catch (e) {
       if (e instanceof WeakPassword) { setError(`${e.message}. Сначала смените пароль`); setWeak(true); }
-      else setError(e instanceof WrongPassword ? 'Неверный пароль: нужен тот же, с которым вы входите' : 'Не удалось создать журнал');
+      else setError(e instanceof WrongPassword ? 'Неверный пароль: нужен тот же, с которым вы входите' : 'Не удалось создать профиль');
     } finally {
       setBusy(false);
     }
@@ -82,7 +82,7 @@ function CreateJournal({ email, onChangePassword }: { email: string; onChangePas
       autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter' && password) create(); }} style={input} />
     {error && <div style={errorText}>{error}</div>}
     {weak && <button onClick={onChangePassword} style={{ ...plainBtn, alignSelf: 'flex-start', color: '#4a90e2' }}>Сменить пароль</button>}
-    <button onClick={create} disabled={busy || !password} style={mainBtn}>{busy ? 'Создаём…' : 'Создать журнал'}</button>
+    <button onClick={create} disabled={busy || !password} style={mainBtn}>{busy ? 'Создаём…' : 'Создать профиль'}</button>
   </>);
 }
 
@@ -97,18 +97,18 @@ function Unlock({ email }: { email: string }) {
     try {
       await unlockJournal(email, password);
     } catch (e) {
-      setError(e instanceof WrongPassword ? 'Неверный пароль' : 'Не удалось открыть журнал');
+      setError(e instanceof WrongPassword ? 'Неверный пароль' : 'Не удалось открыть профиль');
     } finally {
       setBusy(false);
     }
   }
 
   return (<>
-    <div style={hint}>Журнал закрыт: после обновления страницы или долгого простоя нужен пароль.</div>
+    <div style={hint}>Профиль закрыт: после обновления страницы или долгого простоя нужен пароль.</div>
     <PasswordInput value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль"
       autoComplete="current-password" onKeyDown={e => { if (e.key === 'Enter' && password) open(); }} style={input} />
     {error && <div style={errorText}>{error}</div>}
-    <button onClick={open} disabled={busy || !password} style={mainBtn}>{busy ? 'Открываем…' : 'Открыть журнал'}</button>
+    <button onClick={open} disabled={busy || !password} style={mainBtn}>{busy ? 'Открываем…' : 'Открыть профиль'}</button>
   </>);
 }
 
@@ -130,7 +130,7 @@ function ChangePassword({ email, onDone }: { email: string; onDone: () => void }
       onDone();
     } catch (e) {
       setError(e instanceof WrongPassword ? 'Неверный текущий пароль'
-        : e instanceof JournalConflict ? 'Журнал изменён в другом окне. Обновите страницу и повторите'
+        : e instanceof JournalConflict ? 'Профиль изменён в другом окне. Обновите страницу и повторите'
         : 'Не удалось сменить пароль');
     } finally {
       setBusy(false);
@@ -155,7 +155,7 @@ function ChangePassword({ email, onDone }: { email: string; onDone: () => void }
 }
 
 function patchClass(id: string, change: (c: JournalClass) => JournalClass) {
-  updateJournal(d => ({ classes: d.classes.map(c => c.id === id ? change(c) : c) }));
+  updateJournal(d => ({ ...d, classes: d.classes.map(c => c.id === id ? change(c) : c) }));
 }
 
 function Classes({ classes, classId, onClassId, lesson }: {
@@ -174,7 +174,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
     const name = newClass.trim();
     if (!name) return;
     const id = newId();
-    updateJournal(d => ({ classes: [...d.classes, { id, name, capacity: 0, students: [] }] }));
+    updateJournal(d => ({ ...d, classes: [...d.classes, { id, name, capacity: 0, students: [] }] }));
     setNewClass('');
     onClassId(id);
   }
@@ -208,6 +208,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
   const here = new Set(lesson?.students.map(p => p.uuid));
 
   return (<>
+    <strong style={{ fontSize: 14 }}>Журнал класса</strong>
     <div style={{ display: 'flex', gap: 6 }}>
       <select aria-label="Класс" value={cls?.id ?? ''} onChange={e => { onClassId(e.target.value || null); setConfirmDelete(false); setRemembered(false); }} style={{ ...input, flex: 1, minWidth: 0 }}>
         <option value="">Без класса</option>
@@ -266,7 +267,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
     {cls && (confirmDelete
       ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
           Удалить класс «{cls.name}» со всеми учениками?
-          <button onClick={() => { const id = cls.id; onClassId(null); updateJournal(d => ({ classes: d.classes.filter(c => c.id !== id) })); setConfirmDelete(false); }}
+          <button onClick={() => { const id = cls.id; onClassId(null); updateJournal(d => ({ ...d, classes: d.classes.filter(c => c.id !== id) })); setConfirmDelete(false); }}
             style={{ ...smallBtn, background: '#e74c3c' }}>Удалить</button>
           <button onClick={() => setConfirmDelete(false)} style={plainBtn}>Нет</button>
         </div>

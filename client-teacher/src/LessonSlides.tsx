@@ -171,34 +171,29 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
   const { material, local, busy, error } = slides;
   const slideCount = material?.blocks.reduce((n, b) => n + (b.slides?.length ?? 0), 0) ?? 0;
 
-  function remove() {
-    if (confirm('Убрать урок с занятия?')) slides.remove();
-  }
-
   return (
-    <div data-testid="material-panel" style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 10, color: '#666' }}>Урок</div>
+    <div data-testid="material-panel" style={{ marginTop: 8, textAlign: 'center' }}>
+      <div style={{ fontSize: 11, color: '#222' }}>Урок</div>
       {material ? (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis' }} title={material.title}>{material.title}</div>
-            <div style={{ fontSize: 10, color: '#888' }}>слайдов: {slideCount}</div>
+            <div style={{ fontSize: 12, color: '#222', overflow: 'hidden', textOverflow: 'ellipsis' }} title={material.title}>{material.title}</div>
+            <div style={{ fontSize: 10, color: '#555' }}>слайдов: {slideCount}</div>
           </div>
-          <button onClick={remove} title="Убрать урок с занятия" style={{ ...miniBtn, color: '#aaa' }}>✕</button>
         </div>
       ) : (
-        <div style={{ fontSize: 11, color: '#777' }}>не открыт</div>
+        <div style={{ fontSize: 11, color: '#222' }}>не открыт</div>
       )}
       {material && !local && (
-        <div data-testid="material-not-local" style={{ fontSize: 11, color: '#e6a23c', marginTop: 2 }}>
+        <div data-testid="material-not-local" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
       <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
       <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
-        marginTop: 4, width: '100%', padding: '5px 6px', borderRadius: 4, border: '1px dashed #555',
-        background: 'transparent', color: '#aaa', fontSize: 11, cursor: 'pointer', textAlign: 'left',
+        marginTop: 4, width: '100%', padding: '5px 6px', borderRadius: 4, border: '1px dashed #a8987a',
+        background: '#fff', color: '#444', fontSize: 11, cursor: 'pointer', textAlign: 'center',
       }}>
         {busy ? 'Открываем…' : material && local ? 'Заменить урок…' : 'Открыть урок…'}
       </button>
@@ -222,10 +217,10 @@ export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: st
         return (
           <button key={b.id} data-testid="plan-block" data-current={on || undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
-            background: on ? '#4a90e2' : '#2e2e3e', color: on ? '#fff' : '#ccc',
+            background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
-            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#888' }}>
+            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
             </div>
           </button>
@@ -370,7 +365,4 @@ export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides 
 
 const navBtn: CSSProperties = {
   padding: '2px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#333', cursor: 'pointer', fontSize: 13,
-};
-const miniBtn: CSSProperties = {
-  padding: '0 4px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12,
 };

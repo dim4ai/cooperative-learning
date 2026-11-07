@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { MediaCheck, saveMediaPrefs } from './mediaCheck';
+import { TeacherLookEditor } from './TeacherLookEditor';
 import type { MediaPrefs } from './mediaCheck';
 
 export type VideoMode = 'all' | 'teacherSees' | 'teacher' | 'none';
@@ -46,8 +47,10 @@ export function ModeButton({ mode, chosen, onChoose }: { mode: VideoMode; chosen
 }
 
 // The teacher's start screen after login: check camera/mic, then start a new lesson or join one by code.
-export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnauthorized, journalLabel, onJournal, onLogout }: {
+export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnauthorized, journalLabel, onJournal, onLogout, classCode, profileLocked }: {
   journalLabel: string;
+  classCode?: string; // the chosen class's code from last time
+  profileLocked?: boolean; // the profile exists but its password wasn't typed since the page opened
   onJournal: () => void;
   onLogout: () => void;
   token: string;
@@ -67,16 +70,33 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
     onJoin(code, prefs);
   }
 
-  async function createNew() {
+  // The class's code from the journal is there already: the same group comes in by the same code
+  const [prefilled, setPrefilled] = useState('');
+  useEffect(() => {
+    if (!classCode || classCode === prefilled) return;
+    setPrefilled(classCode);
+    setCodeInput(prev => !prev.trim() || prev.trim() === prefilled ? classCode : prev);
+  }, [classCode, prefilled]);
+
+  // Starting with the profile closed: no class journal, nothing from the profile — the teacher is asked first
+  const [askNoProfile, setAskNoProfile] = useState<{ reuse?: string } | null>(null);
+  useEffect(() => { if (!profileLocked) setAskNoProfile(null); }, [profileLocked]);
+  function start(reuse?: string) {
+    if (profileLocked) { setAskNoProfile({ reuse }); return; }
+    createNew(reuse);
+  }
+
+  async function createNew(reuse?: string) {
     setCreating(true);
     setCreateError('');
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/lessons`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ videoMode }),
+        body: JSON.stringify(reuse ? { videoMode, reuse, strict: true } : { videoMode }),
       });
       if (res.status === 401) { onUnauthorized(); return; }
+      if (reuse && res.status === 404) { join(reuse); return; } // not this teacher's code: joining tells why
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body.lesson) {
         setCreateError(
@@ -99,15 +119,15 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
 
   return (
     <div style={screenStyle}>
-      <div style={columnStyle}>
+      <div style={{ ...columnStyle, textAlign: 'center' }}>
         <h3 style={{ margin: 0 }}>Камера и микрофон</h3>
         <div style={{ color: '#888', fontSize: 13 }}>Проверьте себя перед занятием</div>
         <MediaCheck prefs={prefs} onChange={setPrefs} />
       </div>
 
       <div style={columnStyle}>
-        <h3 style={{ margin: 0 }}>Занятие</h3>
-        <div style={{ color: '#888', fontSize: 13 }}>Видео на занятии</div>
+        <TeacherLookEditor />
+        <h3 style={{ margin: '14px 0 0', textAlign: 'center' }}>Занятие</h3>
         <div role="radiogroup" aria-label="Видео на занятии" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {(Object.keys(VIDEO_MODE_LABELS) as VideoMode[]).map(m => (
             <ModeButton key={m} mode={m} chosen={videoMode === m} onChoose={() => setVideoMode(m)} />
@@ -116,25 +136,39 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
         <button data-testid="journal-open" onClick={onJournal} style={{
           padding: '8px 10px', fontSize: 14, borderRadius: 6, border: '1px solid #ccc', background: '#fff', color: '#222', cursor: 'pointer',
         }}>{journalLabel}</button>
-        <button onClick={createNew} disabled={creating} style={mainButton}>
-          {creating ? 'Создаём…' : 'Новое занятие'}
+        <button data-testid="new-lesson" onClick={() => start()} disabled={creating} style={mainButton}>
+          {creating ? 'Создаём…' : 'Начать занятие с новым кодом'}
         </button>
-        <div style={{ color: '#888', fontSize: 13, textAlign: 'center' }}>или присоединиться к начатому</div>
+        <div style={{ color: '#888', fontSize: 13, textAlign: 'center' }}>или начать / продолжить занятие по коду</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             value={codeInput}
             onChange={e => setCodeInput(e.target.value)}
             placeholder="Код занятия"
-            onKeyDown={e => { if (e.key === 'Enter' && code) join(code); }}
+            data-testid="code-input"
+            onKeyDown={e => { if (e.key === 'Enter' && code && !creating) start(code); }}
             style={{ flex: 1, minWidth: 0, fontSize: 15, padding: 8, borderRadius: 6, border: '1px solid #ccc', letterSpacing: 1 }}
           />
-          <button onClick={() => code && join(code)} disabled={!code}
+          <button data-testid="code-start" onClick={() => code && start(code)} disabled={!code || creating}
             style={{ ...mainButton, width: 'auto', padding: '8px 14px', fontSize: 14, opacity: code ? 1 : 0.5 }}>
-            Войти
+            Начать
           </button>
         </div>
+        {askNoProfile && (
+          <div data-testid="no-profile-warning" style={{ border: '1px solid #f0c36d', background: '#fff8e6', borderRadius: 6, padding: 10, fontSize: 13, color: '#222', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>Профиль не открыт: урок начнётся без журнала класса, и данные профиля не подтянутся.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onJournal} style={{ ...mainButton, fontSize: 13, padding: '6px 10px' }}>Открыть профиль</button>
+              <button data-testid="start-without-profile" onClick={() => { const a = askNoProfile; setAskNoProfile(null); createNew(a.reuse); }}
+                style={{ ...mainButton, fontSize: 13, padding: '6px 10px', background: '#fff', color: '#222', border: '1px solid #ccc' }}>Начать без профиля</button>
+            </div>
+          </div>
+        )}
         {(createError || lessonError) && <div style={{ color: '#e74c3c', fontSize: 13, textAlign: 'center' }}>{createError || lessonError}</div>}
-        <button onClick={onLogout} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Выйти</button>
+        <button data-testid="logout" onClick={onLogout} style={{
+          marginTop: 14, padding: '8px 10px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
+          border: '1px solid #e74c3c', background: '#fff', color: '#e74c3c',
+        }}>Выйти из аккаунта</button>
       </div>
     </div>
   );

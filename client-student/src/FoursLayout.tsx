@@ -5,6 +5,7 @@ import { WorkBoard, type StudentSlides } from './LessonSlides';
 import { shownName, socket } from './socket';
 import { NameCard, SpeakingRing } from './speaking';
 import type { Seat } from './SeatingMap';
+import { useTeacherTitle } from './avatars';
 
 interface Props {
   room: string;
@@ -44,6 +45,7 @@ export function FoursLayout({ room, groupSeats, slides, noTeacher, showTeacher }
   const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher' && !t.publication?.isMuted);
   // the teacher came to the desk: they see it, camera or not
   const teacherHere = useParticipants().some(p => p.identity === 'Teacher') && !!showTeacher;
+  const teacherTitle = useTeacherTitle();
   const [calling, setCalling] = useState(false);
   const callBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -96,11 +98,11 @@ export function FoursLayout({ room, groupSeats, slides, noTeacher, showTeacher }
           {teacher
             ? <div style={{ width: '100%', flexShrink: 0, position: 'relative', background: '#222', borderRadius: 6, overflow: 'hidden', aspectRatio: '4/3' }}>
                 <VideoTrack trackRef={teacher} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>Учитель</div>
+                <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>{teacherTitle}</div>
               </div>
             : teacherHere
               ? <div data-testid="teacher-here" style={{ width: '100%', flexShrink: 0, borderRadius: 6, overflow: 'hidden', aspectRatio: '4/3' }}>
-                  <NameCard name="Учитель" identity="Teacher" />
+                  <NameCard name={teacherTitle} identity="Teacher" />
                 </div>
               : null
           }

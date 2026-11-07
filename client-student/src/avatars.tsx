@@ -2,7 +2,7 @@
 // Only the id travels over the network; every client has the same pictures.
 // Canonical copy: client-student/src (avatars.tsx + avatars/); scripts/sync-slides.sh copies both
 // into client-teacher.
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useMemo, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
 const urls = import.meta.glob('./avatars/*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
@@ -48,10 +48,32 @@ export function AvatarProvider({ participants, children }: {
   return <AvatarContext.Provider value={map}>{children}</AvatarContext.Provider>;
 }
 
+// The teacher's own look: what students call them and, if they gave one, a photo (a small round
+// picture made in the teacher's browser). Comes in a lesson from the server's memory, never stored there.
+export const TEACHER_IDENTITY = 'Teacher';
+export const TEACHER_TITLE_MAX = 40;
+export interface TeacherLook { title: string; photo: string | null }
+let teacherLook: TeacherLook = { title: '', photo: null };
+const lookListeners = new Set<() => void>();
+export function setTeacherLook(look: TeacherLook) {
+  if (look.title === teacherLook.title && look.photo === teacherLook.photo) return;
+  teacherLook = look;
+  lookListeners.forEach(l => l());
+}
+function useTeacherLook(): TeacherLook {
+  return useSyncExternalStore(cb => { lookListeners.add(cb); return () => { lookListeners.delete(cb); }; }, () => teacherLook);
+}
+/** How the teacher is shown to students: their name if they gave one */
+export function useTeacherTitle(): string {
+  return useTeacherLook().title || 'Учитель';
+}
+
 /** Picture URL of this participant's avatar — the default one if they didn't pick any */
 export function useAvatarUrl(identity: string | null | undefined): string | undefined {
   const map = useContext(AvatarContext);
+  const { photo } = useTeacherLook();
   if (!identity) return undefined;
+  if (identity === TEACHER_IDENTITY && photo) return photo;
   const id = map.get(identity);
   return (id && AVATARS[id]) || DEFAULT_AVATAR;
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { NameCard, SpeakingRing } from './speaking';
-import { AvatarProvider } from './avatars';
+import { AvatarProvider, useTeacherTitle } from './avatars';
 import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
@@ -17,8 +17,9 @@ import { StartLessonDialog } from './StartLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { PasswordInput } from './PasswordInput';
 import { StudentName, StudentNames, useStudentName } from './studentNames';
-import { forgetJournal, loadJournal, lockJournal, seatPlanOf, useJournal } from './journal';
+import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, useJournal } from './journal';
 import { derivePasswordKeys } from './journalCrypto';
+import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
@@ -49,10 +50,10 @@ interface LessonState {
 }
 
 const entryBtn: CSSProperties = {
-  padding: '3px 6px', borderRadius: 5, border: '1px solid #444', background: 'transparent', color: '#aaa', fontSize: 11, cursor: 'pointer', textAlign: 'left',
+  padding: '3px 6px', borderRadius: 5, border: '1px solid #c9b99c', background: '#fff', color: '#555', fontSize: 11, cursor: 'pointer', textAlign: 'center',
 };
 const backToSeats: CSSProperties = {
-  marginTop: 6, padding: '6px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2e2e3e', color: '#888', fontSize: 11, textAlign: 'left', flexShrink: 0,
+  marginTop: 6, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer', background: '#fff', color: '#555', fontSize: 11, textAlign: 'center', flexShrink: 0,
 };
 
 const LESSON_STAGES: { value: Stage; label: string }[] = [
@@ -63,17 +64,20 @@ const LESSON_STAGES: { value: Stage; label: string }[] = [
 ];
 
 /** A student's camera in the teacherSees mode comes from another room than the pair's */
-function PairCamOrName({ identity, name: shown }: { identity: string; name: string }) {
+function PairCamOrName({ identity, name: shown, self }: { identity: string; name: string; self?: boolean }) {
   const cam = useClassCam(identity);
   const student = useStudentName(shown);
-  const name = shown === 'Учитель' ? shown : student;
+  const title = useTeacherTitle();
+  const name = self ? title : student;
   return cam
     ? <><ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><PairTileName identity={identity} name={name} /></>
     : <NameCard name={name} identity={identity} />;
 }
 
 /** Over video; a tile without video has the name on its card */
-function PairTileName({ identity, name }: { identity: string; name?: string }) {
+function PairTileName({ identity, name, self }: { identity: string; name?: string; self?: boolean }) {
+  const title = useTeacherTitle();
+  if (self) name = title;
   return (
     <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
       {name ?? <StudentName identity={identity} />}
@@ -98,9 +102,9 @@ function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; o
           <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
             {isTrackReference(t) && !t.publication.isMuted
               ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <PairCamOrName identity={t.participant.identity} name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
+              : <PairCamOrName identity={t.participant.identity} name={t.participant.name || t.participant.identity} self={t.participant.isLocal} />}
             <SpeakingRing identity={t.participant.identity} />
-            {isTrackReference(t) && !t.publication.isMuted && <PairTileName identity={t.participant.name || t.participant.identity} name={t.participant.isLocal ? 'Учитель' : undefined} />}
+            {isTrackReference(t) && !t.publication.isMuted && <PairTileName identity={t.participant.name || t.participant.identity} self={t.participant.isLocal} />}
           </div>
         ))}
         {others.map(name => (
@@ -124,8 +128,8 @@ function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; o
   );
 }
 
-function CapacityInput() {
-  const [value, setValue] = useState('16');
+function CapacityInput({ initial, onSet }: { initial: number; onSet: (n: number) => void }) {
+  const [value, setValue] = useState(String(initial));
   return (
     <div style={{ display: 'flex', gap: 4 }}>
       <input
@@ -133,11 +137,11 @@ function CapacityInput() {
         value={value}
         onChange={e => setValue(e.target.value)}
         min={4} max={32} step={4}
-        style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #444', background: '#2e2e3e', color: '#fff', fontSize: 13 }}
-        onKeyDown={e => { if (e.key === 'Enter') socket.emit('setCapacity', Number(value)); }}
+        style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 13 }}
+        onKeyDown={e => { if (e.key === 'Enter') onSet(Number(value)); }}
       />
       <button
-        onClick={() => socket.emit('setCapacity', Number(value))}
+        onClick={() => onSet(Number(value))}
         style={{ flex: 1, padding: '4px 6px', borderRadius: 4, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer', fontSize: 12 }}
       >
         ОК
@@ -209,6 +213,7 @@ interface Teacher {
 
 const TEACHER_KEY = 'teacher';
 const TOKEN_KEY = 'teacherToken';
+const GROUP_GAP = 24; // between groups of controls in the sidebar
 const CLASS_KEY = 'journalClass'; // a random id, tells nothing about the class
 const DEMO_KEY = 'demoLesson'; // the running demo lesson: a page reload comes back to it
 const JOURNAL_IDLE_MS = (Number(import.meta.env.VITE_JOURNAL_IDLE_MINUTES) || 60) * 60 * 1000;
@@ -341,10 +346,10 @@ function StudentTile({ name: identity, color }: { name: string; color?: string }
 }
 
 function journalLabel(status: ReturnType<typeof useJournal>['status'], className?: string): string {
-  if (status === 'locked') return '🔒 Журнал закрыт. Открыть';
-  if (status === 'none') return '📒 Создать журнал';
-  if (status === 'open') return `📒 Журнал${className ? `: ${className}` : ''}`;
-  return '📒 Журнал';
+  if (status === 'locked') return '🔒 Открыть профиль';
+  if (status === 'none') return '👤 Создать профиль';
+  if (status === 'open') return className ? `📒 Журнал: ${className}` : '📒 Выбрать журнал класса';
+  return '👤 Профиль';
 }
 
 export default function App() {
@@ -397,6 +402,12 @@ export default function App() {
     try { if (id) localStorage.setItem(CLASS_KEY, id); else localStorage.removeItem(CLASS_KEY); } catch { /* private mode */ }
   }
   const currentClass = journal.data?.classes.find(c => c.id === classId) ?? null;
+
+  // The profile's name and photo, once it opens, replace what this browser had
+  const journalProfile = journal.status === 'open' ? journal.data?.profile : undefined;
+  useEffect(() => {
+    if (journalProfile) adoptTeacherProfile(journalProfile);
+  }, [journalProfile]);
   const [studentUuids, setStudentUuids] = useState<Record<string, string>>({});
   const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
   const [entry, setEntry] = useState<{ roomCode: string; joinCode: string; closed: boolean } | null>(null);
@@ -426,6 +437,15 @@ export default function App() {
   useEffect(() => {
     if (joins && planJson && !demo) socket.emit('seatPlan', JSON.parse(planJson));
   }, [joins, planJson, demo]);
+
+  // The class remembers the code it came in by: next time the same code opens the lesson
+  const roomCode = entry?.roomCode;
+  const classIdNow = currentClass?.id;
+  const lastCode = currentClass?.lastCode;
+  useEffect(() => {
+    if (demo || !joins || !roomCode || !classIdNow || lastCode === roomCode) return;
+    updateJournal(d => ({ ...d, classes: d.classes.map(c => c.id === classIdNow ? { ...c, lastCode: roomCode } : c) }));
+  }, [demo, joins, roomCode, classIdNow, lastCode]);
 
   // After the question the answers open by themselves; the teacher goes back to the slide from there
   const [mapOpen, setMapOpen] = useState(false);
@@ -567,7 +587,8 @@ export default function App() {
     return (<>
       <MediaSetup token={token!} initial={media} error={lessonError} onUnauthorized={logout}
         onJoin={(code, p) => { setMedia(p); setLessonErrorState(''); setLessonCodeReady(code); }}
-        journalLabel={journalLabel(journal.status, currentClass?.name)} onJournal={() => setJournalOpen(true)} onLogout={logout} />
+        journalLabel={journalLabel(journal.status, currentClass?.name)} onJournal={() => setJournalOpen(true)} onLogout={logout}
+        classCode={currentClass?.lastCode} profileLocked={journal.status === 'locked'} />
       {journalOpen && <JournalDialog email={teacher!.email} classId={classId} onClassId={setClassId} onClose={() => setJournalOpen(false)} />}
     </>);
   }
@@ -616,34 +637,32 @@ export default function App() {
 
       {/* Left sidebar */}
       <div style={{
-        width: 180, background: '#1e1e2e', color: '#fff', boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column', padding: 12, gap: 6, flexShrink: 0,
+        width: 180, background: '#ece2d2', color: '#222', borderRight: '1px solid #d6c8b0', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', padding: 12, gap: 6, flexShrink: 0, textAlign: 'center',
       }}>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
-          <span style={{ color: connected ? '#2ecc71' : '#e74c3c' }}>●</span> Учитель
-        </div>
+        {!connected && <div data-testid="no-connection" style={{ fontSize: 12, color: '#e74c3c', marginBottom: 4 }}>● Нет связи</div>}
 
-        <div style={{ fontSize: 10, color: '#666' }}>Код занятия</div>
-        <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#fff' }}>
+        <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
+        <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
           {entry?.joinCode ?? (lessonCode || '…')}
         </div>
         {!demo && state.stage !== 'waiting' && entry && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 }}>
-            <button data-testid="entry-close" onClick={() => socket.emit('entry:close', { closed: !entry.closed })} style={{ ...entryBtn, color: entry.closed ? '#f0c36d' : '#aaa' }}>
+            <button data-testid="entry-close" onClick={() => socket.emit('entry:close', { closed: !entry.closed })} style={{ ...entryBtn, color: entry.closed ? '#b07800' : '#555' }}>
               {entry.closed ? '🔒 Вход закрыт, открыть' : 'Закрыть вход'}
             </button>
             <button data-testid="entry-new-code" onClick={() => socket.emit('entry:newCode')} title="Кто уже был на уроке, вернётся и со старым" style={entryBtn}>Сменить код</button>
           </div>
         )}
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
-          <div data-testid="video-mode" style={{ fontSize: 11, color: '#f0c36d', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
+          <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
 
-        {(state.stage === 'waiting' || !slides.local) && <MaterialPanel slides={slides} />}
+        {(state.stage === 'waiting' || !slides.local) && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} /></div>}
 
         {!demo && state.stage === 'waiting' && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
-          marginTop: 8, padding: '6px', borderRadius: 6, border: '1px solid #444', cursor: 'pointer',
-          background: 'transparent', color: journal.status === 'locked' ? '#f0c36d' : '#ccc', fontSize: 12, textAlign: 'left',
+          marginTop: GROUP_GAP, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer',
+          background: '#fff', color: journal.status === 'locked' ? '#b07800' : '#222', fontSize: 12, textAlign: 'center',
         }}>
           {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
         </button>}
@@ -652,8 +671,16 @@ export default function App() {
 
         {state.stage === 'waiting' && !demo?.solo && (
           <>
-            <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Мест в классе</div>
-            <CapacityInput />
+            <div style={{ fontSize: 11, color: '#222', marginTop: 2 }}>Мест в классе</div>
+            <CapacityInput initial={seats.filter(s => s.extra === undefined).length || currentClass?.capacity || 16} onSet={n => {
+              if (!Number.isInteger(n) || n < 0) return;
+              socket.emit('setCapacity', n);
+              // the class keeps its number of seats for next time
+              const id = currentClass?.id;
+              if (id && n > 0 && !demo && journal.status === 'open') {
+                updateJournal(d => ({ ...d, classes: d.classes.map(c => c.id === id ? { ...c, capacity: Math.min(n, 32) } : c) }));
+              }
+            }} />
           </>
         )}
 
@@ -661,40 +688,29 @@ export default function App() {
           <button data-testid="desks-toggle" onClick={() => socket.emit('desks:set', { on: !state.atDesks })}
             title={state.atDesks ? 'Все вернутся в класс и услышат вас' : 'Кто уже сел, пообщается за своим столом до начала урока'}
             style={{
-              marginTop: 12, padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'center',
-              background: state.atDesks ? '#4a90e2' : '#2e2e3e', color: state.atDesks ? '#fff' : '#ccc',
+              marginTop: 8, padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'center',
+              background: '#4a90e2', color: '#fff',
             }}>
             {state.atDesks ? 'Собрать в класс' : 'Отпустить за столы'}
           </button>
         )}
 
-        {state.stage === 'waiting' ? (
-          <button
-            onClick={() => { if (unseated.length || !slides.material) setStartWarning(true); else startLesson(); }}
-            style={{
-              marginTop: 12, padding: '10px 6px', borderRadius: 6, border: 'none',
-              cursor: 'pointer', background: '#2ecc71', color: '#fff',
-              fontWeight: 'bold', fontSize: 13, textAlign: 'center',
-            }}
-          >
-            {slides.state.block ? 'Продолжить урок' : 'Начать урок'}
-          </button>
-        ) : slides.material?.blocks.length ? (
+        {state.stage === 'waiting' ? null : slides.material?.blocks.length ? (
           <>
             <LessonPlan slides={slides} stage={state.stage} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         ) : (
           <>
-            <div style={{ fontSize: 11, color: '#666', marginTop: 12 }}>ЭТАП</div>
+            <div style={{ fontSize: 11, color: '#222', marginTop: 12 }}>ЭТАП</div>
             {LESSON_STAGES.map(s => (
               <button
                 key={s.value}
                 onClick={() => socket.emit('setStage', s.value)}
                 style={{
                   padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: state.stage === s.value ? '#4a90e2' : '#2e2e3e',
-                  color: state.stage === s.value ? '#fff' : '#aaa',
+                  background: state.stage === s.value ? '#4a90e2' : '#fff',
+                  color: state.stage === s.value ? '#fff' : '#333',
                   fontWeight: state.stage === s.value ? 'bold' : 'normal',
                   fontSize: 13, textAlign: 'left',
                 }}
@@ -706,7 +722,7 @@ export default function App() {
           </>
         )}
 
-        {livekit && !demo?.solo && <SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} />}
+        {livekit && !demo?.solo && <div style={{ marginTop: state.stage === 'waiting' ? GROUP_GAP - 8 : 0 }}><SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} /></div>}
 
         {livekit && !demo?.solo && (
           <button
@@ -721,14 +737,27 @@ export default function App() {
           </button>
         )}
 
-        <div style={{ marginTop: 'auto', fontSize: 12, color: '#fff' }}>
+        {state.stage === 'waiting' && (
+          <button
+            onClick={() => { if (unseated.length || !slides.material) setStartWarning(true); else startLesson(); }}
+            style={{
+              marginTop: GROUP_GAP, padding: '10px 6px', borderRadius: 6, border: 'none',
+              cursor: 'pointer', background: '#2ecc71', color: '#fff',
+              fontWeight: 'bold', fontSize: 13, textAlign: 'center',
+            }}
+          >
+            {slides.state.block ? 'Продолжить урок' : 'Начать урок'}
+          </button>
+        )}
+
+        <div style={{ marginTop: 'auto', fontSize: 12, color: '#222' }}>
           {students.length} учеников
         </div>
         <button
           onClick={() => setEndDialog(true)}
           style={{
-            marginTop: 6, padding: '6px 6px', borderRadius: 6, border: '1px solid #444',
-            cursor: 'pointer', background: 'transparent', color: '#aaa', fontSize: 11, textAlign: 'center',
+            marginTop: 6, padding: '6px 6px', borderRadius: 6, border: '1px solid #c9b99c',
+            cursor: 'pointer', background: '#fff', color: '#555', fontSize: 11, textAlign: 'center',
           }}
         >
           Завершить урок
@@ -745,7 +774,7 @@ export default function App() {
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
-        <div style={{ padding: '10px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '10px 16px 10px 32px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>
           {state.stage === 'group' && livekit && !demo?.solo && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>

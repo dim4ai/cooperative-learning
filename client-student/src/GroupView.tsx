@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SharedBoard } from './SharedBoard';
 import { SlideUnderlay, type StudentSlides } from './LessonSlides';
 import { socket } from './socket';
+import { useTeacherTitle } from './avatars';
 
 /** "Всем понятно?": a moment to answer; no answer is fine too */
 function UnderstoodAsk() {
@@ -66,6 +67,7 @@ export function GroupView({ slides }: { slides: StudentSlides }) {
   const teacherScreen = screenTracks.find(t => t.participant.identity === 'Teacher');
   const teacherCamera = cameraTracks.find(t => t.participant.identity === 'Teacher');
   const myCamera = cameraTracks.find(t => t.participant.isLocal);
+  const teacherTitle = useTeacherTitle();
 
 
   return (
@@ -94,7 +96,7 @@ export function GroupView({ slides }: { slides: StudentSlides }) {
         }}>
           <VideoTrack trackRef={teacherCamera} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
-            Учитель
+            {teacherTitle}
           </div>
         </div>
       )}

@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { Server, type Socket } from 'socket.io';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import {
-  verifyTeacher, checkPassword, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons,
+  verifyTeacher, checkPassword, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons, setLessonVideoMode,
   isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
   hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveBooking, loadCurrentBookings, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
   type DemoRecord,
@@ -159,6 +159,23 @@ app.post('/login', async (req, res) => {
 app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
   const requested = (req.body as { videoMode?: unknown } | undefined)?.videoMode;
   const videoMode: VideoMode = VIDEO_MODES.includes(requested as VideoMode) ? requested as VideoMode : 'all';
+  // The class's code from the last time: the same group comes in by the same code
+  const { reuse, strict } = (req.body ?? {}) as { reuse?: unknown; strict?: unknown };
+  if (typeof reuse === 'string' && reuse.length <= 40) {
+    const old = await getLessonByCode(reuse).catch(() => null);
+    if (old && old.teacherId === req.teacherId && !demos.has(old.code)) {
+      const live = lessons.get(old.code);
+      if (live && !live.ended) { res.json({ lesson: old, reused: true }); return; } // still on: just back in
+      const full = realLessonRefusal(videoMode);
+      if (full) { res.status(429).json({ error: full }); return; }
+      const mode = await setLessonVideoMode(old.code, videoMode).catch(() => null);
+      if (mode === null) { res.status(500).json({ error: 'failed to create lesson' }); return; }
+      res.json({ lesson: { ...old, videoMode: mode }, reused: true });
+      return;
+    }
+    // A typed code that isn't this teacher's: no new lesson in its place, joining tells why
+    if (strict === true) { res.status(404).json({ error: 'not reusable' }); return; }
+  }
   const full = realLessonRefusal(videoMode);
   if (full) { res.status(429).json({ error: full }); return; }
   const lesson = await createLesson(req.teacherId!, videoMode).catch(e => e as Error);
@@ -360,6 +377,19 @@ interface LessonRuntime {
   afterUntil: number | null;       // after-lesson chat in fours (teacher gone) lasts until; then the lesson ends
   afterTimer: NodeJS.Timeout | null;
   bots: BotRun | null;             // the solo demo's simulated class
+  teacherLook: TeacherLook | null; // the teacher's name and photo for students, in memory only
+}
+
+interface TeacherLook { title: string; photo: string | null }
+const TEACHER_TITLE_MAX = 40;
+const TEACHER_PHOTO_MAX = 200_000; // a small picture made in the teacher's browser
+function teacherLookOf(v: unknown): TeacherLook | null {
+  const { title, photo } = (v ?? {}) as { title?: unknown; photo?: unknown };
+  if (typeof title !== 'string') return null;
+  const okPhoto = photo === null || (typeof photo === 'string' && photo.length <= TEACHER_PHOTO_MAX
+    && /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(photo));
+  if (!okPhoto) return null;
+  return { title: title.trim().slice(0, TEACHER_TITLE_MAX), photo: photo as string | null };
 }
 
 const lessons = new Map<string, LessonRuntime>();
@@ -607,6 +637,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     visited: false,
     noTeacherSince: Date.now(),
     ended: false,
+    teacherLook: null,
     afterUntil: null,
     afterTimer: null,
     bots: null,
@@ -1314,7 +1345,7 @@ function sweepAttempts(store: Map<string, AttemptEntry>) {
 }
 
 io.on('connection', async (socket) => {
-  const { name, role, lessonId, uuid: rawUuid, token, avatar: rawAvatar, teacherName: rawTeacherName } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; uuid?: unknown; teacherName?: unknown; token?: string; avatar?: unknown };
+  const { name, role, lessonId, uuid: rawUuid, token, avatar: rawAvatar, teacherName: rawTeacherName, look: rawLook } = socket.handshake.auth as { name: string; role: Role; lessonId?: string; boardRoom?: string; uuid?: unknown; teacherName?: unknown; token?: string; avatar?: unknown; look?: unknown };
   // only an id from the built-in set travels — never a picture; clients ignore ids they don't know
   const avatar = typeof rawAvatar === 'string' && /^[a-z]{1,20}$/.test(rawAvatar) ? rawAvatar : null;
   const uuid = role === 'student' && isUuid(rawUuid) ? rawUuid : null;
@@ -1420,6 +1451,11 @@ io.on('connection', async (socket) => {
   const lesson: LessonRuntime = runtime;
   lesson.videoMode = dbLesson.videoMode;
   socket.join(code);
+  if (role === 'teacher' && rawLook !== undefined) {
+    const look = teacherLookOf(rawLook);
+    if (look) { lesson.teacherLook = look; socket.to(code).emit('teacherLook', look); }
+  }
+  if (lesson.teacherLook) socket.emit('teacherLook', lesson.teacherLook);
 
   // Board-only connection: mobile student viewing/drawing the board via WebView, as a second
   // socket alongside their normal 'student' connection. The room it may attach to is NOT taken

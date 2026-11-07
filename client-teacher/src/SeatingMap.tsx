@@ -3,7 +3,7 @@ import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket } from './socket';
 import { NAME_CARD_BG, SpeakingRing } from './speaking';
-import { useAvatarUrl } from './avatars';
+import { useAvatarUrl, useTeacherTitle } from './avatars';
 import { ClassCamVideo, useClassCam } from './classCams';
 import { StudentName, useStudentName } from './studentNames';
 
@@ -34,6 +34,7 @@ function SelfPreview() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const localTrackRef = tracks.find(t => t.participant.isLocal);
   const selfAvatar = useAvatarUrl('Teacher'); // without video: own avatar (or the default one)
+  const title = useTeacherTitle(); // as students see it
   const hasVideo = !!localTrackRef && !localTrackRef.publication?.isMuted;
 
   return (
@@ -50,7 +51,7 @@ function SelfPreview() {
             {selfAvatar && <img src={selfAvatar} alt="" data-testid="self-avatar" style={{ height: '62%' }} />}
           </div>}
       <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, pointerEvents: 'none', ...(hasVideo ? { color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)' } : { color: '#444', fontWeight: 'bold' }) }}>
-        Учитель
+        {title}
       </div>
     </div>
   );
@@ -100,6 +101,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
 export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
+  const [swap, setSwap] = useState<{ a: string; b: string; seatId: string } | null>(null);
 
   if (seats.length === 0) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 15 }}>
@@ -110,10 +112,16 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
   const numGroups = Math.max(...seats.map(s => s.groupIndex)) + 1;
 
   function handleOccupiedClick(studentName: string, seatId: string) {
-    if (selected && selected !== studentName) {
-      socket.emit('moveSeat', { studentName: selected, toSeatId: seatId }); // the two swap
-      setSelected(null);
-    } else setSelected(prev => prev === studentName ? null : studentName);
+    // A swap is easy to make by a stray click and hard to notice: it waits for a yes
+    const selectedSeated = !!selected && seats.some(s => s.occupant === selected);
+    if (selectedSeated && selected !== studentName) setSwap({ a: selected!, b: studentName, seatId });
+    else setSelected(prev => prev === studentName ? null : studentName);
+  }
+
+  function confirmSwap() {
+    if (swap) socket.emit('moveSeat', { studentName: swap.a, toSeatId: swap.seatId }); // the two swap
+    setSwap(null);
+    setSelected(null);
   }
 
   function handleEmptyClick(seatId: string) {
@@ -130,6 +138,19 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
 
   return (
     <div data-testid="seating-map" style={{ position: 'relative', height: '100%', overflow: 'auto', padding: `${showSelf ? 200 : 16}px 16px 16px`, boxSizing: 'border-box' }}>
+      {swap && (
+        <div onClick={() => setSwap(null)} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div data-testid="swap-confirm" onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 8, padding: 20, maxWidth: 360, boxShadow: '0 4px 20px rgba(0,0,0,0.25)', color: '#222', fontSize: 15 }}>
+            <div style={{ marginBottom: 16 }}>
+              Поменять местами <b><StudentName identity={swap.a} /></b> и <b><StudentName identity={swap.b} /></b>?
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button data-testid="swap-cancel" onClick={() => { setSwap(null); setSelected(null); }} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #ccc', background: '#fff', color: '#222', cursor: 'pointer', fontSize: 14 }}>Отмена</button>
+              <button data-testid="swap-yes" onClick={confirmSwap} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer', fontSize: 14 }}>Поменять</button>
+            </div>
+          </div>
+        </div>
+      )}
       <style>{`
         @keyframes pairPulse {
           0%, 100% { border-color: #f39c12; box-shadow: 0 0 0 2px #f39c1266; }

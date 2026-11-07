@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { getTeacherProfile, lookOf } from './teacherProfile';
 
 let lessonCode = '';
 let authToken = '';
@@ -12,6 +13,9 @@ export function setAuthToken(token: string) {
 }
 
 export const socket = io(import.meta.env.VITE_API_URL, {
-  auth: cb => cb({ name: 'Teacher', role: 'teacher', lessonId: lessonCode, token: authToken }),
+  auth: cb => {
+    const p = getTeacherProfile();
+    cb({ name: 'Teacher', role: 'teacher', lessonId: lessonCode, token: authToken, avatar: p.photo ? null : p.avatar, look: lookOf(p) });
+  },
   autoConnect: false,
 });

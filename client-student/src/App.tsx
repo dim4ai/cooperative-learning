@@ -12,7 +12,7 @@ import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
 import { NAME_CARD_BG } from './speaking';
-import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
+import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, setTeacherLook, useAvatarUrl, useTeacherTitle } from './avatars';
 import { forgetProfile, profileNames, profiles, saveProfileAvatar, saveProfileNames, enterProfile } from './profiles';
 import { socket, myName, ownName, lessonId, isBoardOnly, myBoardRoom, refreshNick, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, toggleStyle, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
@@ -37,6 +37,7 @@ function TeacherPreview() {
   const tracks = useTracks([Track.Source.Camera]);
   const teacherTrack = tracks.find(t => t.participant.identity === 'Teacher' && !t.publication?.isMuted);
   const teacherAvatar = useAvatarUrl('Teacher');
+  const teacherTitle = useTeacherTitle();
   const hasVideo = !!teacherTrack;
 
   return (
@@ -52,8 +53,8 @@ function TeacherPreview() {
         : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 14, boxSizing: 'border-box' }}>
             {teacherAvatar && <img src={teacherAvatar} alt="" data-testid="teacher-avatar" style={{ height: '62%' }} />}
           </div>}
-      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, pointerEvents: 'none', ...(hasVideo ? { color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)' } : { color: '#444', fontWeight: 'bold' }) }}>
-        Учитель
+      <div data-testid="teacher-title" style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, pointerEvents: 'none', ...(hasVideo ? { color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)' } : { color: '#444', fontWeight: 'bold' }) }}>
+        {teacherTitle}
       </div>
     </div>
   );
@@ -370,6 +371,7 @@ export default function App() {
       setPoll(data);
     });
     socket.on('muted', () => setMicOn(false));
+    socket.on('teacherLook', setTeacherLook);
     // Teacher ended the lesson: back to the start screen
     socket.on('lessonEnded', () => {
       setJoined(false);
@@ -379,7 +381,7 @@ export default function App() {
       setLessonState({ stage: 'waiting', timerEndsAt: null, participants: [] });
       setJoinError('Урок завершён');
     });
-    return () => { socket.disconnect(); setConfirmed(false); };
+    return () => { socket.disconnect(); setConfirmed(false); setTeacherLook({ title: '', photo: null }); };
   }, [joined]);
 
   useEffect(() => {
