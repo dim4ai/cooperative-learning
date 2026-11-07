@@ -40,6 +40,7 @@ interface Participant {
 
 interface LessonState {
   stage: Stage;
+  atDesks?: boolean;
   videoMode?: VideoMode;
   timerEndsAt: number | null;
   demo?: DemoTimes | null;
@@ -67,8 +68,17 @@ function PairCamOrName({ identity, name: shown }: { identity: string; name: stri
   const student = useStudentName(shown);
   const name = shown === 'Учитель' ? shown : student;
   return cam
-    ? <ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    ? <><ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><PairTileName identity={identity} name={name} /></>
     : <NameCard name={name} identity={identity} />;
+}
+
+/** Over video; a tile without video has the name on its card */
+function PairTileName({ identity, name }: { identity: string; name?: string }) {
+  return (
+    <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
+      {name ?? <StudentName identity={identity} />}
+    </div>
+  );
 }
 
 function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; others: string[]; sheet: ReactNode }) {
@@ -90,9 +100,7 @@ function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; o
               ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               : <PairCamOrName identity={t.participant.identity} name={t.participant.isLocal ? 'Учитель' : (t.participant.name || t.participant.identity)} />}
             <SpeakingRing identity={t.participant.identity} />
-            <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
-              {t.participant.isLocal ? 'Учитель' : <StudentName identity={t.participant.name || t.participant.identity} />}
-            </div>
+            {isTrackReference(t) && !t.publication.isMuted && <PairTileName identity={t.participant.name || t.participant.identity} name={t.participant.isLocal ? 'Учитель' : undefined} />}
           </div>
         ))}
         {others.map(name => (
@@ -158,9 +166,9 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting }: { students: Participant[]; stage: Stage; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
+function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting }: { students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
   }
 
   if (stage === 'group') {
@@ -576,7 +584,7 @@ export default function App() {
   // An added desk isn't a place in the class yet
   const unseated = students
     .filter(p => !seats.some(s => s.occupant === p.name && s.extra === undefined))
-    .map(p => teacherNames[p.name] ?? p.name);
+    .map(p => p.name);
   function startLesson() {
     const blocks = slides.material?.blocks;
     if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
@@ -594,6 +602,12 @@ export default function App() {
     journalName: occupant => journalStudentOf(studentUuids[students.find(p => p.name === occupant)?.id ?? ''] ?? null)?.name,
     reservedFor: seatId => currentClass?.students.find(s => s.seat === seatId)?.name,
   };
+  // One name per student for the teacher: as in the journal, or else the one they gave for the teacher
+  const shownNames: Record<string, string> = { ...teacherNames };
+  for (const p of students) {
+    const inJournal = journalStudentOf(studentUuids[p.id] ?? null)?.name;
+    if (inJournal) shownNames[p.name] = inJournal;
+  }
   const waitingSeat = seats.length ? students.filter(p => !seats.some(s => s.occupant === p.name)).map(p => p.name) : [];
   const notInJournal = currentClass ? lessonStudents.filter(p => p.uuid && !journalStudentOf(p.uuid)).length : 0;
 
@@ -641,6 +655,17 @@ export default function App() {
             <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>Мест в классе</div>
             <CapacityInput />
           </>
+        )}
+
+        {state.stage === 'waiting' && !slides.state.block && !demo?.solo && (
+          <button data-testid="desks-toggle" onClick={() => socket.emit('desks:set', { on: !state.atDesks })}
+            title={state.atDesks ? 'Все вернутся в класс и услышат вас' : 'Кто уже сел, пообщается за своим столом до начала урока'}
+            style={{
+              marginTop: 12, padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'center',
+              background: state.atDesks ? '#4a90e2' : '#2e2e3e', color: state.atDesks ? '#fff' : '#ccc',
+            }}>
+            {state.atDesks ? 'Собрать в класс' : 'Отпустить за столы'}
+          </button>
         )}
 
         {state.stage === 'waiting' ? (
@@ -709,7 +734,7 @@ export default function App() {
           Завершить урок
         </button>
         {startWarning && <StartLessonDialog
-          names={unseated}
+          names={unseated.map(n => shownNames[n] ?? n)}
           noLesson={!slides.material}
           onStart={() => { setStartWarning(false); startLesson(); }}
           onCancel={() => setStartWarning(false)}
@@ -748,7 +773,7 @@ export default function App() {
             return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
           })()
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} sheet={<ExplainBoard slides={slides} />} />
-            : <StudentGrid students={students} stage={state.stage} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
+            : <StudentGrid students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
                 slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
           }
         </div>
@@ -771,9 +796,9 @@ export default function App() {
     </div>
   );
 
-  if (!livekit) return <AvatarProvider participants={state.participants}><StudentNames.Provider value={teacherNames}><ClassCams.Provider value={classCams}>{inner}</ClassCams.Provider></StudentNames.Provider></AvatarProvider>;
+  if (!livekit) return <AvatarProvider participants={state.participants}><StudentNames.Provider value={shownNames}><ClassCams.Provider value={classCams}>{inner}</ClassCams.Provider></StudentNames.Provider></AvatarProvider>;
 
-  return (<AvatarProvider participants={state.participants}><StudentNames.Provider value={teacherNames}><ClassCams.Provider value={classCams}>
+  return (<AvatarProvider participants={state.participants}><StudentNames.Provider value={shownNames}><ClassCams.Provider value={classCams}>
     <LiveKitRoom
       key={livekit.room}
       serverUrl={livekit.url}

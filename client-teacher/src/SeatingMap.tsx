@@ -2,14 +2,15 @@ import { useState } from 'react';
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket } from './socket';
-import { SpeakingRing } from './speaking';
+import { NAME_CARD_BG, SpeakingRing } from './speaking';
 import { useAvatarUrl } from './avatars';
 import { ClassCamVideo, useClassCam } from './classCams';
-import { StudentName } from './studentNames';
+import { StudentName, useStudentName } from './studentNames';
 
 function SeatVideo({ identity }: { identity: string }) {
   const tracks = useTracks([Track.Source.Camera]);
-  const trackRef = tracks.find(t => t.participant.identity === identity);
+  // a camera switched off stays published, muted: then it's the avatar, not a black frame
+  const trackRef = tracks.find(t => t.participant.identity === identity && !t.publication?.isMuted);
   const classCam = useClassCam(identity);
   const avatar = useAvatarUrl(identity);
   return (<>
@@ -33,6 +34,7 @@ function SelfPreview() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const localTrackRef = tracks.find(t => t.participant.isLocal);
   const selfAvatar = useAvatarUrl('Teacher'); // without video: own avatar (or the default one)
+  const hasVideo = !!localTrackRef && !localTrackRef.publication?.isMuted;
 
   return (
     <div style={{
@@ -40,16 +42,26 @@ function SelfPreview() {
       width: 200, aspectRatio: '4/3',
       borderRadius: 8, overflow: 'hidden',
       boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-      background: '#222',
+      background: hasVideo ? '#222' : NAME_CARD_BG,
     }}>
-      {localTrackRef && !localTrackRef.publication?.isMuted
+      {hasVideo
         ? <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
         : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 14, boxSizing: 'border-box' }}>
             {selfAvatar && <img src={selfAvatar} alt="" data-testid="self-avatar" style={{ height: '62%' }} />}
           </div>}
-      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, pointerEvents: 'none', ...(hasVideo ? { color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)' } : { color: '#444', fontWeight: 'bold' }) }}>
         Учитель
       </div>
+    </div>
+  );
+}
+
+/** What classmates call this student, when the teacher knows them by another name */
+function SeatNick({ nick }: { nick: string }) {
+  if (useStudentName(nick) === nick) return null;
+  return (
+    <div data-testid="seat-nick" title="Так его видят одноклассники" style={{ position: 'relative', zIndex: 1, fontSize: 11, color: '#555', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      ({nick})
     </div>
   );
 }
@@ -85,7 +97,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [] }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[] }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -155,6 +167,12 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
             animation: isGroupCalling ? 'pairPulse 1.2s infinite' : 'none',
           }}>
             {groupSeats[0]?.extra !== undefined && <div style={{ fontSize: 12, color: '#777', marginBottom: -4 }}>Новые ученики</div>}
+            {atDesks && groupSeats[0]?.extra === undefined && groupSeats.some(s => s.occupant) && (
+              <button data-testid="desk-visit" onClick={() => onJoinPair?.(foursRoom)} style={{
+                alignSelf: 'flex-end', marginBottom: -2, padding: '2px 10px', borderRadius: 12, cursor: 'pointer',
+                border: `1px solid ${color}`, background: '#fff', color: '#444', fontSize: 12,
+              }}>💬 Подойти</button>
+            )}
             {isGroupCalling && (
               <div
                 onClick={() => onJoinPair?.(foursRoom)}
@@ -228,11 +246,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                       <div style={{ position: 'relative', zIndex: 1, fontWeight: 'bold', fontSize: 13, color: '#222', textShadow: '0 1px 3px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150 }} title={seat.occupant} data-testid="seat-name">
                         <StudentName identity={seat.occupant} />
                       </div>
-                      {names?.journalName(seat.occupant) && (
-                        <div data-testid="seat-journal-name" style={{ position: 'relative', zIndex: 1, fontSize: 11, color: '#222', textShadow: '0 1px 3px rgba(255,255,255,0.8)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {names.journalName(seat.occupant)}
-                        </div>
-                      )}
+                      <SeatNick nick={seat.occupant} />
                       {!readOnly && (
                         <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
                           {!noRemove && <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>}

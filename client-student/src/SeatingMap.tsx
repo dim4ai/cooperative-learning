@@ -19,7 +19,8 @@ const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 function SeatVideo({ identity }: { identity: string; color?: string; isMe?: boolean }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const trackRef = tracks.find(t => t.participant.identity === identity);
+  // a camera switched off stays published, muted: then it's the avatar, not a black frame
+  const trackRef = tracks.find(t => t.participant.identity === identity && !t.publication?.isMuted);
   const avatar = useAvatarUrl(identity);
   return (<>
     {/* in the tile's centered column, above the name */}
