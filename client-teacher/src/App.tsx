@@ -7,7 +7,7 @@ import { Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Marks, Seat, SeatNames } from './SeatingMap';
-import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, MaterialPanel, UnderstoodPanel } from './LessonSlides';
+import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
 import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
@@ -213,6 +213,10 @@ interface Teacher {
 
 const TEACHER_KEY = 'teacher';
 const TOKEN_KEY = 'teacherToken';
+const tabStyle = (on: boolean): CSSProperties => ({
+  padding: '3px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 14,
+  border: on ? '1px solid #c9b99c' : '1px solid transparent', background: on ? '#fff' : 'transparent', color: on ? '#222' : '#666',
+});
 const GROUP_GAP = 24; // between groups of controls in the sidebar
 const CLASS_KEY = 'journalClass'; // a random id, tells nothing about the class
 const DEMO_KEY = 'demoLesson'; // the running demo lesson: a page reload comes back to it
@@ -449,6 +453,8 @@ export default function App() {
 
   // After the question the answers open by themselves; the teacher goes back to the slide from there
   const [mapOpen, setMapOpen] = useState(false);
+  // Before the lesson the teacher may look through it alone, in place of the seating
+  const [previewTab, setPreviewTab] = useState(false);
   const [screenPick, setScreenPick] = useState(0);
   const wasAsking = useRef(false);
   useEffect(() => {
@@ -612,6 +618,13 @@ export default function App() {
     else socket.emit('setStage', 'group');
   }
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
+  // room names are "<lessonCode>:<base>" — check the base, not the full string
+  const roomBase = livekit?.room.split(':')[1] ?? '';
+  const inSmallRoom = roomBase.startsWith('pair-') || roomBase.startsWith('fours-') || roomBase.startsWith('individual-');
+  const canPreview = state.stage === 'waiting' && !!slides.material && !inSmallRoom && !demo?.solo;
+  const preview = canPreview && previewTab;
+  // a bell, or a newcomer on an added desk: worth a look at the seating
+  const seatingNeedsYou = callingRooms.size > 0 || seats.some(s => s.extra !== undefined && !!s.occupant);
   const currentBlockTitle = state.stage === 'waiting' ? undefined : slides.material?.blocks.find(b => b.id === slides.state.block)?.title;
 
   // Who is who, seen only here: name in the lesson (what classmates see) → name in the journal
@@ -775,7 +788,14 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
         <div style={{ padding: '10px 16px 10px 32px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>
+          {canPreview
+            ? <div role="tablist" style={{ display: 'flex', gap: 4 }}>
+                <button role="tab" data-testid="tab-seating" aria-selected={!preview} onClick={() => setPreviewTab(false)} style={tabStyle(!preview)}>
+                  Рассадка{seatingNeedsYou && <span data-testid="seating-attention" title="На рассадке что-то ждёт вас" style={{ color: '#e74c3c', marginLeft: 4 }}>●</span>}
+                </button>
+                <button role="tab" data-testid="tab-preview" aria-selected={preview} onClick={() => setPreviewTab(true)} style={tabStyle(preview)}>Просмотр урока</button>
+              </div>
+            : <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>}
           {state.stage === 'group' && livekit && !demo?.solo && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
               {(['board', 'screen'] as GroupMode[]).map(m => (
@@ -796,11 +816,7 @@ export default function App() {
         </div>
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
-          {(() => {
-            // room names are "<lessonCode>:<base>" — check the base, not the full string
-            const base = livekit?.room.split(':')[1] ?? '';
-            return base.startsWith('pair-') || base.startsWith('fours-') || base.startsWith('individual-');
-          })()
+          {preview ? <LessonPreview slides={slides} /> : inSmallRoom
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : []} sheet={<ExplainBoard slides={slides} />} />
             : <StudentGrid students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
                 slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />

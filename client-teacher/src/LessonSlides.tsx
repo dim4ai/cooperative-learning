@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
-import type { Scene } from './slides/model';
+import { SLIDE_HEIGHT, SLIDE_WIDTH, type Scene } from './slides/model';
 import { SharedBoard } from './SharedBoard';
 import {
   readLesson, releaseLesson, lessonForServer, storedLessonFile, storeLessonFile, forgetLessonFile,
@@ -366,3 +366,108 @@ export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides 
 const navBtn: CSSProperties = {
   padding: '2px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#333', cursor: 'pointer', fontSize: 13,
 };
+
+// ---------- before the lesson: the teacher looks through the lesson alone ----------
+
+/** Only here: nothing goes to the server, students see nothing of it */
+export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides }) {
+  const { local } = teacherSlides;
+  const blocks = local?.blocks ?? [];
+  const [blockId, setBlockId] = useState<string | null>(null);
+  const [index, setIndex] = useState(0);
+  const block = blocks.find(b => b.id === blockId) ?? blocks[0];
+  const scenes = block?.slides ?? [];
+  const scene = scenes[Math.min(index, scenes.length - 1)];
+  const at = scene ? scenes.indexOf(scene) : 0;
+
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBox({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [local]);
+  const width = Math.floor(Math.min(box.w, box.h * SLIDE_WIDTH / SLIDE_HEIGHT));
+
+  const go = useCallback((i: number) => setIndex(Math.max(0, Math.min(i, scenes.length - 1))), [scenes.length]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest('input, textarea, select')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); go(at + 1); }
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(at - 1); }
+      // ↑/↓ — the previous / next block, from its first slide
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const i = blocks.findIndex(b => b.id === block?.id) + (e.key === 'ArrowDown' ? 1 : -1);
+        if (i >= 0 && i < blocks.length) { setBlockId(blocks[i].id); setIndex(0); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [at, go, blocks, block]);
+  // the chosen block stays in sight in the list
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector('[data-current]')?.scrollIntoView({ block: 'nearest' });
+  }, [block?.id]);
+
+  const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
+  const nothingRevealed = useMemo(() => new Set<string>(), []);
+
+  if (!local) return (
+    <div data-testid="preview-no-file" style={{ padding: 24, color: '#555', fontSize: 14 }}>
+      Чтобы посмотреть урок, откройте его файл в этом браузере: «Открыть урок…» слева.
+    </div>
+  );
+
+  const note = (scene?.note?.trim()) || block?.teacherNote || '';
+  return (
+    <div data-testid="lesson-preview" style={{ height: '100%', display: 'flex', minHeight: 0 }}>
+      <div ref={listRef} style={{ width: 190, flexShrink: 0, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 4, borderRight: '1px solid #e0d4c0' }}>
+        {blocks.map(b => {
+          const on = b.id === block?.id;
+          return (
+            <button key={b.id} data-testid="preview-block" data-current={on || undefined} onClick={() => { setBlockId(b.id); setIndex(0); }} style={{
+              flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: '1px solid #d6c8b0', cursor: 'pointer', textAlign: 'left',
+              background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
+            }}>
+              <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
+              <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
+                {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', color: '#444', fontSize: 13, flexShrink: 0 }}>
+          {scenes.length > 0 ? (<>
+            <button onClick={() => go(at - 1)} disabled={at === 0} style={navBtn} title="Предыдущий (←)">←</button>
+            <span data-testid="preview-counter">{at + 1} / {scenes.length}</span>
+            <button onClick={() => go(at + 1)} disabled={at >= scenes.length - 1} style={navBtn} title="Следующий (→)">→</button>
+          </>) : <span>В этом блоке нет слайдов</span>}
+          <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>← → слайды, ↑ ↓ блоки · ученики этого не видят</span>
+        </div>
+        <div ref={hostRef} style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '0 12px 12px' }}>
+          {scene && width > 0 && (
+            <div style={{ width, boxShadow: '0 1px 6px rgba(0,0,0,0.15)', background: '#fff' }}>
+              <SlidePlayer key={scene.id} scene={scene} resolveMedia={resolve} role="teacher" revealed={nothingRevealed} canDrag={false} width={width} />
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ width: 'min(260px, 24vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e0d4c0', background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {block?.task && <div>
+          <div style={noteLabel}>Задание</div>
+          <div data-testid="preview-task" style={noteText}>{block.task}</div>
+        </div>}
+        <div>
+          <div style={noteLabel}>Заметка учителю</div>
+          <div data-testid="preview-note" style={noteText}>{note || 'Здесь заметки нет.'}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
