@@ -11,6 +11,7 @@ import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
 import { SharedBoard } from './SharedBoard';
 import { Board } from './slides/Board';
+import { NAME_CARD_BG } from './speaking';
 import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
 import { forgetProfile, profileNames, profiles, saveProfileAvatar, saveProfileNames, enterProfile } from './profiles';
 import { socket, myName, ownName, lessonId, isBoardOnly, myBoardRoom, refreshNick, setName, setLessonId } from './socket';
@@ -31,26 +32,28 @@ function MicControl({ enabled }: { enabled: boolean }) {
   return null;
 }
 
-function SelfPreview() {
-  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const localTrackRef = tracks.find(t => t.participant.isLocal);
-  const selfAvatar = useAvatarUrl(myName); // without video: own avatar (or the default one)
+/** In the class before the lesson: the teacher on top — their camera, or their avatar */
+function TeacherPreview() {
+  const tracks = useTracks([Track.Source.Camera]);
+  const teacherTrack = tracks.find(t => t.participant.identity === 'Teacher' && !t.publication?.isMuted);
+  const teacherAvatar = useAvatarUrl('Teacher');
+  const hasVideo = !!teacherTrack;
 
   return (
-    <div style={{
+    <div data-testid="teacher-preview" style={{
       position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
       width: 200, aspectRatio: '4/3', zIndex: 10,
       borderRadius: 8, overflow: 'hidden',
       boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-      background: '#222',
+      background: hasVideo ? '#222' : NAME_CARD_BG,
     }}>
-      {localTrackRef && !localTrackRef.publication?.isMuted
-        ? <VideoTrack trackRef={localTrackRef} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+      {hasVideo
+        ? <VideoTrack trackRef={teacherTrack} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
         : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 14, boxSizing: 'border-box' }}>
-            {selfAvatar && <img src={selfAvatar} alt="" data-testid="self-avatar" style={{ height: '62%' }} />}
+            {teacherAvatar && <img src={teacherAvatar} alt="" data-testid="teacher-avatar" style={{ height: '62%' }} />}
           </div>}
-      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
-        {ownName}
+      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, pointerEvents: 'none', ...(hasVideo ? { color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)' } : { color: '#444', fontWeight: 'bold' }) }}>
+        Учитель
       </div>
     </div>
   );
@@ -60,6 +63,8 @@ type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
 
 interface LessonState {
   stage: Stage;
+  /** Before the lesson: the teacher let those seated go to their desks */
+  atDesks?: boolean;
   /** Who may show video in this lesson; students only when 'all' */
   videoMode?: 'all' | 'teacherSees' | 'teacher' | 'none';
   timerEndsAt: number | null;
@@ -200,7 +205,7 @@ function ProfileNames({ onNick }: { onNick: (nick: string) => void }) {
       </label>
       <label style={{ fontSize: 13, color: 'var(--text-h)', display: 'flex', flexDirection: 'column', gap: 3 }}>
         Ник для одноклассников
-        <input data-testid="nick" value={names.nick} maxLength={60} onChange={e => change('nick', e.target.value)} style={field} />
+        <input data-testid="nick" value={names.nick} maxLength={20} onChange={e => change('nick', e.target.value)} style={field} />
       </label>
     </div>
   );
@@ -385,7 +390,8 @@ export default function App() {
 
   const students = lessonState.participants.filter(p => p.role === 'student');
   const showDesk = livekit && lessonState.stage === 'pairs';
-  const showFours = livekit && lessonState.stage === 'fours';
+  const atDesk = !!livekit && !!lessonState.atDesks && !!livekit.room.split(':')[1]?.startsWith('fours-');
+  const showFours = livekit && (lessonState.stage === 'fours' || atDesk);
   const showGroup = livekit && lessonState.stage === 'group';
   const showIndividual = livekit && lessonState.stage === 'individual';
   // A saved seating without this student in it
@@ -511,7 +517,7 @@ export default function App() {
           ? <strong data-testid="after-lesson">
               Урок окончен. Учитель покинул занятие. Можно поболтать ещё {Math.floor(afterLeft / 60)}:{String(afterLeft % 60).padStart(2, '0')}
             </strong>
-          : <strong>{STAGE_LABELS[lessonState.stage]}</strong>}
+          : <strong data-testid="stage-label">{atDesk ? 'До начала урока: вы за своим столом' : STAGE_LABELS[lessonState.stage]}</strong>}
         {demoLeft !== null && demoLeft <= 300 && (
           <span data-testid="demo-ending" style={{ color: '#b9770e', fontSize: 13 }}>
             Демо-урок закончится через {Math.floor(demoLeft / 60)}:{String(demoLeft % 60).padStart(2, '0')}
@@ -592,9 +598,9 @@ export default function App() {
                   </div>
                   <div style={{ flex: 1, minHeight: 0 }}><IndividualLayout room={livekit.room} mediaControls={mediaControls} leaveButton={leaveButton} /></div>
                 </div>
-              : lessonState.stage === 'waiting'
+              : lessonState.stage === 'waiting' && !atDesk
               ? <div style={{ height: '100%', position: 'relative' }}>
-                  <SelfPreview />
+                  <TeacherPreview />
                   <SeatingMap seats={seats} />
                 </div>
               : !showGroup && livekit.room.endsWith(':main-room') && !seats.some(s => s.occupant === myName)
@@ -606,7 +612,7 @@ export default function App() {
                 : showIndividual
                   ? <IndividualLayout room={livekit.room} slides={slides} />
                   : showFours
-                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} slides={slides} noTeacher={afterLeft !== null} />
+                  ? <FoursLayout room={livekit.room} groupSeats={groupSeats} slides={slides} noTeacher={afterLeft !== null} showTeacher={atDesk} />
                   : showDesk
                     ? <DeskLayout room={livekit.room} slides={slides} />
                     : <VideoRoom />

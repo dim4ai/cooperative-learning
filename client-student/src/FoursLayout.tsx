@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useTracks, VideoTrack } from '@livekit/components-react';
+import { useParticipants, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { WorkBoard, type StudentSlides } from './LessonSlides';
 import { shownName, socket } from './socket';
@@ -12,6 +12,8 @@ interface Props {
   slides: StudentSlides;
   /** After-lesson chat: no teacher to call */
   noTeacher?: boolean;
+  /** Before the lesson the teacher comes only openly: shown even without a camera */
+  showTeacher?: boolean;
 }
 
 function CamTile({ identity, label }: { identity: string | null; label: string }) {
@@ -21,25 +23,27 @@ function CamTile({ identity, label }: { identity: string | null; label: string }
   return (
     <div style={{
       width: '100%', aspectRatio: '4/3', flexShrink: 0,
-      position: 'relative', background: '#222', borderRadius: 6, overflow: 'hidden',
+      position: 'relative', background: track ? '#222' : 'var(--board-margin, #e9ecef)', borderRadius: 6, overflow: 'hidden',
     }}>
       {track
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : identity
           ? <NameCard name={label} identity={identity} />
-          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 12 }}>—</div>
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a89878', fontSize: 12 }}>—</div>
       }
       <SpeakingRing identity={identity} />
-      <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
+      {track && <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
         {label}
-      </div>
+      </div>}
     </div>
   );
 }
 
-export function FoursLayout({ room, groupSeats, slides, noTeacher }: Props) {
+export function FoursLayout({ room, groupSeats, slides, noTeacher, showTeacher }: Props) {
   const subscribedTracks = useTracks([Track.Source.Camera]);
-  const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher');
+  const teacher = subscribedTracks.find(t => t.participant.identity === 'Teacher' && !t.publication?.isMuted);
+  // the teacher came to the desk: they see it, camera or not
+  const teacherHere = useParticipants().some(p => p.identity === 'Teacher') && !!showTeacher;
   const [calling, setCalling] = useState(false);
   const callBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -94,7 +98,11 @@ export function FoursLayout({ room, groupSeats, slides, noTeacher }: Props) {
                 <VideoTrack trackRef={teacher} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 <div style={{ position: 'absolute', bottom: 3, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>Учитель</div>
               </div>
-            : null
+            : teacherHere
+              ? <div data-testid="teacher-here" style={{ width: '100%', flexShrink: 0, borderRadius: 6, overflow: 'hidden', aspectRatio: '4/3' }}>
+                  <NameCard name="Учитель" identity="Teacher" />
+                </div>
+              : null
           }
         </div>
         <CamTile identity={seat(1, 1)?.occupant ?? null} label={shownName(seat(1, 1)?.occupant ?? '—')} />

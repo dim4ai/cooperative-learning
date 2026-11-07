@@ -335,6 +335,7 @@ interface LessonRuntime {
   videoMode: VideoMode; // from the DB, fixed for the lesson
   teacherId: number | null; // owner, for the per-teacher limit
   stage: Stage;
+  atDesks: boolean;                // before the lesson: the teacher let those seated go to their fours
   timerEndsAt: number | null;
   participants: Map<string, Participant>;
   seats: Seat[];
@@ -493,6 +494,7 @@ function demoEndInfo(demo: DemoRecord) {
 
 /** The simulated class comes in by itself: nothing here is connected to anybody */
 function startBots(code: string, lesson: LessonRuntime) {
+  lesson.atDesks = false; // the simulated class waits in the room, as its script expects
   createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
   const bots = new BotRun({
@@ -583,6 +585,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     videoMode: 'all',
     teacherId,
     stage: 'waiting',
+    atDesks: true, // those seated wait at their desks until the teacher calls everyone in
     timerEndsAt: null,
     participants: new Map(),
     seats: [],
@@ -666,7 +669,7 @@ function roomOf(code: string, lesson: LessonRuntime, p: Participant): string {
   const seat = lesson.seats.find(s => s.occupant === p.name);
   const base = isNewcomer(lesson, p) || lesson.stage === 'individual' ? `individual-${p.name}`
     : lesson.stage === 'pairs' && seat ? `pair-g${seat.groupIndex}-r${seat.row}`
-    : lesson.stage === 'fours' && seat ? `fours-${seat.groupIndex + 1}` : 'main-room';
+    : (lesson.stage === 'fours' || lesson.atDesks) && seat ? `fours-${seat.groupIndex + 1}` : 'main-room';
   return roomName(code, base);
 }
 
@@ -705,9 +708,24 @@ async function settleSeats(code: string, lesson: LessonRuntime) {
     await sendMonitor(code, lesson, p);
   }
   if (changed.length) broadcastState(code, lesson);
+  await settleDesks(code, lesson);
+}
+
+/** Before the lesson the seated are at their desks: a change of seat is a change of room */
+async function settleDesks(code: string, lesson: LessonRuntime) {
+  if (!lesson.atDesks) return;
+  for (const p of lesson.participants.values()) if (p.role === 'student') await placeStudent(code, lesson, p);
+  broadcastState(code, lesson);
+}
+
+/** The teacher walked up to a desk and the class is called back: they come along */
+async function bringTeachersToMain(code: string, lesson: LessonRuntime) {
+  const room = roomName(code, 'main-room');
+  for (const id of socketsOf(lesson, 'teacher')) await sendToRoom(code, lesson, id, room);
 }
 
 const MAX_CAPACITY = MAX_STUDENTS_PER_LESSON;
+const MAX_NICK = 20;
 
 /** Whether this seat is kept for someone other than this student */
 function reservedForOther(lesson: LessonRuntime, seat: Seat, uuid: string | null): boolean {
@@ -778,6 +796,7 @@ function demoState(code: string) {
 function broadcastState(code: string, lesson: LessonRuntime) {
   const state = {
     stage: lesson.stage,
+    atDesks: lesson.atDesks,
     videoMode: lesson.videoMode,
     timerEndsAt: lesson.timerEndsAt,
     afterUntil: lesson.afterUntil,
@@ -858,6 +877,7 @@ const MAX_AFTER_LESSON_MINUTES = 15;
 async function startAfterLesson(code: string, lesson: LessonRuntime, minutes: number) {
   lesson.afterUntil = Date.now() + minutes * 60 * 1000;
   lesson.stage = 'fours';
+  lesson.atDesks = false;
   lesson.timerEndsAt = null;
   lesson.currentPoll = null;
   setMaterial(code, lesson, null);
@@ -938,12 +958,15 @@ function enterBlock(lesson: LessonRuntime, block: Block) {
 }
 
 async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
+  const wereAtDesks = lesson.atDesks;
   lesson.stage = stage;
+  lesson.atDesks = false;
   console.log(`[${code}] stage -> ${stage}`);
   if (stage === 'pairs') await assignPairs(code, lesson);
   else if (stage === 'fours') await assignFours(code, lesson);
   else if (stage === 'individual') await assignIndividual(code, lesson);
   else await sendAllToMain(code, lesson);
+  if (wereAtDesks) await bringTeachersToMain(code, lesson);
   broadcastState(code, lesson);
   lesson.bots?.onStage(stage);
   soloReached(code, stage);
@@ -1029,7 +1052,8 @@ const BOARD_MAX_OP_BYTES = 256 * 1024;
 
 /** Each slide or sheet (or block without any) keeps its own drawing, per room */
 function boardKey(lesson: LessonRuntime, room: string): string {
-  if (!lesson.block) return room;
+  // what was drawn at a desk before the lesson doesn't stay on the lesson's board
+  if (!lesson.block) return lesson.atDesks ? `${room}#before` : room;
   const scene = lesson.slides.active ? currentScene(lesson.material, lesson.slides) : null;
   return `${room}#${scene?.id ?? lesson.block}`;
 }
@@ -1521,6 +1545,7 @@ io.on('connection', async (socket) => {
       const capacity = Math.min(n, MAX_CAPACITY);
       createSeats(lesson, capacity);
       broadcastSeats(code, lesson);
+      settleDesks(code, lesson).catch(e => console.error('desks not settled:', e));
       console.log(`[${code}] capacity -> ${capacity} (${capacity / 4} groups)`);
     });
 
@@ -1534,6 +1559,7 @@ io.on('connection', async (socket) => {
       // Claim new seat if free
       if (target && !target.occupant) target.occupant = effectiveName;
       broadcastSeats(code, lesson);
+      settleDesks(code, lesson).catch(e => console.error('desks not settled:', e));
     });
 
     socket.on('clearSeat', (seatId: string) => {
@@ -1555,6 +1581,21 @@ io.on('connection', async (socket) => {
       // Was waiting for a seat, and the others are at work already
       const moved = [...lesson.participants.values()].find(p => p.name === studentName);
       if (!from && moved) { await placeStudent(code, lesson, moved); broadcastState(code, lesson); }
+    });
+
+    // Before the lesson: those seated wait at their desks, or everyone comes back to the class
+    socket.on('desks:set', async ({ on }: { on?: unknown } = {}) => {
+      if (role !== 'teacher' || lesson.stage !== 'waiting' || lesson.block || lesson.bots) return;
+      if (typeof on !== 'boolean' || on === lesson.atDesks) return;
+      lesson.atDesks = on;
+      console.log(`[${code}] at desks -> ${on}`);
+      for (const p of lesson.participants.values()) if (p.role === 'student') await placeStudent(code, lesson, p);
+      if (!on) {
+        await bringTeachersToMain(code, lesson);
+        // they were talking at their desks; now the teacher speaks
+        for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('muted');
+      }
+      broadcastState(code, lesson);
     });
 
     socket.on('setStage', async (stage: Stage) => {
@@ -1753,7 +1794,8 @@ io.on('connection', async (socket) => {
 
   }
 
-  const effectiveName = role === 'student' ? uniqueName(lesson, name, uuid) : name;
+  // a nick fits on a seat tile; the client is told if it was cut
+  const effectiveName = role === 'student' ? uniqueName(lesson, String(name).slice(0, MAX_NICK), uuid) : name;
   if (effectiveName !== name) socket.emit('myName', effectiveName);
   await finishJoin(effectiveName);
 });

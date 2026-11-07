@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 import { loadAvatar } from './avatars';
-import { profileNames, profileUuid } from './profiles';
+import { profileAvatar, profileNames, profileUuid } from './profiles';
 
 const params = new URLSearchParams(window.location.search);
 const boardOnly = params.get('boardonly') === '1';
@@ -39,7 +39,7 @@ export function setLessonId(code: string) {
 
 const auth = boardOnly
   ? (cb: (data: object) => void) => cb({ name: myName, role: 'board', boardRoom, lessonId })
-  : (cb: (data: object) => void) => cb({ name: myName, role: 'student', lessonId, avatar: loadAvatar(), uuid: profileUuid(ownName), teacherName: profileNames(ownName).teacherName });
+  : (cb: (data: object) => void) => cb({ name: myName, role: 'student', lessonId, avatar: ownName ? profileAvatar(ownName) : loadAvatar(), uuid: profileUuid(ownName), teacherName: profileNames(ownName).teacherName });
 
 export const socket = io(import.meta.env.VITE_API_URL, {
   auth,

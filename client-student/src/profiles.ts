@@ -67,6 +67,11 @@ export function saveProfileNames(name: string, names: { teacherName?: string; ni
   save(profiles().map(p => p.name === name ? { ...p, ...names } : p));
 }
 
+/** This profile's own avatar: with two students in one browser, the last pick must not become everyone's */
+export function profileAvatar(name: string): string | null {
+  return profiles().find(p => p.name === name)?.avatar ?? null;
+}
+
 export function saveProfileAvatar(name: string, avatar: string | null) {
   save(profiles().map(p => p.name === name ? { ...p, avatar } : p));
 }
