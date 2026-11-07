@@ -370,8 +370,11 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
     // Fit the page into the stage
     const stage = stageRef.current!
     const fit = () => {
-      const k = Math.max(0.05, Math.min(stage.clientWidth / W, stage.clientHeight / H))
-      fc.setDimensions({ width: Math.floor(W * k), height: Math.floor(H * k) })
+      // A local board matches nobody's page, so it needn't keep the shared proportions: it fills the stage
+      const k = Math.max(0.05, live.current.link ? Math.min(stage.clientWidth / W, stage.clientHeight / H) : stage.clientWidth / W)
+      fc.setDimensions(live.current.link
+        ? { width: Math.floor(W * k), height: Math.floor(H * k) }
+        : { width: stage.clientWidth, height: stage.clientHeight })
       fc.setZoom(k)
       setPageWidth(Math.floor(W * k))
     }

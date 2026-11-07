@@ -191,6 +191,8 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const isTarget = !!selected && seat.occupant !== selected && (!seat.occupant || (!readOnly && !waiting.includes(selected)));
               const individualRoom = seat.occupant ? `${lessonCode}:individual-${seat.occupant}` : null;
               const isSeatCalling = !!(individualRoom && callingRooms?.has(individualRoom));
+              // Someone on an added desk needs a place, so it keeps asking for attention
+              const pulsing = isSeatCalling || (seat.extra !== undefined && !!seat.occupant);
               const joinRoom = seat.extra !== undefined || joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
               const mark = seat.occupant ? marks?.[seat.occupant] : undefined;
               return (
@@ -203,8 +205,8 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                   }}
                   style={{
                     width: 160, height: 120,
-                    background: '#f5f5f5',
-                    border: isSeatCalling ? '2px solid #f39c12' : isTarget ? `2px dashed #4a4` : `1px solid #ccc`,
+                    background: '#fff',
+                    border: pulsing ? '2px solid #f39c12' : isTarget ? `2px dashed #4a4` : `1px solid #ccc`,
                     boxShadow: isSelected ? `0 0 0 3px ${color}` : 'none',
                     borderRadius: 6,
                     position: 'relative', overflow: 'hidden',
@@ -213,7 +215,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                     cursor: readOnly ? (seat.occupant && joinRoom && onJoinPair ? 'pointer' : 'default') : seat.occupant || isTarget ? 'pointer' : 'default',
                     transition: 'all 0.15s',
                     fontSize: 12, color: '#555',
-                    animation: isSeatCalling ? 'pairPulse 1.2s infinite' : 'none',
+                    animation: pulsing ? 'pairPulse 1.2s infinite' : 'none',
                   }}
                 >
                   {mark && <div data-testid={`mark-${mark}`} style={{

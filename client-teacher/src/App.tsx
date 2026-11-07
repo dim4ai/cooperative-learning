@@ -13,6 +13,7 @@ import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, typ
 import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
+import { StartLessonDialog } from './StartLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { PasswordInput } from './PasswordInput';
 import { StudentName, StudentNames, useStudentName } from './studentNames';
@@ -310,7 +311,7 @@ function StudentTile({ name: identity, color }: { name: string; color?: string }
   return (
     <div style={{
       width: 90,
-      background: '#f5f5f5',
+      background: '#fff',
       borderRadius: 6,
       padding: '8px 4px',
       textAlign: 'center',
@@ -430,6 +431,7 @@ export default function App() {
   useEffect(() => { if (!Object.keys(slides.understood.marks).length && !slides.understood.asking) setMapOpen(false); }, [slides.understood]);
 
   const [endDialog, setEndDialog] = useState(false);
+  const [startWarning, setStartWarning] = useState(false);
 
   // The solo demo's class works on the sample lesson, so it is open from the start
   const soloLoaded = useRef<string | null>(null);
@@ -571,6 +573,15 @@ export default function App() {
   }
 
   const students = state.participants.filter(p => p.role === 'student');
+  // An added desk isn't a place in the class yet
+  const unseated = students
+    .filter(p => !seats.some(s => s.occupant === p.name && s.extra === undefined))
+    .map(p => teacherNames[p.name] ?? p.name);
+  function startLesson() {
+    const blocks = slides.material?.blocks;
+    if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
+    else socket.emit('setStage', 'group');
+  }
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
   const currentBlockTitle = state.stage === 'waiting' ? undefined : slides.material?.blocks.find(b => b.id === slides.state.block)?.title;
 
@@ -634,11 +645,7 @@ export default function App() {
 
         {state.stage === 'waiting' ? (
           <button
-            onClick={() => {
-              const blocks = slides.material?.blocks;
-              if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
-              else socket.emit('setStage', 'group');
-            }}
+            onClick={() => { if (unseated.length || !slides.material) setStartWarning(true); else startLesson(); }}
             style={{
               marginTop: 12, padding: '10px 6px', borderRadius: 6, border: 'none',
               cursor: 'pointer', background: '#2ecc71', color: '#fff',
@@ -701,13 +708,19 @@ export default function App() {
         >
           Завершить урок
         </button>
+        {startWarning && <StartLessonDialog
+          names={unseated}
+          noLesson={!slides.material}
+          onStart={() => { setStartWarning(false); startLesson(); }}
+          onCancel={() => setStartWarning(false)}
+        />}
         {endDialog && <EndLessonDialog noChat={!!demo} onEnd={endLesson} onCancel={() => setEndDialog(false)} />}
       </div>
 
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
-        <div style={{ padding: '10px 16px', background: '#f8f8f8', borderBottom: '1px solid #eee', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '10px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>
           {state.stage === 'group' && livekit && !demo?.solo && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
@@ -744,7 +757,7 @@ export default function App() {
       {(demo?.solo || state.stage !== 'waiting') && (
         <div data-testid="right-panel" style={{
           width: 'min(270px, 26vw)', flexShrink: 0, padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
-          background: '#fbfbfd', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',
+          background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',
         }}>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {demo?.solo && <SoloGuide stage={state.stage} calls={Object.values(callNotes)} />}

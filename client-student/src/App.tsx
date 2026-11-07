@@ -14,7 +14,7 @@ import { Board } from './slides/Board';
 import { AVATARS, AvatarPicker, AvatarProvider, DEFAULT_AVATAR, loadAvatar, saveAvatar, useAvatarUrl } from './avatars';
 import { forgetProfile, profileNames, profiles, saveProfileAvatar, saveProfileNames, enterProfile } from './profiles';
 import { socket, myName, ownName, lessonId, isBoardOnly, myBoardRoom, refreshNick, setName, setLessonId } from './socket';
-import { MediaCheck, LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
+import { MediaCheck, LocalMediaSync, toggleStyle, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 
 function MicControl({ enabled }: { enabled: boolean }) {
@@ -205,6 +205,11 @@ function ProfileNames({ onNick }: { onNick: (nick: string) => void }) {
     </div>
   );
 }
+
+const roundToggle = (on: boolean): React.CSSProperties => ({
+  background: on ? '#27ae60' : '#e74c3c', color: '#fff', border: 'none', borderRadius: 20,
+  width: 36, height: 36, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+});
 
 function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: string; earlyCode: string; media: MediaPrefs; onMedia: (p: MediaPrefs) => void; onJoin: (code: string) => void }) {
   const [code, setCode] = useState(earlyCode); // came too early: no need to type it again
@@ -447,9 +452,58 @@ export default function App() {
     setJoinError('');
   }
 
+  const mediaControls = <>
+    {livekit && camAllowed && (newcomer
+      ? <button
+          onClick={() => setMedia({ ...media, camOn: !media.camOn })}
+          title={media.camOn ? 'Выключить камеру' : 'Включить камеру'}
+          style={{ ...toggleStyle(media.camOn), flex: 'none', width: '100%' }}
+        >
+          {media.camOn ? '📷 Камера вкл' : '📷 Камера выкл'}
+        </button>
+      : <button
+          onClick={() => setMedia({ ...media, camOn: !media.camOn })}
+          title={media.camOn ? 'Выключить камеру' : 'Включить камеру'}
+          style={roundToggle(media.camOn)}
+        >
+          📷
+        </button>
+    )}
+    {livekit && (newcomer
+      ? <button
+          onClick={() => setMicOn(v => !v)}
+          title={micOn ? 'Выключить микрофон' : 'Включить микрофон'}
+          style={{ ...toggleStyle(micOn), flex: 'none', width: '100%' }}
+        >
+          {micOn ? '🎤 Микрофон вкл' : '🔇 Микрофон выкл'}
+        </button>
+      : <button
+          onClick={() => setMicOn(v => !v)}
+          title={micOn ? 'Выключить микрофон' : 'Включить микрофон'}
+          style={roundToggle(micOn)}
+        >
+          {micOn ? '🎤' : '🔇'}
+        </button>
+    )}
+  </>;
+  const leaveButton = (
+    <button
+      onClick={leaveClass}
+      title="Выйти из класса"
+      style={{
+        fontSize: 13, padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
+        ...(newcomer
+          ? { border: '1px solid #eeb4ac', background: '#f8d7d3', color: '#a93226' }
+          : { border: '1px solid #ccc', background: '#fff', color: '#666' }),
+      }}
+    >
+      Выйти
+    </button>
+  );
+
   return (<AvatarProvider participants={lessonState.participants}>
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '8px 16px', background: '#f0f0f0', display: 'flex', gap: 16, alignItems: 'center' }}>
+      <div style={{ padding: '8px 16px', background: '#ece2d2', display: 'flex', gap: 16, alignItems: 'center' }}>
         <span style={{ color: connected ? 'green' : 'red', fontWeight: 'bold' }}>
           {connected ? '●' : '○'}
         </span>
@@ -468,64 +522,13 @@ export default function App() {
             {secondsLeft}s
           </span>
         )}
-        <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
+        {!newcomer && <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
           {students.length} уч.
-        </span>
+        </span>}
         {livekit && videoMode === 'teacherSees' && media.camOn && (
           <span data-testid="teacher-sees-you" style={{ color: '#888', fontSize: 12 }}>Вас видит только учитель</span>
         )}
-        {livekit && camAllowed && (
-          <button
-            onClick={() => setMedia({ ...media, camOn: !media.camOn })}
-            title={media.camOn ? 'Выключить камеру' : 'Включить камеру'}
-            style={{
-              background: media.camOn ? '#27ae60' : '#e74c3c',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 20,
-              width: 36,
-              height: 36,
-              fontSize: 18,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            📷
-          </button>
-        )}
-        {livekit && (
-          <button
-            onClick={() => setMicOn(v => !v)}
-            title={micOn ? 'Выключить микрофон' : 'Включить микрофон'}
-            style={{
-              background: micOn ? '#27ae60' : '#e74c3c',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 20,
-              width: 36,
-              height: 36,
-              fontSize: 18,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {micOn ? '🎤' : '🔇'}
-          </button>
-        )}
-        <button
-          onClick={leaveClass}
-          title="Выйти из класса"
-          style={{
-            fontSize: 13, padding: '6px 12px', borderRadius: 6, border: '1px solid #ccc',
-            background: '#fff', color: '#666', cursor: 'pointer',
-          }}
-        >
-          Выйти
-        </button>
+        {!newcomer && <>{mediaControls}{leaveButton}</>}
       </div>
 
       {poll && (
@@ -584,10 +587,10 @@ export default function App() {
             <LocalMediaSync camOn={media.camOn && camInClass} />
             {newcomer
               ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <div data-testid="newcomer" style={{ padding: 12, textAlign: 'center', background: '#fdf1d6', color: '#8a5a00', fontSize: 15 }}>
+                  <div data-testid="newcomer" style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #e8decd', color: '#5c4a2e', fontSize: 15 }}>
                     Вы пока не в классе: вас видит и слышит только учитель. Он подойдёт и определит ваше место
                   </div>
-                  <div style={{ flex: 1, minHeight: 0 }}><IndividualLayout room={livekit.room} /></div>
+                  <div style={{ flex: 1, minHeight: 0 }}><IndividualLayout room={livekit.room} mediaControls={mediaControls} leaveButton={leaveButton} /></div>
                 </div>
               : lessonState.stage === 'waiting'
               ? <div style={{ height: '100%', position: 'relative' }}>

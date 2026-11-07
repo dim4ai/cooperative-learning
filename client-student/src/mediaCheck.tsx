@@ -77,7 +77,7 @@ function useMicLevel(stream: MediaStream | null, enabled: boolean) {
   return level;
 }
 
-const toggleStyle = (on: boolean): CSSProperties => ({
+export const toggleStyle = (on: boolean): CSSProperties => ({
   flex: 1, fontSize: 14, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
   border: 'none', color: '#fff', background: on ? '#27ae60' : '#e74c3c',
 });

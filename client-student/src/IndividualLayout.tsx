@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
-import { NameCard, SpeakingRing } from './speaking';
+import { NameCard, NAME_CARD_BG, SpeakingRing } from './speaking';
 import { Track } from 'livekit-client';
 import { socket, ownName } from './socket';
 import { WorkBoard, type StudentSlides } from './LessonSlides';
+import { Board } from './slides/Board';
 
 interface Props {
   room: string;
   /** The work and its board; a newcomer has none yet and only talks to the teacher */
   slides?: StudentSlides;
+  /** Newcomer's screen: go under their own card and the teacher's */
+  mediaControls?: ReactNode;
+  leaveButton?: ReactNode;
 }
 
 function CamBox({ track, label, width = 200 }: { track: TrackReferenceOrPlaceholder; label: string; width?: number | string }) {
@@ -19,14 +23,14 @@ function CamBox({ track, label, width = 200 }: { track: TrackReferenceOrPlacehol
         ? <VideoTrack trackRef={track} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : <NameCard name={label} identity={track.participant.identity} />}
       <SpeakingRing identity={track.participant.identity} />
-      <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
+      {hasVideo && <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
         {label}
-      </div>
+      </div>}
     </div>
   );
 }
 
-export function IndividualLayout({ room, slides }: Props) {
+export function IndividualLayout({ room, slides, mediaControls, leaveButton }: Props) {
   const [calling, setCalling] = useState(false);
   const allTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
   const subscribedTracks = allTracks;
@@ -50,7 +54,7 @@ export function IndividualLayout({ room, slides }: Props) {
       title={calling ? 'Отменить вызов' : 'Позвать учителя'}
       style={{
         width: 60, height: 60, borderRadius: '50%', border: 'none', cursor: 'pointer', fontSize: 28,
-        background: calling ? '#f39c12' : '#2e2e3e',
+        background: calling ? '#f39c12' : '#eee',
         boxShadow: calling ? '0 0 0 4px #f39c1255' : 'none',
         transition: 'all 0.2s',
         animation: calling ? 'callPulse 1.2s infinite' : 'none',
@@ -79,19 +83,28 @@ export function IndividualLayout({ room, slides }: Props) {
   );
 
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, background: '#111', padding: 16, boxSizing: 'border-box' }}>
-      {localTrack && <CamBox track={localTrack} label={ownName} />}
-
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>{bell}</div>
-
-      {teacher
-        ? <CamBox track={teacher} label="Учитель" />
-        : <div style={{ width: 200, aspectRatio: '4/3', borderRadius: 8, background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: 13 }}>
-            Учитель
+    <div className="wait-page">
+      <div className="setup-left">
+        <div data-testid="newcomer-controls" style={{
+          margin: 'auto', width: 416, maxWidth: '100%',
+          display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '48px 16px', justifyItems: 'center', alignItems: 'start',
+        }}>
+          <div style={{ width: '100%' }}>{localTrack && <CamBox track={localTrack} label={ownName} width="100%" />}</div>
+          <div style={{ width: '100%' }}>
+            {teacher
+              ? <CamBox track={teacher} label="Учитель" width="100%" />
+              : <div style={{ width: '100%', aspectRatio: '4/3', borderRadius: 8, background: NAME_CARD_BG, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: 13 }}>
+                  Учитель
+                </div>
+            }
           </div>
-      }
-
-      <style>{pulse}</style>
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>{mediaControls}</div>
+          {leaveButton}
+        </div>
+      </div>
+      <div className="setup-right">
+        <div className="wait-board" data-testid="newcomer-board"><Board /></div>
+      </div>
     </div>
   );
 }
