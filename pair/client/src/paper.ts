@@ -18,7 +18,7 @@ export interface Sheet {
   borderColor: string
 }
 
-export const DEFAULT_SHEET: Sheet = { paper: 'grid-m', color: '#aebfd2', weight: 1, page: 'A4', landscape: false, borders: false, borderColor: '#dc2626' }
+export const DEFAULT_SHEET: Sheet = { paper: 'grid-m', color: '#aebfd2', weight: 1, page: 'A4', landscape: false, borders: false, borderColor: '#ea580c' }
 
 export const PAPERS: { value: Paper; label: string }[] = [
   { value: 'grid-m', label: 'Клетка' },

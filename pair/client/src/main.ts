@@ -1,12 +1,12 @@
 import './style.css'
-import { Board, isShape, throttle, type Tool } from './board'
+import { Board, isShape, throttle, type TextStyle, type Tool } from './board'
 import { Peers, type LinkState } from './peers'
 import type { PeerInfo } from './signaling'
 import { icons } from './icons'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
-import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS } from './paper'
+import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, type Sheet } from './paper'
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
@@ -49,6 +49,18 @@ const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea'
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
 const WIDTHS = [2, 4, 8]
 const SIZES = [16, 20, 24, 28, 36, 48, 64, 96]
+
+const PREFS_KEY = 'pair.prefs'
+type Prefs = { sheet?: Partial<Sheet>; color?: string; width?: number; fill?: string; text?: Partial<TextStyle> }
+
+function loadPrefs(): Prefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return {}
+  }
+}
 
 function savedName() {
   try {
@@ -373,18 +385,18 @@ async function lesson(entry: Entry, name: string) {
 
   const fontSel = el('select', { title: 'Шрифт', 'aria-label': 'Шрифт' }, FONTS.map((f) => `<option value="${f.value}" style="font-family:${f.value.replace(/"/g, '')}">${f.label}</option>`).join('')) as HTMLSelectElement
   const sizeSel = el('select', { title: 'Размер шрифта', 'aria-label': 'Размер шрифта' }, SIZES.map((s) => `<option>${s}</option>`).join('')) as HTMLSelectElement
-  fontSel.addEventListener('change', () => board.setTextStyle({ fontFamily: fontSel.value }))
-  sizeSel.addEventListener('change', () => board.setTextStyle({ fontSize: +sizeSel.value }))
+  fontSel.addEventListener('change', () => setText({ fontFamily: fontSel.value }))
+  sizeSel.addEventListener('change', () => setText({ fontSize: +sizeSel.value }))
   const boldBtn = btn(icons.bold, 'Жирный', () => {
-    board.setTextStyle({ fontWeight: board.text.fontWeight === 'bold' ? 'normal' : 'bold' })
+    setText({ fontWeight: board.text.fontWeight === 'bold' ? 'normal' : 'bold' })
     syncText()
   })
   const italicBtn = btn(icons.italic, 'Курсив', () => {
-    board.setTextStyle({ fontStyle: board.text.fontStyle === 'italic' ? 'normal' : 'italic' })
+    setText({ fontStyle: board.text.fontStyle === 'italic' ? 'normal' : 'italic' })
     syncText()
   })
   const underBtn = btn(icons.underline, 'Подчёркнутый', () => {
-    board.setTextStyle({ underline: !board.text.underline })
+    setText({ underline: !board.text.underline })
     syncText()
   })
   const texts = section('texts edit', fontSel, sizeSel, boldBtn, italicBtn, underBtn)
@@ -471,28 +483,28 @@ async function lesson(entry: Entry, name: string) {
     }
     head('Разлиновка')
     const papers = row('papers')
-    for (const p of PAPERS) choice(papers, p.label, sh.paper === p.value, () => board.setSheet({ paper: p.value }))
+    for (const p of PAPERS) choice(papers, p.label, sh.paper === p.value, () => setSheet({ paper: p.value }))
     head('Линии разметки')
     const colorsRow = row()
     for (const c of LINE_COLORS) {
-      const b = choice(colorsRow, '', sh.color === c.value, () => board.setSheet({ color: c.value }), 'swatch')
+      const b = choice(colorsRow, '', sh.color === c.value, () => setSheet({ color: c.value }), 'swatch')
       b.title = c.label
       b.setAttribute('aria-label', `Цвет линий: ${c.label}`)
       b.style.setProperty('--c', c.value)
     }
     const weights = row()
-    for (const w of LINE_WEIGHTS) choice(weights, w.label, sh.weight === w.value, () => board.setSheet({ weight: w.value }))
+    for (const w of LINE_WEIGHTS) choice(weights, w.label, sh.weight === w.value, () => setSheet({ weight: w.value }))
     head('Страницы')
     const sizes = row()
-    for (const p of PAGE_SIZES) choice(sizes, p.label, sh.page === p.value, () => board.setSheet({ page: p.value }))
-    choice(sizes, 'Книжная', !sh.landscape, () => board.setSheet({ landscape: false }))
-    choice(sizes, 'Альбомная', sh.landscape, () => board.setSheet({ landscape: true }))
+    for (const p of PAGE_SIZES) choice(sizes, p.label, sh.page === p.value, () => setSheet({ page: p.value }))
+    choice(sizes, 'Книжная', !sh.landscape, () => setSheet({ landscape: false }))
+    choice(sizes, 'Альбомная', sh.landscape, () => setSheet({ landscape: true }))
     const borders = el('label', { class: 'check' }, `<input type="checkbox"${sh.borders ? ' checked' : ''}> Показывать границы страниц`)
-    borders.querySelector('input')!.addEventListener('change', (e) => board.setSheet({ borders: (e.target as HTMLInputElement).checked }))
+    borders.querySelector('input')!.addEventListener('change', (e) => setSheet({ borders: (e.target as HTMLInputElement).checked }))
     pop.append(borders)
     const borderColors = row()
     for (const c of BORDER_COLORS) {
-      const b = choice(borderColors, '', sh.borderColor === c.value, () => board.setSheet({ borderColor: c.value, borders: true }), 'swatch')
+      const b = choice(borderColors, '', sh.borderColor === c.value, () => setSheet({ borderColor: c.value, borders: true }), 'swatch')
       b.title = `Границы: ${c.label}`
       b.setAttribute('aria-label', `Цвет границ: ${c.label}`)
       b.style.setProperty('--c', c.value)
@@ -627,8 +639,26 @@ async function lesson(entry: Entry, name: string) {
     menuBtn,
   )
 
+  // my settings stay in this browser: the sheet, colour, width, fill, text
+  let restored = false
+  function savePrefs() {
+    if (!restored) return
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ sheet: board.sheet, color: board.color, width: board.width, fill: board.fill, text: board.text }))
+    } catch {}
+  }
+  function setSheet(patch: Partial<Sheet>) {
+    board.setSheet(patch)
+    savePrefs()
+  }
+  function setText(patch: Partial<TextStyle>) {
+    board.setTextStyle(patch)
+    savePrefs()
+  }
+
   function pickColor(c: string) {
     board.setColor(c)
+    savePrefs()
     swatches.forEach((s, i) => s.classList.toggle('on', COLORS[i] === c))
     custom.value = c
     const own = !COLORS.includes(c)
@@ -637,17 +667,32 @@ async function lesson(entry: Entry, name: string) {
   }
   function pickWidth(w: number) {
     board.setWidth(w)
+    savePrefs()
     widthBtns.forEach((b, i) => b.classList.toggle('on', WIDTHS[i] === w))
   }
   function pickFill(c: string) {
     board.setFill(c)
+    savePrefs()
     fillBtn.style.setProperty('--c', c || 'transparent')
     fillBtn.classList.toggle('has', !!c)
     closePops()
   }
-  pickColor(COLORS[0])
-  pickWidth(WIDTHS[0])
-  syncText()
+  {
+    const prefs = loadPrefs()
+    const hex = (v: unknown) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)
+    if (prefs.sheet) board.setSheet(prefs.sheet, false) // until the lesson meets the teacher's sheet
+    pickColor(hex(prefs.color) ? prefs.color! : COLORS[0])
+    pickWidth(WIDTHS.includes(prefs.width!) ? prefs.width! : WIDTHS[0])
+    if (prefs.fill === '' || hex(prefs.fill)) pickFill(prefs.fill!)
+    const t = prefs.text ?? {}
+    if (FONTS.some((f) => f.value === t.fontFamily)) board.text.fontFamily = t.fontFamily!
+    if (SIZES.includes(t.fontSize!)) board.text.fontSize = t.fontSize!
+    if (t.fontWeight === 'bold' || t.fontWeight === 'normal') board.text.fontWeight = t.fontWeight
+    if (t.fontStyle === 'italic' || t.fontStyle === 'normal') board.text.fontStyle = t.fontStyle
+    if (typeof t.underline === 'boolean') board.text.underline = t.underline
+    syncText()
+    restored = true
+  }
 
   /** Shows only the top-bar sections that apply to the current tool and selection. */
   function refreshBar() {
@@ -992,6 +1037,8 @@ async function lesson(entry: Entry, name: string) {
           if (peer.teacher && !teacher && msg.on !== board.readOnly) lockedByTeacher(!!msg.on)
           return
       }
+      // the teacher's sheet wins when two boards meet
+      if (msg.op === 'sync' && teacher && !peer.teacher) delete msg.sheet
       board.apply(msg)
     },
     gone: (peer) => {
