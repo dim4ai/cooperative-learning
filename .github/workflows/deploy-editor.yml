@@ -1,0 +1,29 @@
+name: Deploy editor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client-editor/**'
+      - '.github/workflows/deploy-editor.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # the editor holds the original slide player; its copies in the lesson clients must match
+      - name: Check shared slide player copies are in sync
+        run: scripts/sync-slides.sh --check
+
+      - name: Build lesson editor
+        working-directory: client-editor
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy lesson editor
+        run: |
+          mkdir -p ~/co-learn/editor
+          rsync -a --delete client-editor/dist/ ~/co-learn/editor/
