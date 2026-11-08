@@ -6,7 +6,7 @@ import { icons } from './icons'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
-import { LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS } from './paper'
+import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS } from './paper'
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
@@ -490,6 +490,13 @@ async function lesson(entry: Entry, name: string) {
     const borders = el('label', { class: 'check' }, `<input type="checkbox"${sh.borders ? ' checked' : ''}> Показывать границы страниц`)
     borders.querySelector('input')!.addEventListener('change', (e) => board.setSheet({ borders: (e.target as HTMLInputElement).checked }))
     pop.append(borders)
+    const borderColors = row()
+    for (const c of BORDER_COLORS) {
+      const b = choice(borderColors, '', sh.borderColor === c.value, () => board.setSheet({ borderColor: c.value, borders: true }), 'swatch')
+      b.title = `Границы: ${c.label}`
+      b.setAttribute('aria-label', `Цвет границ: ${c.label}`)
+      b.style.setProperty('--c', c.value)
+    }
     pop.append(el('p', { class: 'pop-hint' }, 'Доска делится на страницы выбранного размера. В PDF сохраняются страницы, на которых что-то есть.'))
   })
   board.onSheet = () => refreshSheet()

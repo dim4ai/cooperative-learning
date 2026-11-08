@@ -15,9 +15,10 @@ export interface Sheet {
   page: PageSize
   landscape: boolean
   borders: boolean
+  borderColor: string
 }
 
-export const DEFAULT_SHEET: Sheet = { paper: 'grid-m', color: '#aebfd2', weight: 1, page: 'A4', landscape: false, borders: false }
+export const DEFAULT_SHEET: Sheet = { paper: 'grid-m', color: '#aebfd2', weight: 1, page: 'A4', landscape: false, borders: false, borderColor: '#dc2626' }
 
 export const PAPERS: { value: Paper; label: string }[] = [
   { value: 'grid-m', label: 'Клетка' },
@@ -38,6 +39,13 @@ export const LINE_COLORS = [
   { value: '#86efac', label: 'Зелёный' },
   { value: '#fca5a5', label: 'Красный' },
   { value: '#9ca3af', label: 'Серый' },
+]
+
+export const BORDER_COLORS = [
+  { value: '#dc2626', label: 'Красный' },
+  { value: '#ea580c', label: 'Оранжевый' },
+  { value: '#111827', label: 'Чёрный' },
+  { value: '#92400e', label: 'Коричневый' },
 ]
 
 export const LINE_WEIGHTS = [
@@ -72,6 +80,7 @@ export function validSheet(s: Partial<Sheet> | undefined): Sheet {
     page: PAGE_SIZES.some((p) => p.value === s.page) ? s.page! : d.page,
     landscape: !!s.landscape,
     borders: !!s.borders,
+    borderColor: BORDER_COLORS.some((c) => c.value === s.borderColor) ? s.borderColor! : d.borderColor,
   }
 }
 
@@ -184,7 +193,7 @@ export function renderPaper(ctx: CanvasRenderingContext2D, W: number, H: number,
   ctx.globalAlpha = 1
 }
 
-/** Dashed page borders with page numbers in the corner */
+/** Solid page borders in their own colour */
 function renderBorders(ctx: CanvasRenderingContext2D, W: number, H: number, sheet: Sheet, v: number[]) {
   const { w, h } = pageBox(sheet)
   const z = v[0]
@@ -193,10 +202,8 @@ function renderBorders(ctx: CanvasRenderingContext2D, W: number, H: number, shee
   const x1 = x0 + W / z
   const y1 = y0 + H / z
   ctx.save()
-  ctx.strokeStyle = '#64748b'
-  ctx.globalAlpha = 0.7
+  ctx.strokeStyle = sheet.borderColor
   ctx.lineWidth = 1.5
-  ctx.setLineDash([8, 6])
   ctx.beginPath()
   for (let x = Math.floor(x0 / w) * w; x <= x1; x += w) {
     const X = Math.round((x - x0) * z)
