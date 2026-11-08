@@ -1017,6 +1017,16 @@ async function lesson(entry: Entry, name: string) {
       t.append(shot)
       if (mirrored) t.classList.add('me')
       t.append(grip(t))
+      // hiding a tile keeps its sound: only the picture folds into a small label
+      const hide = el('button', { class: 'hide', title: 'Скрыть видео (звук останется)', 'aria-label': 'Скрыть видео' }, icons.eyeOff)
+      const show = el('button', { class: 'show', title: 'Показать видео', 'aria-label': 'Показать видео' }, icons.eye)
+      const f = t
+      hide.addEventListener('click', (e) => {
+        e.stopPropagation()
+        setCollapsed(f, true)
+      })
+      f.addEventListener('click', () => f.classList.contains('collapsed') && setCollapsed(f, false))
+      t.append(hide, show)
       key === 'me' ? videos.append(t) : videos.prepend(t)
       sizeTile(t)
     }
@@ -1041,8 +1051,23 @@ async function lesson(entry: Entry, name: string) {
     return Math.max(120, Math.min(window.innerWidth - 200, (window.innerHeight - 160) * aspect))
   }
   function sizeTile(t: HTMLElement) {
+    t.classList.toggle('collapsed', hiddenKinds.has(tileKind(t)))
     const w = tileWidths[tileKind(t)]
     t.style.width = typeof w === 'number' && w >= 80 ? `${Math.min(w, maxTileWidth(t))}px` : ''
+  }
+  // hidden tiles stay hidden for this tab (a reload too), by kind
+  const HIDDEN_KEY = 'pair.tilesHidden'
+  const hiddenKinds = new Set<string>()
+  try {
+    for (const k of JSON.parse(sessionStorage.getItem(HIDDEN_KEY) ?? '[]')) hiddenKinds.add(String(k))
+  } catch {}
+  function setCollapsed(t: HTMLElement, on: boolean) {
+    t.classList.toggle('collapsed', on)
+    if (on) hiddenKinds.add(tileKind(t))
+    else hiddenKinds.delete(tileKind(t))
+    try {
+      sessionStorage.setItem(HIDDEN_KEY, JSON.stringify([...hiddenKinds]))
+    } catch {}
   }
   window.addEventListener('resize', () => videos.querySelectorAll<HTMLElement>('figure').forEach(sizeTile))
   function grip(t: HTMLElement) {
