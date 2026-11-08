@@ -34,7 +34,7 @@ jobs:
       - name: Deploy and restart signaling server
         run: |
           mkdir -p ~/co-learn/pair-server
-          rsync -a --delete --exclude node_modules pair/server/ ~/co-learn/pair-server/
+          rsync -a --delete --exclude node_modules --exclude .env pair/server/ ~/co-learn/pair-server/
           cd ~/co-learn/pair-server && npm ci --omit=dev
           pm2 restart co-learn-pair || pm2 start start.mjs --name co-learn-pair --cwd ~/co-learn/pair-server
           pm2 save

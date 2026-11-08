@@ -5,7 +5,6 @@
 import { Signaling, type PeerInfo } from './signaling'
 import { JsonChannel } from './channel'
 
-const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
 const CONNECT_TIMEOUT_MS = 15000
 
 export type LinkState = 'connecting' | 'connected' | 'failed'
@@ -31,9 +30,11 @@ class PeerLink {
     private polite: boolean,
     private sig: Signaling,
     local: MediaStream | null,
+    iceServers: RTCIceServer[],
     private on: PeerEvents,
   ) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    // STUN addresses come from the server's .env with the 'joined' message, never from the code
+    const pc = new RTCPeerConnection({ iceServers })
     this.pc = pc
     // negotiated: both sides create the same channel, no need to wait for ondatachannel
     const dc = pc.createDataChannel('board', { negotiated: true, id: 0, ordered: true })
@@ -126,6 +127,7 @@ class PeerLink {
 export class Peers {
   private links = new Map<string, PeerLink>()
   private myId = ''
+  private iceServers: RTCIceServer[] = []
   private sig: Signaling
 
   constructor(
@@ -135,7 +137,8 @@ export class Peers {
     private on: PeerEvents & { waiting: () => void; full: () => void; offline: () => void },
   ) {
     this.sig = new Signaling(room, 'main', name, {
-      joined: (id, peers) => {
+      joined: (id, peers, iceServers) => {
+        this.iceServers = iceServers
         // after a reconnect we get a new id: old links are dead
         for (const l of this.links.values()) this.drop(l.peer.id)
         this.myId = id
@@ -155,7 +158,7 @@ export class Peers {
 
   private link(p: PeerInfo) {
     this.drop(p.id)
-    this.links.set(p.id, new PeerLink(p, this.myId > p.id, this.sig, this.local, this.on))
+    this.links.set(p.id, new PeerLink(p, this.myId > p.id, this.sig, this.local, this.iceServers, this.on))
   }
 
   private drop(id: string) {

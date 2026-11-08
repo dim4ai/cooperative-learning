@@ -30,7 +30,7 @@ export const LIMITS = {
 const ROOM_RE = /^[a-z0-9]{6,32}$/
 const ROLES = new Set(['main', 'cam'])
 
-export function createServer({ log = console.log } = {}) {
+export function createServer({ log = console.log, iceServers = [] } = {}) {
   /** @type {Map<string, {peers: Map<string, any>, created: number}>} */
   const rooms = new Map()
   /** @type {Map<string, number>} */
@@ -135,7 +135,7 @@ export function createServer({ log = console.log } = {}) {
         const others = [...room.peers.values()].map((p) => ({ id: p.id, role: p.role, name: p.name }))
         room.peers.set(ws.id, ws)
         ws.room = msg.room
-        send(ws, { t: 'joined', id: ws.id, peers: others })
+        send(ws, { t: 'joined', id: ws.id, peers: others, iceServers })
         for (const other of room.peers.values()) {
           if (other !== ws) send(other, { t: 'peer-joined', id: ws.id, role, name })
         }

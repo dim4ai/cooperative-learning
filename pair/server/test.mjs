@@ -134,3 +134,68 @@ test('too many sockets from one ip are refused', async () => {
     for (const p of open) p.close()
   })
 })
+
+import dgram from 'node:dgram'
+import { createStunServer, bindingResponse, STUN_LIMITS } from './stun.mjs'
+
+function bindingRequest() {
+  const b = Buffer.alloc(20)
+  b.writeUInt16BE(0x0001, 0)
+  b.writeUInt32BE(0x2112a442, 4)
+  for (let i = 8; i < 20; i++) b[i] = (Math.random() * 256) | 0
+  return b
+}
+
+function parseXorMapped(res) {
+  let off = 20
+  while (off < res.length) {
+    const type = res.readUInt16BE(off)
+    const len = res.readUInt16BE(off + 2)
+    if (type === 0x0020) {
+      const port = res.readUInt16BE(off + 6) ^ 0x2112
+      const ip = [0, 1, 2, 3].map((i) => res[off + 8 + i] ^ [0x21, 0x12, 0xa4, 0x42][i]).join('.')
+      return { ip, port }
+    }
+    off += 4 + len + ((4 - (len % 4)) % 4)
+  }
+}
+
+test('stun answers with the address the request came from', async () => {
+  const stun = createStunServer({ port: 0, log: () => {} })
+  const port = await stun.listen()
+  const client = dgram.createSocket('udp4')
+  await new Promise((r) => client.bind(0, '127.0.0.1', r))
+  const req = bindingRequest()
+  const res = await new Promise((resolve, reject) => {
+    client.once('message', resolve)
+    client.send(req, port, '127.0.0.1')
+    setTimeout(() => reject(new Error('no stun answer')), 2000)
+  })
+  assert.equal(res.readUInt16BE(0), 0x0101)
+  assert.deepEqual(res.subarray(8, 20), req.subarray(8, 20))
+  assert.deepEqual(parseXorMapped(res), { ip: '127.0.0.1', port: client.address().port })
+  client.close()
+  await stun.close()
+})
+
+test('stun ignores garbage and rate-limits per ip', async () => {
+  assert.equal(bindingResponse(Buffer.from('hello world, not stun'), '1.2.3.4', 5), null)
+  const stun = createStunServer({ port: 0, log: () => {} })
+  const port = await stun.listen()
+  const client = dgram.createSocket('udp4')
+  let answers = 0
+  client.on('message', () => answers++)
+  await new Promise((r) => client.bind(0, '127.0.0.1', r))
+  for (let i = 0; i < STUN_LIMITS.burst * 3; i++) client.send(bindingRequest(), port, '127.0.0.1')
+  await new Promise((r) => setTimeout(r, 300))
+  assert.ok(answers >= STUN_LIMITS.burst && answers < STUN_LIMITS.burst + 15, `answers: ${answers}`)
+  client.close()
+  await stun.close()
+})
+
+test('stun encodes ipv6 addresses', () => {
+  const req = bindingRequest()
+  const res = bindingResponse(req, '2001:db8::1', 40000)
+  assert.equal(res.readUInt8(20 + 5), 0x02)
+  assert.equal(res.readUInt16BE(20 + 2), 20)
+})

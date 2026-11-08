@@ -4,7 +4,7 @@
 export type PeerInfo = { id: string; role: string; name: string }
 
 type Events = {
-  joined: (id: string, peers: PeerInfo[]) => void
+  joined: (id: string, peers: PeerInfo[], iceServers: RTCIceServer[]) => void
   peerJoined: (peer: PeerInfo) => void
   peerLeft: (id: string) => void
   signal: (from: string, data: unknown) => void
@@ -36,7 +36,7 @@ export class Signaling {
     }
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data)
-      if (msg.t === 'joined') this.on.joined(msg.id, msg.peers)
+      if (msg.t === 'joined') this.on.joined(msg.id, msg.peers, Array.isArray(msg.iceServers) ? msg.iceServers : [])
       else if (msg.t === 'peer-joined') this.on.peerJoined({ id: msg.id, role: msg.role, name: msg.name })
       else if (msg.t === 'peer-left') this.on.peerLeft(msg.id)
       else if (msg.t === 'signal') this.on.signal(msg.from, msg.data)
