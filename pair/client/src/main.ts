@@ -101,7 +101,7 @@ function joinScreen(entry: Entry) {
           : `<p class="hint code-line">Код занятия: <code class="code">${pretty(entry.room)}</code></p>`
       }
       <label>Ваше имя (будет отображаться на уроке)
-        <input id="name" maxlength="40" autocomplete="name" placeholder="Например, Анна Сергеевна">
+        <input id="name" maxlength="40" autocomplete="name" placeholder="${teacher ? 'Например, Анна Сергеевна' : 'Например, Павел'}">
       </label>
       <button class="primary" id="join">Войти</button>
       <p class="hint">Браузер спросит доступ к камере и микрофону. Без них доска тоже работает.</p>
@@ -300,7 +300,7 @@ async function lesson(entry: Entry, name: string) {
     return t
   }
   if (local?.getVideoTracks().length) {
-    const v = tile('me', label(name || 'Вы', teacher), true).querySelector('video')!
+    const v = tile('me', name || 'Вы', true).querySelector('video')!
     v.muted = true
     v.srcObject = local
   }
@@ -354,7 +354,7 @@ async function lesson(entry: Entry, name: string) {
       refreshStatus()
     },
     stream: (peer, stream) => {
-      const t = tile(peer.id, label(peer.name || (peer.teacher ? 'Учитель' : 'Ученик'), peer.teacher), false)
+      const t = tile(peer.id, peer.name || (peer.teacher ? 'Учитель' : 'Ученик'), false)
       const v = t.querySelector('video')!
       if (v.srcObject !== stream) v.srcObject = stream
       t.classList.toggle('novideo', !stream.getVideoTracks().length)
@@ -402,11 +402,6 @@ async function lesson(entry: Entry, name: string) {
     app.querySelector('#back')!.addEventListener('click', () => location.reload())
   })
   window.addEventListener('beforeunload', () => peers.leave())
-}
-
-/** Caption under a video: the name, with a mark for the teacher. */
-function label(name: string, teacher: boolean) {
-  return teacher && name !== 'Учитель' ? `${name} · учитель` : name
 }
 
 function escapeHtml(s: string) {
