@@ -1096,7 +1096,7 @@ export class Board {
       const ctx = cv.getContext('2d')!
       ctx.fillStyle = '#fff'
       ctx.fillRect(0, 0, cv.width, cv.height)
-      renderPaper(ctx, cv.width, cv.height, this.sheet, [scale, 0, 0, scale, -x0 * scale, -y0 * scale], scale)
+      renderPaper(ctx, cv.width, cv.height, this.sheet, [scale, 0, 0, scale, -x0 * scale, -y0 * scale], scale, true) // whole cells on every page
       const shot = c.toCanvasElement(scale / z, {
         left: x0 * z + v[4],
         top: y0 * z + v[5],
