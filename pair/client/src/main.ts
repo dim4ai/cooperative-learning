@@ -861,7 +861,7 @@ async function lesson(entry: Entry, name: string) {
       const pages = await pdfDialog(file)
       if (!pages?.length) return
       await board.placePages(pages)
-      say(`Вставлено страниц: ${pages.length}. Они в слое «Подложка», он заблокирован`, 5000)
+      say(`Вставлено страниц: ${pages.length}`)
     } catch (err) {
       console.warn(err)
       say('Не удалось открыть PDF')

@@ -63,8 +63,7 @@ export interface Layer {
 }
 
 export const BASE_LAYER = 'L1'
-/** Where imported PDF pages go: at the bottom, locked, so drawing over them doesn't move them */
-export const UNDERLAY = 'under'
+
 
 /** A remembered place on the board: what was in the middle of the screen, and the zoom */
 export type Bookmark = { id: string; name: string; x: number; y: number; z: number }
@@ -495,15 +494,6 @@ export class Board {
     if (objs.every((o) => o.selectable)) this.reselect(objs)
     this.canvas.requestRenderAll()
     this.onLayers()
-  }
-
-  /** The layer for imported pages: at the bottom, locked */
-  ensureUnderlay() {
-    if (!this.layers.some((l) => l.id === UNDERLAY)) {
-      this.layers.unshift({ id: UNDERLAY, name: 'Подложка', locked: true })
-      this.layersChanged()
-    }
-    return UNDERLAY
   }
 
   /**
@@ -1115,7 +1105,8 @@ export class Board {
 
   /**
    * Puts pictures (imported PDF pages) one per board page, down from the first empty
-   * page in the column on screen, into the locked underlay. One undo step removes them all.
+   * page in the column on screen, into the current layer like any picture, and selects
+   * them so they can be moved or cropped right away. One undo step removes them all.
    */
   async placePages(files: Blob[]) {
     const c = this.canvas
@@ -1125,7 +1116,6 @@ export class Board {
     const used = new Set(this.pagesWithContent().map((p) => p.join(',')))
     let row = Math.floor(center.y / h)
     while (used.has(`${col},${row}`)) row++
-    const layer = this.ensureUnderlay()
     const imgs: FabricImage[] = []
     for (const f of files) {
       const img = await FabricImage.fromURL(await downscale(f, 1800, 'image/jpeg'))
@@ -1137,10 +1127,11 @@ export class Board {
         const cx = col * w + w / 2
         const cy = (row + k) * h + h / 2
         img.set({ left: cx, top: cy, originX: 'center', originY: 'center', scaleX: s, scaleY: s })
-        ;(img as Obj).layer = layer
         c.add(img)
       })
     })
+    this.setTool('select')
+    this.reselect(imgs)
     // show the first imported page whole
     const zoom = Math.min(c.width / w, c.height / h) * 0.95
     this.lookAt(col * w + w / 2, row * h + h / 2, Math.min(5, Math.max(0.2, zoom)))
@@ -1335,9 +1326,7 @@ export class Board {
         // both sides may have made layers before meeting: keep mine, add theirs on top
         const have = new Set(this.layers.map((l) => l.id))
         const add = validLayers(op.layers).filter((l) => !have.has(l.id))
-        const under = add.find((l) => l.id === UNDERLAY)
-        if (under) this.layers.unshift(under)
-        this.layers.push(...add.filter((l) => l !== under))
+        this.layers.push(...add)
         if (add.length) this.layersChanged(false)
       }
       if (op.op === 'sync' && op.bookmarks?.length) {

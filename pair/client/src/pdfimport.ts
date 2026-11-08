@@ -68,7 +68,7 @@ function chooseFile(): Promise<File | null> {
     const zone = h('div', { class: 'pdf-drop' })
     zone.append(
       h('p', { class: 'pdf-drop-title' }, 'Перетащите PDF-файл сюда'),
-      h('p', { class: 'muted' }, 'Потом можно будет выбрать страницы и обрезать поля. Страницы лягут по листам доски, в заблокированный слой «Подложка».'),
+      h('p', { class: 'muted' }, 'Потом можно будет выбрать страницы и обрезать поля. Страницы лягут по листам доски, как обычные картинки.'),
     )
     const input = h('input', { type: 'file', accept: 'application/pdf,.pdf', hidden: '' }) as HTMLInputElement
     const pick = h('button', { class: 'primary-sm' }, 'Выбрать файл…')
@@ -119,7 +119,8 @@ export async function pdfDialog(given?: File): Promise<Blob[] | null> {
   const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
   const doc = await task.promise
   const n = doc.numPages
-  const chosen = new Set<number>(Array.from({ length: Math.min(n, 30) }, (_, i) => i + 1))
+  // a short file is usually wanted whole; from a long one (a textbook) the teacher picks pages
+  const chosen = new Set<number>(n <= 10 ? Array.from({ length: n }, (_, i) => i + 1) : [])
   let current = 1
   let crop: Crop = { l: 0, t: 0, r: 1, b: 1 }
 
