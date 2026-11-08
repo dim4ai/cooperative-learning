@@ -34,8 +34,8 @@ const RULINGS: Record<Exclude<Paper, 'none'>, Ruling> = {
   'lines-s': { period: 30, rows: [[0, 1]] },
   'lines-m': { period: 44, rows: [[0, 1]] },
   'lines-l': { period: 64, rows: [[0, 1]] },
-  propis: { period: 60, rows: [[0, 1], [20, 0.5], [40, 1]], slant: { angle: 65, step: 28, alpha: 0.45 } },
-  calligraphy: { period: 80, rows: [[0, 0.6], [20, 1], [50, 1], [70, 0.6]], slant: { angle: 55, step: 56, alpha: 0.35 } },
+  propis: { period: 60, rows: [[0, 1], [20, 0.5], [40, 1]], slant: { angle: 65, step: 28, alpha: 0.85 } },
+  calligraphy: { period: 80, rows: [[0, 0.6], [20, 1], [50, 1], [70, 0.6]], slant: { angle: 55, step: 56, alpha: 0.75 } },
   dots: { dots: 24 },
 }
 
