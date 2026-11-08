@@ -1,0 +1,40 @@
+name: Deploy pair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pair/**'
+      - '.github/workflows/deploy-pair.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test signaling server
+        working-directory: pair/server
+        run: |
+          npm ci
+          npm test
+
+      - name: Build client
+        working-directory: pair/client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy client
+        run: |
+          mkdir -p ~/co-learn/pair
+          rsync -a --delete pair/client/dist/ ~/co-learn/pair/
+
+      # restarting only drops the "introductions" in progress; running lessons are browser-to-browser and keep going
+      - name: Deploy and restart signaling server
+        run: |
+          mkdir -p ~/co-learn/pair-server
+          rsync -a --delete --exclude node_modules pair/server/ ~/co-learn/pair-server/
+          cd ~/co-learn/pair-server && npm ci --omit=dev
+          pm2 restart co-learn-pair || pm2 start start.mjs --name co-learn-pair --cwd ~/co-learn/pair-server
+          pm2 save

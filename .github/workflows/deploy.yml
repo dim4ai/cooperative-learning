@@ -3,10 +3,12 @@ name: Deploy
 on:
   push:
     branches: [main]
-    # the landing page has its own deploy: changing it mustn't restart the server mid-lesson
+    # the landing page and pair have their own deploys: changing them mustn't restart the server mid-lesson
     paths-ignore:
       - 'landing/**'
       - '.github/workflows/deploy-landing.yml'
+      - 'pair/**'
+      - '.github/workflows/deploy-pair.yml'
 
 jobs:
   deploy:

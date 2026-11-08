@@ -1,0 +1,181 @@
+// Direct WebRTC links to every other participant ("perfect negotiation":
+// either side may start, collisions resolve themselves). No TURN on purpose —
+// see the server's header comment.
+
+import { Signaling, type PeerInfo } from './signaling'
+import { JsonChannel } from './channel'
+
+const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+const CONNECT_TIMEOUT_MS = 15000
+
+export type LinkState = 'connecting' | 'connected' | 'failed'
+
+export type PeerEvents = {
+  state: (peer: PeerInfo, state: LinkState) => void
+  stream: (peer: PeerInfo, stream: MediaStream) => void
+  channelOpen: (peer: PeerInfo, ch: JsonChannel) => void
+  message: (peer: PeerInfo, msg: any) => void
+  gone: (peer: PeerInfo) => void
+}
+
+class PeerLink {
+  readonly pc: RTCPeerConnection
+  readonly channel: JsonChannel
+  private makingOffer = false
+  private ignoreOffer = false
+  private timer: number
+  private restarted = false
+
+  constructor(
+    readonly peer: PeerInfo,
+    private polite: boolean,
+    private sig: Signaling,
+    local: MediaStream | null,
+    private on: PeerEvents,
+  ) {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    this.pc = pc
+    // negotiated: both sides create the same channel, no need to wait for ondatachannel
+    const dc = pc.createDataChannel('board', { negotiated: true, id: 0, ordered: true })
+    this.channel = new JsonChannel(dc, (msg) => on.message(peer, msg))
+    dc.addEventListener('open', () => on.channelOpen(peer, this.channel))
+
+    if (local) for (const track of local.getTracks()) pc.addTrack(track, local)
+    else {
+      // still ask for the other side's camera and microphone
+      pc.addTransceiver('audio', { direction: 'recvonly' })
+      pc.addTransceiver('video', { direction: 'recvonly' })
+    }
+
+    pc.ontrack = ({ streams }) => streams[0] && on.stream(peer, streams[0])
+    pc.onicecandidate = ({ candidate }) => sig.send(peer.id, { candidate })
+    pc.onnegotiationneeded = async () => {
+      try {
+        this.makingOffer = true
+        await pc.setLocalDescription()
+        sig.send(peer.id, { description: pc.localDescription })
+      } catch (e) {
+        console.warn('negotiation', e)
+      } finally {
+        this.makingOffer = false
+      }
+    }
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState
+      if (s === 'connected') {
+        clearTimeout(this.timer)
+        on.state(peer, 'connected')
+      } else if (s === 'failed') {
+        if (!this.restarted) {
+          this.restarted = true
+          pc.restartIce()
+          this.armTimeout()
+        } else on.state(peer, 'failed')
+      } else if (s === 'disconnected' || s === 'connecting') on.state(peer, 'connecting')
+    }
+    on.state(peer, 'connecting')
+    this.timer = 0
+    this.armTimeout()
+  }
+
+  private armTimeout() {
+    clearTimeout(this.timer)
+    this.timer = window.setTimeout(() => {
+      if (this.pc.connectionState !== 'connected') this.on.state(this.peer, 'failed')
+    }, CONNECT_TIMEOUT_MS)
+  }
+
+  private inbox: Promise<void> = Promise.resolve()
+
+  /** Signals are applied strictly in arrival order: a candidate must not overtake its description. */
+  signal(data: any) {
+    this.inbox = this.inbox.then(() => this.handle(data))
+  }
+
+  private async handle(data: any) {
+    const pc = this.pc
+    try {
+      if (data.description) {
+        const d = data.description as RTCSessionDescriptionInit
+        const collision = d.type === 'offer' && (this.makingOffer || pc.signalingState !== 'stable')
+        this.ignoreOffer = !this.polite && collision
+        if (this.ignoreOffer) return
+        await pc.setRemoteDescription(d)
+        if (d.type === 'offer') {
+          await pc.setLocalDescription()
+          this.sig.send(this.peer.id, { description: pc.localDescription })
+        }
+      } else if (data.candidate) {
+        try {
+          await pc.addIceCandidate(data.candidate)
+        } catch (e) {
+          if (!this.ignoreOffer) throw e
+        }
+      }
+    } catch (e) {
+      console.warn('signal', e)
+    }
+  }
+
+  close() {
+    clearTimeout(this.timer)
+    this.pc.close()
+  }
+}
+
+export class Peers {
+  private links = new Map<string, PeerLink>()
+  private myId = ''
+  private sig: Signaling
+
+  constructor(
+    room: string,
+    name: string,
+    private local: MediaStream | null,
+    private on: PeerEvents & { waiting: () => void; full: () => void; offline: () => void },
+  ) {
+    this.sig = new Signaling(room, 'main', name, {
+      joined: (id, peers) => {
+        // after a reconnect we get a new id: old links are dead
+        for (const l of this.links.values()) this.drop(l.peer.id)
+        this.myId = id
+        if (peers.length === 0) on.waiting()
+        for (const p of peers) this.link(p)
+      },
+      peerJoined: (p) => this.link(p),
+      peerLeft: (id) => {
+        this.drop(id)
+        if (this.links.size === 0) on.waiting()
+      },
+      signal: (from, data) => this.links.get(from)?.signal(data),
+      full: () => on.full(),
+      offline: () => on.offline(),
+    })
+  }
+
+  private link(p: PeerInfo) {
+    this.drop(p.id)
+    this.links.set(p.id, new PeerLink(p, this.myId > p.id, this.sig, this.local, this.on))
+  }
+
+  private drop(id: string) {
+    const l = this.links.get(id)
+    if (!l) return
+    l.close()
+    this.links.delete(id)
+    this.on.gone(l.peer)
+  }
+
+  broadcast(msg: unknown) {
+    for (const l of this.links.values()) l.channel.send(msg)
+  }
+
+  broadcastVolatile(msg: unknown) {
+    for (const l of this.links.values()) l.channel.sendVolatile(msg)
+  }
+
+  leave() {
+    for (const id of [...this.links.keys()]) this.drop(id)
+    this.sig.close()
+  }
+}
