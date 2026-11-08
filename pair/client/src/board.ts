@@ -26,6 +26,7 @@ export type Tool =
   | 'pen'
   | 'marker'
   | 'eraser'
+  | 'broom'
   | 'line'
   | 'arrow'
   | 'rect'
@@ -111,6 +112,10 @@ export class Board {
       this.myAdds.push(o.id)
       this.onOp({ op: 'add', obj: this.serialize(o) })
     })
+    // the eraser draws a stroke that cuts through everything under it: the grid (page background) shows through
+    canvas.on('before:path:created', ({ path }) => {
+      if (this.tool === 'eraser') path.set({ stroke: '#000', globalCompositeOperation: 'destination-out' })
+    })
     canvas.on('object:removed', ({ target }) => {
       const o = target as Obj
       if (this.applying || o._pending || !o.id) return
@@ -150,16 +155,21 @@ export class Board {
     this.tool = t
     const c = this.canvas
     if (t !== 'select') c.discardActiveObject()
-    c.isDrawingMode = t === 'pen' || t === 'marker'
+    c.isDrawingMode = t === 'pen' || t === 'marker' || t === 'eraser'
     if (c.isDrawingMode) {
       const brush = new PencilBrush(c)
-      brush.color = t === 'marker' ? this.markerColor() : this.color
-      brush.width = t === 'marker' ? this.width * 5 : this.width
+      if (t === 'eraser') {
+        brush.color = 'rgba(148, 163, 184, 0.55)' // preview only; the finished stroke cuts (see before:path:created)
+        brush.width = Math.max(16, this.width * 5)
+      } else {
+        brush.color = t === 'marker' ? this.markerColor() : this.color
+        brush.width = t === 'marker' ? this.width * 5 : this.width
+      }
       c.freeDrawingBrush = brush
     }
     c.selection = t === 'select'
     c.defaultCursor = t === 'hand' ? 'grab' : t === 'select' ? 'default' : t === 'text' ? 'text' : 'crosshair'
-    c.hoverCursor = t === 'select' ? 'move' : t === 'eraser' ? 'pointer' : c.defaultCursor
+    c.hoverCursor = t === 'select' ? 'move' : t === 'broom' ? 'pointer' : c.defaultCursor
     c.forEachObject((o) => this.interactivity(o))
     c.requestRenderAll()
     this.onToolChange(t)
@@ -195,9 +205,15 @@ export class Board {
   }
 
   private interactivity(o: FabricObject) {
+    // eraser strokes are holes, not things: they can't be picked, moved or swept away
+    if (isCut(o)) {
+      o.selectable = false
+      o.evented = false
+      return
+    }
     const select = this.tool === 'select'
     o.selectable = select
-    o.evented = select || this.tool === 'eraser'
+    o.evented = select || this.tool === 'broom'
   }
 
   // ---------- pointer ----------
@@ -211,7 +227,7 @@ export class Board {
       return
     }
     const p = c.getScenePoint(ev)
-    if (this.tool === 'eraser') {
+    if (this.tool === 'broom') {
       this.erasing = true
       if (e.target) c.remove(e.target)
       return
@@ -490,6 +506,10 @@ export class Board {
     this.wrap.style.backgroundPosition = `${v[4]}px ${v[5]}px`
     this.onViewport()
   }
+}
+
+function isCut(o: FabricObject) {
+  return o.globalCompositeOperation === 'destination-out'
 }
 
 function snap45(o: Point, p: Point) {

@@ -9,6 +9,7 @@ export const icons = {
   pen: svg('<path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/><path d="M14.5 6.5l3 3"/>'),
   marker: svg('<path d="M9 15l-2.5 2.5V20h4l2.5-2.5"/><path d="M9 15l7.5-10.5a2 2 0 013 2L13 17.5z"/><path d="M4 21h16" opacity=".5"/>'),
   eraser: svg('<path d="M8 20h12"/><path d="M4.6 15.4l9.8-9.8a2 2 0 012.8 0l2.2 2.2a2 2 0 010 2.8L11 19H8z"/><path d="M9 11l5 5"/>'),
+  broom: svg('<path d="M20 4l-7.5 7.5"/><path d="M12.5 11.5l-3-1-6 6.5 4 4 6.5-6z"/><path d="M6 15.5l1.5 1.5M8.5 13l2.5 2.5"/>'),
   line: svg('<path d="M5 19L19 5"/>'),
   arrow: svg('<path d="M5 19L19 5"/><path d="M10 5h9v9"/>'),
   rect: svg('<rect x="4" y="6" width="16" height="12" rx="1"/>'),

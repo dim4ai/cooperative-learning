@@ -7,12 +7,14 @@ import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, typ
 
 const app = document.getElementById('app')!
 
-const TOOLS: { id: Tool | 'image'; title: string; key: string }[] = [
+type ToolId = Tool | 'image'
+const TOOLS: { id: ToolId; title: string; key: string }[] = [
   { id: 'select', title: 'Выбор', key: 'V' },
   { id: 'hand', title: 'Рука — двигать доску (или пробел)', key: 'H' },
   { id: 'pen', title: 'Ручка', key: 'P' },
   { id: 'marker', title: 'Маркер', key: 'M' },
-  { id: 'eraser', title: 'Ластик — провести по объекту', key: 'E' },
+  { id: 'eraser', title: 'Ластик — стирает там, где провели', key: 'E' },
+  { id: 'broom', title: 'Метёлка — убирает объект целиком', key: 'B' },
   { id: 'line', title: 'Линия (Shift — шаг 15°)', key: 'L' },
   { id: 'arrow', title: 'Стрелка', key: 'A' },
   { id: 'rect', title: 'Прямоугольник (Shift — квадрат)', key: 'R' },
@@ -21,6 +23,8 @@ const TOOLS: { id: Tool | 'image'; title: string; key: string }[] = [
   { id: 'text', title: 'Текст', key: 'T' },
   { id: 'image', title: 'Картинка (или вставить Ctrl+V)', key: 'I' },
 ]
+/** The left panel: single tools and groups that open sideways; a group shows its last used tool. */
+const PANEL: ToolId[][] = [['select'], ['hand'], ['pen', 'marker'], ['eraser', 'broom'], ['line', 'arrow'], ['rect', 'ellipse', 'triangle'], ['text'], ['image']]
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const WIDTHS = [2, 4, 8]
 
@@ -160,15 +164,64 @@ async function lesson(entry: Entry, name: string) {
   const board = new Board($<HTMLCanvasElement>('#board'), $('#wrap'))
   if (import.meta.env.DEV) Object.assign(window, { board })
 
-  // left: tools
+  // left: tools — single buttons and groups with a flyout to the right
   const tools = $('#tools')
-  for (const t of TOOLS) {
-    const b = el('button', { 'data-tool': t.id, title: `${t.title} · ${t.key}`, 'aria-label': t.title }, icons[t.id])
-    b.addEventListener('click', () => (t.id === 'image' ? $<HTMLInputElement>('#file').click() : board.setTool(t.id)))
-    tools.append(b)
+  const info = (id: ToolId) => TOOLS.find((t) => t.id === id)!
+  const pick = (id: ToolId) => (id === 'image' ? $<HTMLInputElement>('#file').click() : board.setTool(id))
+  const groups: { members: ToolId[]; current: ToolId; button: HTMLButtonElement; flyout: HTMLElement | null }[] = []
+  const closeFlyouts = () => groups.forEach((g) => g.flyout?.setAttribute('hidden', ''))
+  for (const members of PANEL) {
+    const wrap = el('div', { class: 'tool-group' })
+    const button = el('button') as HTMLButtonElement
+    const g = { members, current: members[0], button, flyout: null as HTMLElement | null }
+    const show = () => {
+      const t = info(g.current)
+      button.innerHTML = icons[t.id] + (members.length > 1 ? '<i class="more"></i>' : '')
+      button.title = `${t.title} · ${t.key}`
+      button.setAttribute('aria-label', t.title)
+      button.dataset.tool = t.id
+    }
+    show()
+    wrap.append(button)
+    if (members.length > 1) {
+      const flyout = el('div', { class: 'flyout panel', hidden: '' })
+      for (const id of members) {
+        const t = info(id)
+        const b = el('button', { 'data-tool': id, title: `${t.title} · ${t.key}`, 'aria-label': t.title }, icons[id])
+        b.addEventListener('click', () => {
+          g.current = id
+          show()
+          closeFlyouts()
+          pick(id)
+        })
+        flyout.append(b)
+      }
+      wrap.append(flyout)
+      g.flyout = flyout
+    }
+    button.addEventListener('click', () => {
+      const open = g.flyout && g.flyout.hidden
+      closeFlyouts()
+      if (g.current === 'image' || board.tool !== g.current) pick(g.current)
+      if (open) g.flyout!.hidden = false
+    })
+    Object.assign(g, { show })
+    groups.push(g)
+    tools.append(wrap)
   }
+  document.addEventListener('pointerdown', (e) => {
+    if (!(e.target as HTMLElement).closest('#tools')) closeFlyouts()
+  })
+  window.addEventListener('keydown', (e) => e.key === 'Escape' && closeFlyouts())
   board.onToolChange = (tool) => {
-    for (const b of tools.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tool === tool)
+    for (const g of groups) {
+      if (g.members.includes(tool) && g.current !== tool) {
+        g.current = tool
+        ;(g as unknown as { show: () => void }).show()
+      }
+      g.button.classList.toggle('on', g.members.includes(tool))
+    }
+    for (const b of tools.querySelectorAll<HTMLElement>('.flyout button')) b.classList.toggle('on', b.dataset.tool === tool)
   }
   board.onToolChange(board.tool)
 
@@ -216,10 +269,10 @@ async function lesson(entry: Entry, name: string) {
     if (e.ctrlKey || e.metaKey || e.altKey) return
     const editing = (board.canvas.getActiveObject() as { isEditing?: boolean } | undefined)?.isEditing
     if (editing || (e.target as HTMLElement).closest('input, textarea')) return
-    const t = TOOLS.find((x) => x.key === e.key.toUpperCase() || x.key === e.code.replace('Key', ''))
+    const t = TOOLS.find((x) => x.key === e.code.replace('Key', '') || x.key === e.key.toUpperCase())
     if (!t) return
-    if (t.id === 'image') $<HTMLInputElement>('#file').click()
-    else board.setTool(t.id)
+    closeFlyouts()
+    pick(t.id)
   })
 
   // pictures: file, paste, drop

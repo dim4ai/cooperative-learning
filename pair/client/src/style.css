@@ -418,8 +418,6 @@ button.primary:hover {
   }
   #tools {
     top: 10px;
-    max-height: calc(100% - 140px);
-    overflow-y: auto;
   }
   #status {
     bottom: 120px;
@@ -560,4 +558,34 @@ button.primary:hover {
   .code-block .copyline {
     flex-wrap: wrap;
   }
+}
+
+/* ---------- tool groups ---------- */
+
+.tool-group {
+  position: relative;
+}
+
+.tool-group > button {
+  position: relative;
+}
+
+/* small corner mark: this button opens more tools */
+.tool-group .more {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-bottom: 5px solid currentColor;
+  opacity: 0.45;
+}
+
+.flyout {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: -4px;
+  flex-direction: row;
+  white-space: nowrap;
 }
