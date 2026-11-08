@@ -21,7 +21,8 @@
     "@fontsource/neucha": "5.3.0",
     "@fontsource/pt-serif": "5.3.0",
     "@fontsource/rubik": "5.3.0",
-    "fabric": "7.4.0"
+    "fabric": "7.4.0",
+    "pdfjs-dist": "6.4.299"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

@@ -20,10 +20,11 @@ import {
 } from 'fabric'
 import { MARKS, markFromDrag, type MarkKind } from './marks'
 import { SHAPES, buildShape, dragBox, type ShapeKind } from './shapes'
-import { drawPaper, renderPaper, type Paper } from './paper'
+import { DEFAULT_SHEET, drawPaper, pageBox, pagesOf, renderPaper, validSheet, type Sheet } from './paper'
+import { makePdf, type PdfPage } from './pdfwrite'
 import { applyCrop, cropFrame, isCropped, uncrop } from './crop'
 
-FabricObject.customProperties = ['id', 'locked']
+FabricObject.customProperties = ['id', 'locked', 'layer']
 
 export type Tool =
   | 'select'
@@ -45,9 +46,25 @@ export type Op =
   | { op: 'mod'; obj: any }
   | { op: 'del'; id: string }
   | { op: 'order'; ids: string[] }
-  | { op: 'paper'; paper: Paper }
+  | { op: 'sheet'; sheet: Sheet }
   | { op: 'bookmarks'; list: Bookmark[] }
-  | { op: 'sync'; objs: any[]; paper?: Paper; bookmarks?: Bookmark[] }
+  | { op: 'layers'; list: Layer[] }
+  | { op: 'sync'; objs: any[]; sheet?: Sheet; bookmarks?: Bookmark[]; layers?: Layer[] }
+
+/**
+ * A layer: a named part of the board that sets what is above what (as in the lesson editor).
+ * The eraser cuts only inside its own layer. Shared: name, order, locked, hidden from the student.
+ */
+export interface Layer {
+  id: string
+  name: string
+  locked?: boolean
+  studentHidden?: boolean
+}
+
+export const BASE_LAYER = 'L1'
+/** Where imported PDF pages go: at the bottom, locked, so drawing over them doesn't move them */
+export const UNDERLAY = 'under'
 
 /** A remembered place on the board: what was in the middle of the screen, and the zoom */
 export type Bookmark = { id: string; name: string; x: number; y: number; z: number }
@@ -60,7 +77,7 @@ export interface TextStyle {
   fontFamily: string
 }
 
-type Obj = FabricObject & { id?: string; locked?: boolean; _pending?: boolean }
+type Obj = FabricObject & { id?: string; locked?: boolean; layer?: string; _pending?: boolean }
 type State = Record<string, any>
 type Change = { id: string; before: State | null; after: State | null }
 
@@ -100,7 +117,7 @@ export class Board {
   color = '#1f2937'
   width = 3
   fill = '' // '' = no fill
-  paper: Paper = 'grid-m'
+  sheet: Sheet = { ...DEFAULT_SHEET }
   text: TextStyle = { fontSize: 28, fontWeight: 'normal', fontStyle: 'normal', underline: false, fontFamily: 'Inter, system-ui, sans-serif' }
   /** the teacher has locked the board: only looking around and pointing */
   readOnly = false
@@ -120,6 +137,14 @@ export class Board {
   onCrop: () => void = () => {}
 
   bookmarks: Bookmark[] = []
+  layers: Layer[] = [{ id: BASE_LAYER, name: 'Слой 1' }]
+  activeLayer = BASE_LAYER
+  /** layers I hid on my screen only */
+  hiddenForMe = new Set<string>()
+  /** set by the page: the teacher sees layers hidden from the student (dimmed) */
+  isTeacher = false
+  onLayers: () => void = () => {}
+  onSheet: () => void = () => {}
   cropping: { img: FabricImage; frame: Obj } | null = null
 
   private applying = false
@@ -149,12 +174,18 @@ export class Board {
       fireRightClick: false,
     })
     this.canvas = canvas
+    const plain = canvas._renderObjects.bind(canvas)
+    canvas._renderObjects = (ctx: CanvasRenderingContext2D, objects: FabricObject[]) => this.renderLayers(ctx, objects, plain)
     this.resize()
     window.addEventListener('resize', () => this.resize())
 
     canvas.on('object:added', ({ target }) => {
       const o = target as Obj
       o.id ??= newId()
+      if (!this.applying && !o._pending) {
+        o.layer ??= this.targetLayer()
+        canvas.moveObjectTo(o, this.layerTopIndex(o.layer, o))
+      }
       this.interactivity(o)
       if (this.applying || o._pending) return
       const state = this.serialize(o)
@@ -165,6 +196,7 @@ export class Board {
     // the eraser draws a stroke that cuts through everything under it: the ruling (a separate canvas) shows through
     canvas.on('before:path:created', ({ path }) => {
       if (this.tool === 'eraser') path.set({ stroke: '#000', globalCompositeOperation: 'destination-out' })
+      ;(path as Obj).layer = this.targetLayer()
     })
     canvas.on('object:removed', ({ target }) => {
       const o = target as Obj
@@ -310,21 +342,205 @@ export class Board {
   }
 
   private interactivity(o: FabricObject) {
+    const L = this.layerOf(o as Obj)
+    const hidden = !!L && (this.hiddenForMe.has(L.id) || (!this.isTeacher && !!L.studentHidden))
+    o.visible = !hidden
     // eraser strokes are holes, not things: they can't be picked, moved or swept away
     if (isCut(o)) {
       o.selectable = false
       o.evented = false
       return
     }
+    const layerLocked = hidden || !!L?.locked
     if (this.tool === 'lock') {
       o.selectable = false
-      o.evented = true
+      o.evented = !layerLocked
       return
     }
-    const free = !(o as Obj).locked
+    const free = !(o as Obj).locked && !layerLocked
     o.selectable = free && this.tool === 'select'
     o.evented = free && (this.tool === 'select' || this.tool === 'broom')
   }
+
+  // ---------- layers ----------
+
+  private layerOf(o: Obj) {
+    return this.layers.find((l) => l.id === (o.layer ?? BASE_LAYER))
+  }
+
+  private layerOrder() {
+    return new Map(this.layers.map((l, i) => [l.id, i]))
+  }
+
+  /** z-index of an object's layer; objects of a layer not known yet go on top */
+  private rank(order: Map<string, number>, o: Obj) {
+    return order.get(o.layer ?? BASE_LAYER) ?? this.layers.length
+  }
+
+  /** Canvas index right above the last object of the layer (`except`: the object being placed) */
+  private layerTopIndex(layer: string, except?: FabricObject) {
+    const order = this.layerOrder()
+    const k = order.get(layer) ?? this.layers.length
+    let at = 0
+    this.canvas
+      .getObjects()
+      .filter((o) => o !== except)
+      .forEach((o, i) => {
+        if (this.rank(order, o as Obj) <= k) at = i + 1
+      })
+    return at
+  }
+
+  /** Objects sorted by layer again (stable inside a layer) */
+  private resort() {
+    const c = this.canvas
+    const order = this.layerOrder()
+    const sorted = c
+      .getObjects()
+      .map((o, i) => ({ o, i }))
+      .sort((a, b) => this.rank(order, a.o as Obj) - this.rank(order, b.o as Obj) || a.i - b.i)
+    sorted.forEach(({ o }, i) => c.moveObjectTo(o, i))
+  }
+
+  private editable(l: Layer) {
+    return !l.locked && !this.hiddenForMe.has(l.id) && (this.isTeacher || !l.studentHidden)
+  }
+
+  /** The layer new objects go to: the active one if it can be drawn on, otherwise the top one that can */
+  private targetLayer() {
+    const act = this.layers.find((l) => l.id === this.activeLayer)
+    if (act && this.editable(act)) return act.id
+    let t = [...this.layers].reverse().find((l) => this.editable(l))
+    if (!t) {
+      t = { id: 'L' + newId(), name: `Слой ${this.layers.length + 1}` }
+      this.layers.push(t)
+      this.layersChanged()
+    }
+    this.activeLayer = t.id
+    this.onLayers()
+    return t.id
+  }
+
+  private layersChanged(send = true) {
+    this.resort()
+    this.canvas.forEachObject((o) => this.interactivity(o))
+    const sel = this.canvas.getActiveObjects()
+    if (sel.some((o) => !o.selectable || !o.visible)) this.canvas.discardActiveObject()
+    this.canvas.requestRenderAll()
+    this.onLayers()
+    if (send) this.onOp({ op: 'layers', list: this.layers })
+  }
+
+  setActiveLayer(id: string) {
+    this.activeLayer = id
+    this.onLayers()
+  }
+
+  addLayer() {
+    const at = Math.max(0, this.layers.findIndex((l) => l.id === this.activeLayer)) + 1
+    const fresh: Layer = { id: 'L' + newId(), name: `Слой ${this.layers.length + 1}` }
+    this.layers.splice(at, 0, fresh)
+    this.activeLayer = fresh.id
+    this.layersChanged()
+    return fresh
+  }
+
+  patchLayer(id: string, patch: Partial<Layer>) {
+    this.layers = this.layers.map((l) => (l.id === id ? { ...l, ...patch } : l))
+    this.layersChanged()
+  }
+
+  /** dir +1: up (drawn above), -1: down */
+  moveLayer(id: string, dir: 1 | -1) {
+    const i = this.layers.findIndex((l) => l.id === id)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= this.layers.length) return
+    ;[this.layers[i], this.layers[j]] = [this.layers[j], this.layers[i]]
+    this.layersChanged()
+  }
+
+  /** Deletes a layer with its objects (the objects come back with Ctrl+Z, into the top layer) */
+  deleteLayer(id: string) {
+    if (this.layers.length < 2) return
+    const inside = this.canvas.getObjects().filter((o) => (o as Obj).layer === id || (!(o as Obj).layer && id === BASE_LAYER))
+    this.canvas.discardActiveObject()
+    this.tx(() => inside.length && this.canvas.remove(...inside))
+    this.layers = this.layers.filter((l) => l.id !== id)
+    if (this.activeLayer === id) this.activeLayer = this.layers.at(-1)!.id
+    this.layersChanged()
+  }
+
+  countInLayer(id: string) {
+    return this.canvas.getObjects().filter((o) => ((o as Obj).layer ?? BASE_LAYER) === id && !isCut(o)).length
+  }
+
+  /** Shows or hides a layer on my screen only */
+  toggleHidden(id: string) {
+    if (this.hiddenForMe.has(id)) this.hiddenForMe.delete(id)
+    else this.hiddenForMe.add(id)
+    this.layersChanged(false)
+  }
+
+  /** Moves the selected objects to the top of a layer */
+  moveSelectionToLayer(id: string) {
+    const objs = this.canvas.getActiveObjects() as Obj[]
+    if (!objs.length) return
+    this.canvas.discardActiveObject()
+    for (const o of objs) o.layer = id
+    this.resort()
+    this.commit(...objs)
+    this.onOp({ op: 'order', ids: this.ids() })
+    this.activeLayer = id
+    this.canvas.forEachObject((o) => this.interactivity(o))
+    if (objs.every((o) => o.selectable)) this.reselect(objs)
+    this.canvas.requestRenderAll()
+    this.onLayers()
+  }
+
+  /** The layer for imported pages: at the bottom, locked */
+  ensureUnderlay() {
+    if (!this.layers.some((l) => l.id === UNDERLAY)) {
+      this.layers.unshift({ id: UNDERLAY, name: 'Подложка', locked: true })
+      this.layersChanged()
+    }
+    return UNDERLAY
+  }
+
+  /**
+   * Draws the objects layer by layer. A layer with eraser strokes is drawn on its own
+   * canvas first, so the strokes cut through that layer only and not the layers below.
+   * The teacher sees layers hidden from the student dimmed.
+   */
+  private renderLayers(ctx: CanvasRenderingContext2D, objects: FabricObject[], plain: (ctx: CanvasRenderingContext2D, o: FabricObject[]) => void) {
+    const runs: { layer: string; objs: FabricObject[] }[] = []
+    for (const o of objects) {
+      const l = (o as Obj).layer ?? BASE_LAYER
+      const last = runs.at(-1)
+      if (last && last.layer === l) last.objs.push(o)
+      else runs.push({ layer: l, objs: [o] })
+    }
+    runs.forEach((run, i) => {
+      const dim = this.isTeacher && !!this.layers.find((l) => l.id === run.layer)?.studentHidden
+      const cuts = i > 0 && run.objs.some((o) => isCut(o) && o.visible)
+      if (!dim && !cuts) return plain(ctx, run.objs)
+      const off = (this.offscreen ??= document.createElement('canvas'))
+      if (off.width !== ctx.canvas.width || off.height !== ctx.canvas.height) {
+        off.width = ctx.canvas.width
+        off.height = ctx.canvas.height
+      }
+      const o2 = off.getContext('2d')!
+      o2.setTransform(1, 0, 0, 1, 0, 0)
+      o2.clearRect(0, 0, off.width, off.height)
+      o2.setTransform(ctx.getTransform())
+      plain(o2, run.objs)
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.globalAlpha = dim ? 0.45 : 1
+      ctx.drawImage(off, 0, 0)
+      ctx.restore()
+    })
+  }
+  private offscreen: HTMLCanvasElement | undefined
 
   /** In the pin tool, outline every object: red — pinned, blue — free. */
   private drawLockMarks(ctx: CanvasRenderingContext2D) {
@@ -696,7 +912,11 @@ export class Board {
 
   async paste(states = this.clip) {
     if (!states.length) return
-    const fresh = states.map((s) => ({ ...s, id: newId(), locked: false, left: s.left + 24, top: s.top + 24 }))
+    const target = this.targetLayer()
+    const fresh = states.map((s) => {
+      const l = this.layers.find((x) => x.id === s.layer)
+      return { ...s, id: newId(), locked: false, layer: l && this.editable(l) ? l.id : target, left: s.left + 24, top: s.top + 24 }
+    })
     this.clip = fresh // pasting again steps further
     const objs = await util.enlivenObjects<FabricObject>(fresh)
     const c = this.canvas
@@ -726,6 +946,7 @@ export class Board {
     // keep their mutual order: to the front one by one from the bottom, to the back from the top
     if (front) ordered.forEach((o) => c.bringObjectToFront(o))
     else ordered.reverse().forEach((o) => c.sendObjectToBack(o))
+    this.resort() // front and back within its own layer
     this.reselect(objs)
     this.onOp({ op: 'order', ids: this.ids() })
   }
@@ -765,6 +986,7 @@ export class Board {
     this.tx(() => {
       c.remove(...ordered)
       g = new Group(ordered)
+      ;(g as Obj).layer = (ordered.at(-1) as Obj).layer
       c.add(g)
     })
     this.reselect([g])
@@ -835,13 +1057,93 @@ export class Board {
     const ctx = out.getContext('2d')!
     ctx.fillStyle = '#fff'
     ctx.fillRect(0, 0, out.width, out.height)
-    renderPaper(ctx, out.width, out.height, this.paper, [scale, 0, 0, scale, -x0 * scale, -y0 * scale])
+    renderPaper(ctx, out.width, out.height, this.sheet, [scale, 0, 0, scale, -x0 * scale, -y0 * scale], scale)
     // the board on its own canvas, so the eraser's holes stay transparent
     const v = c.viewportTransform
     const z = v[0]
     const shot = c.toCanvasElement(scale / z, { left: x0 * z + v[4], top: y0 * z + v[5], width: w * z, height: h * z })
     ctx.drawImage(shot, 0, 0, out.width, out.height)
     return new Promise((r) => out.toBlob(r, 'image/png'))
+  }
+
+  /** Board pages (column, row) that have something on them, top to bottom, left to right */
+  pagesWithContent() {
+    const seen = new Map<string, [number, number]>()
+    for (const o of this.canvas.getObjects() as Obj[]) {
+      if (o._pending || isCut(o) || !o.visible) continue
+      for (const p of pagesOf(this.sheet, o.getBoundingRect())) seen.set(p.join(','), p)
+    }
+    return [...seen.values()].sort((a, b) => a[1] - b[1] || a[0] - b[0])
+  }
+
+  /** PDF of every page with something on it, each on its own sheet of the chosen size */
+  async exportPdf(onProgress?: (done: number, total: number) => void): Promise<Blob | null> {
+    const pages = this.pagesWithContent()
+    if (!pages.length) return null
+    const c = this.canvas
+    const { w, h, mmW, mmH } = pageBox(this.sheet)
+    const scale = Math.min(2, 2400 / Math.max(w, h)) // ~190 dpi on A4
+    const out: PdfPage[] = []
+    const v = c.viewportTransform
+    const z = v[0]
+    for (const [i, j] of pages) {
+      onProgress?.(out.length + 1, pages.length)
+      const x0 = i * w
+      const y0 = j * h
+      const cv = document.createElement('canvas')
+      cv.width = Math.round(w * scale)
+      cv.height = Math.round(h * scale)
+      const ctx = cv.getContext('2d')!
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, cv.width, cv.height)
+      renderPaper(ctx, cv.width, cv.height, this.sheet, [scale, 0, 0, scale, -x0 * scale, -y0 * scale], scale)
+      const shot = c.toCanvasElement(scale / z, {
+        left: x0 * z + v[4],
+        top: y0 * z + v[5],
+        width: w * z,
+        height: h * z,
+        filter: (o) => !(o as Obj)._pending,
+      })
+      ctx.drawImage(shot, 0, 0, cv.width, cv.height)
+      const blob = await new Promise<Blob | null>((r) => cv.toBlob(r, 'image/jpeg', 0.9))
+      if (!blob) continue
+      out.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width: cv.width, height: cv.height, mmW, mmH })
+      await new Promise((r) => setTimeout(r)) // let the page breathe on long boards
+    }
+    return makePdf(out)
+  }
+
+  /**
+   * Puts pictures (imported PDF pages) one per board page, down from the first empty
+   * page in the column on screen, into the locked underlay. One undo step removes them all.
+   */
+  async placePages(files: Blob[]) {
+    const c = this.canvas
+    const { w, h } = pageBox(this.sheet)
+    const center = this.viewCenter()
+    const col = Math.floor(center.x / w)
+    const used = new Set(this.pagesWithContent().map((p) => p.join(',')))
+    let row = Math.floor(center.y / h)
+    while (used.has(`${col},${row}`)) row++
+    const layer = this.ensureUnderlay()
+    const imgs: FabricImage[] = []
+    for (const f of files) {
+      const img = await FabricImage.fromURL(await downscale(f, 1800, 'image/jpeg'))
+      imgs.push(img)
+    }
+    this.tx(() => {
+      imgs.forEach((img, k) => {
+        const s = Math.min(w / img.width, h / img.height)
+        const cx = col * w + w / 2
+        const cy = (row + k) * h + h / 2
+        img.set({ left: cx, top: cy, originX: 'center', originY: 'center', scaleX: s, scaleY: s })
+        ;(img as Obj).layer = layer
+        c.add(img)
+      })
+    })
+    // show the first imported page whole
+    const zoom = Math.min(c.width / w, c.height / h) * 0.95
+    this.lookAt(col * w + w / 2, row * h + h / 2, Math.min(5, Math.max(0.2, zoom)))
   }
 
   // ---------- pictures ----------
@@ -966,18 +1268,32 @@ export class Board {
   }
 
   snapshot(): Op {
-    return { op: 'sync', objs: this.canvas.getObjects().filter((o) => !(o as Obj)._pending).map((o) => this.serialize(o)), paper: this.paper, bookmarks: this.bookmarks }
+    return {
+      op: 'sync',
+      objs: this.canvas.getObjects().filter((o) => !(o as Obj)._pending).map((o) => this.serialize(o)),
+      sheet: this.sheet,
+      bookmarks: this.bookmarks,
+      layers: this.layers,
+    }
   }
 
-  setPaper(p: Paper, send = true) {
-    this.paper = p
+  setSheet(patch: Partial<Sheet>, send = true) {
+    this.sheet = validSheet({ ...this.sheet, ...patch })
     this.updateView()
-    if (send) this.onOp({ op: 'paper', paper: p })
+    this.onSheet()
+    if (send) this.onOp({ op: 'sheet', sheet: this.sheet })
   }
 
   async apply(op: Op): Promise<void> {
     const c = this.canvas
-    if (op.op === 'paper') return this.setPaper(op.paper, false)
+    if (op.op === 'sheet') return this.setSheet(op.sheet, false)
+    if (op.op === 'layers') {
+      const list = validLayers(op.list)
+      if (!list.length) return
+      this.layers = list
+      if (!list.some((l) => l.id === this.activeLayer)) this.activeLayer = list.at(-1)!.id
+      return this.layersChanged(false)
+    }
     if (op.op === 'bookmarks') {
       this.bookmarks = op.list.filter(validBookmark)
       return this.onBookmarks()
@@ -986,6 +1302,7 @@ export class Board {
       const pos = new Map(op.ids.map((id, i) => [id, i]))
       const sorted = [...(c.getObjects() as Obj[])].sort((a, b) => (pos.get(a.id!) ?? 1e9) - (pos.get(b.id!) ?? 1e9))
       sorted.forEach((o, i) => c.moveObjectTo(o, i))
+      this.resort()
     } else if (op.op === 'del') {
       const o = this.find(op.id)
       this.known.delete(op.id)
@@ -1001,16 +1318,28 @@ export class Board {
       if (c.getActiveObjects().includes(o)) c.discardActiveObject()
       const props = { ...op.obj }
       for (const k of NOT_SYNCED_ON_MOD) delete props[k]
+      const prevLayer = (o as Obj).layer
       o.set(props)
       if (o instanceof IText) {
         o.initDimensions()
         this.onFont(o)
       }
       o.setCoords()
+      const layer = (o as Obj).layer
+      if (layer !== prevLayer) c.moveObjectTo(o, this.layerTopIndex(layer ?? BASE_LAYER, o)) // moved to another layer
       this.interactivity(o)
       this.known.set(op.obj.id, { ...(this.known.get(op.obj.id) ?? {}), ...op.obj })
     } else {
-      if (op.op === 'sync' && op.paper) this.setPaper(op.paper, false)
+      if (op.op === 'sync' && op.sheet) this.setSheet(op.sheet, false)
+      if (op.op === 'sync' && op.layers) {
+        // both sides may have made layers before meeting: keep mine, add theirs on top
+        const have = new Set(this.layers.map((l) => l.id))
+        const add = validLayers(op.layers).filter((l) => !have.has(l.id))
+        const under = add.find((l) => l.id === UNDERLAY)
+        if (under) this.layers.unshift(under)
+        this.layers.push(...add.filter((l) => l !== under))
+        if (add.length) this.layersChanged(false)
+      }
       if (op.op === 'sync' && op.bookmarks?.length) {
         const have = new Set(this.bookmarks.map((b) => b.id))
         const add = op.bookmarks.filter((b) => validBookmark(b) && !have.has(b.id))
@@ -1027,6 +1356,7 @@ export class Board {
       for (const o of objs as Obj[]) {
         if (this.find(o.id!)) continue
         c.add(o)
+        c.moveObjectTo(o, this.layerTopIndex(o.layer ?? BASE_LAYER, o))
         this.known.set(o.id!, this.serialize(o))
       }
       this.applying = false
@@ -1079,7 +1409,7 @@ export class Board {
   }
 
   private updateView() {
-    drawPaper(this.paperEl, this.paper, this.canvas.viewportTransform)
+    drawPaper(this.paperEl, this.sheet, this.canvas.viewportTransform)
     this.onViewport()
   }
 }
@@ -1087,6 +1417,13 @@ export class Board {
 const POINTER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="6" fill="#ef4444" fill-opacity=".85" stroke="#fff" stroke-width="2"/></svg>',
 )}") 10 10, crosshair`
+
+function validLayers(list: unknown): Layer[] {
+  if (!Array.isArray(list)) return []
+  return list
+    .filter((l) => l && typeof l.id === 'string' && typeof l.name === 'string')
+    .map((l) => ({ id: l.id, name: String(l.name).slice(0, 40), locked: !!l.locked, studentHidden: !!l.studentHidden }))
+}
 
 function validBookmark(b: Bookmark) {
   return b && typeof b.id === 'string' && typeof b.name === 'string' && [b.x, b.y, b.z].every(Number.isFinite) && b.z > 0
@@ -1104,14 +1441,14 @@ function snap15(o: { x: number; y: number }, p: Point) {
   return new Point(o.x + len * Math.cos(a), o.y + len * Math.sin(a))
 }
 
-async function downscale(file: Blob, max: number): Promise<string> {
+async function downscale(file: Blob, max: number, as?: 'image/jpeg'): Promise<string> {
   const bmp = await createImageBitmap(file)
   const k = Math.min(1, max / Math.max(bmp.width, bmp.height))
   const cv = document.createElement('canvas')
   cv.width = Math.round(bmp.width * k)
   cv.height = Math.round(bmp.height * k)
   cv.getContext('2d')!.drawImage(bmp, 0, 0, cv.width, cv.height)
-  const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+  const type = as ?? (file.type === 'image/png' ? 'image/png' : 'image/jpeg')
   let url = cv.toDataURL(type, 0.85)
   if (url.length > 1_500_000) url = cv.toDataURL('image/jpeg', 0.8) // big screenshots: png is wasteful
   return url

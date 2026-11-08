@@ -238,14 +238,44 @@ button.primary:hover {
   background: transparent;
 }
 
+/* own colour: a rainbow ring; the chosen colour fills its middle */
 #topbar .custom {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
+  position: relative;
+  width: 38px;
+  height: 38px;
   flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+#topbar .custom:hover {
+  background: #f3f4f6;
+}
+
+#topbar .custom::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--c, transparent) 0 4.5px, #fff 5px 6px, transparent 6.5px),
+    conic-gradient(#ef4444, #f59e0b, #eab308, #22c55e, #06b6d4, #3b82f6, #8b5cf6, #ec4899, #ef4444);
+}
+
+#topbar .custom.on::before {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #94a3b8;
+}
+
+#topbar .custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
 }
 
 #topbar .width i {
@@ -872,5 +902,324 @@ button.primary:hover {
 @media (hover: none) {
   #videos .shot {
     opacity: 0.8;
+  }
+}
+
+/* ---------- sheet and layers popovers ---------- */
+
+.pop-head {
+  margin: 8px 6px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.pop-head:first-child {
+  margin-top: 2px;
+}
+
+.pop-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 4px;
+}
+
+.pop-row.papers {
+  max-width: 300px;
+}
+
+.pop .chip {
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.pop .chip.on {
+  border-color: var(--accent);
+}
+
+.pop .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 2px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.layers-pop {
+  min-width: 330px;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 8px;
+}
+
+.layer.on {
+  background: var(--accent-soft);
+}
+
+.layer .layer-name {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  justify-content: start;
+  text-align: left;
+  padding: 0 8px;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.layer.on .layer-name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.layer button:not(.layer-name) {
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+
+.layer button:not(.layer-name) svg {
+  width: 18px;
+  height: 18px;
+}
+
+.layer button.on:not(.layer-name) {
+  color: var(--danger);
+  background: transparent;
+}
+
+.layer button.sure {
+  background: var(--danger);
+  color: #fff;
+}
+
+.layer-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  padding: 4px 6px;
+  margin: 0 4px;
+}
+
+/* ---------- dialog (PDF import) ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.modal-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  width: min(1000px, 100%);
+}
+
+.modal-head,
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+
+.modal-head {
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.modal-foot {
+  border-top: 1px solid var(--panel-border);
+}
+
+.modal .muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 8px 0 4px;
+}
+
+.modal .grow {
+  flex: 1;
+}
+
+.pdf-body {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 420px);
+  gap: 16px;
+  padding: 12px 16px;
+  min-height: 0;
+  height: min(70vh, 720px);
+}
+
+.pdf-thumbs {
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  align-content: start;
+  padding: 4px;
+}
+
+.pdf-thumb {
+  position: relative;
+  border: 2px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0;
+  background: #fff;
+  overflow: hidden;
+  opacity: 0.55;
+}
+
+.pdf-thumb.on {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.pdf-thumb.current {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.pdf-thumb canvas,
+.pdf-ph {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pdf-ph {
+  aspect-ratio: 1 / 1.414;
+  background: #f1f5f9;
+}
+
+.pdf-num {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #fff;
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.pdf-thumb.on .pdf-num {
+  background: var(--accent);
+}
+
+.pdf-side {
+  overflow-y: auto;
+}
+
+.pdf-view {
+  position: relative;
+  border: 1px solid var(--panel-border);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.pdf-view canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.pdf-crop {
+  position: absolute;
+  border: 2px dashed #f59e0b;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.35);
+  cursor: move;
+  pointer-events: none;
+}
+
+.pdf-crop.whole {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.pdf-view {
+  overflow: hidden;
+}
+
+.pdf-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.pdf-range input {
+  font: inherit;
+  font-size: 14px;
+  width: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.link-btn {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  padding: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.secondary,
+.primary-sm {
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 15px;
+  border: 1px solid var(--panel-border);
+  background: #fff;
+}
+
+.primary-sm {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary-sm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 700px) {
+  .pdf-body {
+    grid-template-columns: 1fr;
+    height: auto;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .pdf-thumbs {
+    overflow: visible;
   }
 }

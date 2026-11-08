@@ -6,14 +6,14 @@ import { icons } from './icons'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
-import { PAPERS } from './paper'
+import { LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS } from './paper'
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
 
 const app = document.getElementById('app')!
 
-type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot'
+type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot' | 'pdf'
 const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'select', title: 'Выбор', key: 'V' },
   { id: 'lock', title: 'Закрепление: щёлкните объект, чтобы закрепить или открепить его', key: 'K' },
@@ -29,6 +29,7 @@ const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'polygon', title: 'Многоугольник по точкам: щелчок — вершина; замкнуть — щелчок по первой точке, двойной щелчок или Enter', key: 'G' },
   { id: 'text', title: 'Текст', key: 'T' },
   { id: 'image', title: 'Картинка из файла (или вставить Ctrl+V, перетащить файл)', key: 'I' },
+  { id: 'pdf', title: 'PDF: выбрать страницы, обрезать поля и разложить по страницам доски (или перетащить файл)' },
   { id: 'snapshot', title: 'Снимок со своей камеры на доску (снимок с камеры собеседника — кнопкой на его видео)' },
 ]
 /** The left panel: single tools and groups that open sideways; a group shows its last used tool. */
@@ -42,7 +43,7 @@ const PANEL: { members: ToolId[]; title?: string }[] = [
   { members: WORD_MARKS, title: 'Разбор слова' },
   { members: [...SHAPE_KINDS, 'polygon'], title: 'Фигуры' },
   { members: ['text'] },
-  { members: ['image', 'snapshot'] },
+  { members: ['image', 'pdf', 'snapshot'] },
 ]
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
@@ -179,10 +180,12 @@ async function lesson(entry: Entry, name: string) {
     <aside id="side"></aside>
     <div id="status" hidden></div>
     <div id="toast" hidden></div>
-    <input id="file" type="file" accept="image/*" hidden>`
+    <input id="file" type="file" accept="image/*" hidden>
+    <input id="pdf" type="file" accept="application/pdf,.pdf" hidden>`
 
   const $ = <T extends HTMLElement>(s: string) => app.querySelector<T>(s)!
   const board = new Board($<HTMLCanvasElement>('#board'), $('#wrap'), $<HTMLCanvasElement>('#paper'))
+  board.isTeacher = teacher
   const laser = new Laser($<HTMLCanvasElement>('#laser'), (x, y) => board.sceneToScreen(x, y))
   if (import.meta.env.DEV) Object.assign(window, { board })
 
@@ -202,18 +205,23 @@ async function lesson(entry: Entry, name: string) {
     const pop = el('div', { class: 'pop panel', hidden: '' })
     document.body.append(pop)
     pops.push(pop)
-    button.addEventListener('click', () => {
-      const open = pop.hidden
-      closePops()
-      if (!open) return
+    const show = () => {
       pop.innerHTML = ''
       fill(pop)
       const r = button.getBoundingClientRect()
       pop.hidden = false
-      pop.style.top = `${r.bottom + pop.offsetHeight + 8 > innerHeight ? r.top - pop.offsetHeight - 6 : r.bottom + 6}px`
+      pop.style.top = `${r.bottom + pop.offsetHeight + 8 > innerHeight ? Math.max(8, r.top - pop.offsetHeight - 6) : r.bottom + 6}px`
       pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`
+    }
+    button.addEventListener('click', () => {
+      const open = pop.hidden
+      closePops()
+      if (open) show()
     })
-    return pop
+    /** redraws an open popover after its data changed */
+    return () => {
+      if (!pop.hidden) show()
+    }
   }
 
   // ---------- left: tools — single buttons and groups with a flyout to the right ----------
@@ -226,6 +234,7 @@ async function lesson(entry: Entry, name: string) {
   const pick = (id: ToolId) => {
     if (board.readOnly && id !== 'hand' && id !== 'pointer') return
     if (id === 'image') $<HTMLInputElement>('#file').click()
+    else if (id === 'pdf') $<HTMLInputElement>('#pdf').click()
     else if (id === 'snapshot') snapshot(null)
     else board.setTool(id)
   }
@@ -268,7 +277,7 @@ async function lesson(entry: Entry, name: string) {
     button.addEventListener('click', () => {
       const open = g.flyout && g.flyout.hidden
       closeFlyouts()
-      if (g.current === 'image' || g.current === 'snapshot' || board.tool !== g.current) pick(g.current)
+      if (g.current === 'image' || g.current === 'snapshot' || g.current === 'pdf' || board.tool !== g.current) pick(g.current)
       if (open) g.flyout!.hidden = false
     })
     groups.push(g)
@@ -277,7 +286,7 @@ async function lesson(entry: Entry, name: string) {
   document.addEventListener('pointerdown', (e) => {
     const t = e.target as HTMLElement
     if (!t.closest('#tools')) closeFlyouts()
-    if (!t.closest('.pop, #topbar')) closePops()
+    if (!t.closest('.pop, #topbar, #corner')) closePops()
   })
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return
@@ -321,7 +330,10 @@ async function lesson(entry: Entry, name: string) {
     b.style.setProperty('--c', c)
     return b
   })
-  const custom = el('input', { type: 'color', title: 'Свой цвет', class: 'custom' }) as HTMLInputElement
+  // own colour: a rainbow circle (the browser's colour picker opens from it); the chosen colour shows in its middle
+  const customWrap = el('label', { class: 'custom', title: 'Свой цвет' })
+  const custom = el('input', { type: 'color', 'aria-label': 'Свой цвет' }) as HTMLInputElement
+  customWrap.append(custom)
   custom.addEventListener('input', () => pickColor(custom.value))
   const pipette = btn(icons.pipette, 'Пипетка: взять цвет', async () => {
     const ED = (window as unknown as { EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper
@@ -336,7 +348,7 @@ async function lesson(entry: Entry, name: string) {
     }
   })
   board.onPipette = (c) => pickColor(c)
-  const colors = section('colors edit', ...swatches, custom, pipette)
+  const colors = section('colors edit', ...swatches, customWrap, pipette)
 
   const widthBtns = WIDTHS.map((w) =>
     btn(`<i style="width:${w + 2}px;height:${w + 2}px"></i>`, `Толщина ${w}`, () => pickWidth(w), 'width'),
@@ -441,18 +453,117 @@ async function lesson(entry: Entry, name: string) {
   for (const ev of ['object:modified', 'text:editing:exited', 'text:editing:entered'] as const) board.canvas.on(ev, () => placeSelbar())
 
   // right end: the sheet, the teacher's controls, the board menu
-  const paperBtn = btn(icons.grid, 'Разлиновка листа', () => {}, 'edit')
-  popover(paperBtn, (pop) => {
-    for (const p of PAPERS) {
-      const b = el('button', { class: 'wide' }, p.label)
-      b.classList.toggle('on', board.paper === p.value)
-      b.addEventListener('click', () => {
-        board.setPaper(p.value)
-        closePops()
-      })
-      pop.append(b)
+  const paperBtn = btn(icons.grid, 'Лист: разлиновка, линии, страницы', () => {}, 'edit')
+  const refreshSheet = popover(paperBtn, (pop) => {
+    const sh = board.sheet
+    const head = (t: string) => pop.append(el('p', { class: 'pop-head' }, t))
+    const row = (cls = '') => {
+      const r = el('div', { class: `pop-row ${cls}` })
+      pop.append(r)
+      return r
     }
+    const choice = (parent: HTMLElement, label: string, on: boolean, act: () => void, cls = 'chip') => {
+      const b = el('button', { class: cls }, label)
+      b.classList.toggle('on', on)
+      b.addEventListener('click', act)
+      parent.append(b)
+      return b
+    }
+    head('Разлиновка')
+    const papers = row('papers')
+    for (const p of PAPERS) choice(papers, p.label, sh.paper === p.value, () => board.setSheet({ paper: p.value }))
+    head('Линии разметки')
+    const colorsRow = row()
+    for (const c of LINE_COLORS) {
+      const b = choice(colorsRow, '', sh.color === c.value, () => board.setSheet({ color: c.value }), 'swatch')
+      b.title = c.label
+      b.setAttribute('aria-label', `Цвет линий: ${c.label}`)
+      b.style.setProperty('--c', c.value)
+    }
+    const weights = row()
+    for (const w of LINE_WEIGHTS) choice(weights, w.label, sh.weight === w.value, () => board.setSheet({ weight: w.value }))
+    head('Страницы')
+    const sizes = row()
+    for (const p of PAGE_SIZES) choice(sizes, p.label, sh.page === p.value, () => board.setSheet({ page: p.value }))
+    choice(sizes, 'Книжная', !sh.landscape, () => board.setSheet({ landscape: false }))
+    choice(sizes, 'Альбомная', sh.landscape, () => board.setSheet({ landscape: true }))
+    const borders = el('label', { class: 'check' }, `<input type="checkbox"${sh.borders ? ' checked' : ''}> Показывать границы страниц`)
+    borders.querySelector('input')!.addEventListener('change', (e) => board.setSheet({ borders: (e.target as HTMLInputElement).checked }))
+    pop.append(borders)
+    pop.append(el('p', { class: 'pop-hint' }, 'Доска делится на страницы выбранного размера. В PDF сохраняются страницы, на которых что-то есть.'))
   })
+  board.onSheet = () => refreshSheet()
+
+  // layers, as in the lesson editor
+  const layersBtn = btn(icons.layers, 'Слои', () => {})
+  const refreshLayers = popover(layersBtn, (pop) => {
+    pop.classList.add('layers-pop')
+    const sel = board.canvas.getActiveObjects()
+    for (const l of [...board.layers].reverse()) {
+      const r = el('div', { class: 'layer' })
+      r.classList.toggle('on', l.id === board.activeLayer)
+      const name = el('button', { class: 'layer-name', title: 'Сделать текущим: новое рисуется в нём. Двойной щелчок — переименовать' }, '')
+      name.textContent = `${l.name} · ${board.countInLayer(l.id)}`
+      name.addEventListener('click', () => board.setActiveLayer(l.id))
+      name.addEventListener('dblclick', () => {
+        const input = el('input', { value: l.name, maxlength: '40', class: 'layer-rename' }) as HTMLInputElement
+        name.replaceWith(input)
+        input.focus()
+        input.select()
+        const done = () => {
+          const v = input.value.trim()
+          if (v && v !== l.name) board.patchLayer(l.id, { name: v })
+          else refreshLayers()
+        }
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') done()
+          if (e.key === 'Escape') refreshLayers()
+        })
+        input.addEventListener('blur', done)
+      })
+      const icon = (svg: string, title: string, on: boolean, act: () => void, cls = '') => {
+        const b = btn(svg, title, act, cls)
+        b.classList.toggle('on', on)
+        return b
+      }
+      const mine = board.hiddenForMe.has(l.id)
+      r.append(
+        name,
+        ...(sel.length ? [icon(icons.moveIn, 'Перенести выделенное в этот слой', false, () => board.moveSelectionToLayer(l.id), 'edit')] : []),
+        icon(mine ? icons.eyeOff : icons.eye, mine ? 'Показать у себя' : 'Скрыть у себя (собеседник видит)', mine, () => board.toggleHidden(l.id)),
+        icon(icons.boardLock, l.locked ? 'Разблокировать слой' : 'Заблокировать слой: его нельзя выделить и стереть', !!l.locked, () =>
+          board.patchLayer(l.id, { locked: !l.locked }), 'edit'),
+        ...(teacher
+          ? [icon(icons.studentHidden, l.studentHidden ? 'Показать ученику' : 'Скрыть от ученика (у вас слой бледный)', !!l.studentHidden, () =>
+              board.patchLayer(l.id, { studentHidden: !l.studentHidden }), 'edit')]
+          : []),
+        icon(icons.up, 'Выше', false, () => board.moveLayer(l.id, 1), 'edit'),
+        icon(icons.down, 'Ниже', false, () => board.moveLayer(l.id, -1), 'edit'),
+      )
+      if (board.layers.length > 1) {
+        const del = icon(icons.trash, 'Удалить слой', false, () => {
+          if (board.countInLayer(l.id) && !del.dataset.sure) {
+            del.dataset.sure = '1'
+            del.classList.add('sure')
+            del.title = `Удалить вместе с объектами (${board.countInLayer(l.id)})? Нажмите ещё раз; вернуть — Ctrl+Z`
+            return
+          }
+          board.deleteLayer(l.id)
+        }, 'edit')
+        r.append(del)
+      }
+      pop.append(r)
+    }
+    const add = el('button', { class: 'wide edit' }, `${icons.plus}<span>Новый слой</span>`)
+    add.addEventListener('click', () => board.addLayer())
+    pop.append(add)
+    if (!teacher) return
+    pop.append(el('p', { class: 'pop-hint' }, 'Скрытое от ученика всё равно передаётся в его браузер: для заготовок и ответов, а не для секретов.'))
+  })
+  board.onLayers = () => refreshLayers()
+  board.canvas.on('selection:created', () => refreshLayers())
+  board.canvas.on('selection:cleared', () => refreshLayers())
+
   const followBtn = btn(icons.follow, 'Следовать за мной: ученик видит доску так же, как вы', () => setFollow(!following))
   const lockBtn = btn(icons.boardLock, 'Заблокировать доску ученика: он сможет только смотреть и показывать указкой', () =>
     setBoardLock(!boardLocked),
@@ -478,7 +589,18 @@ async function lesson(entry: Entry, name: string) {
       closePops()
       board.clear()
     })
-    pop.append(save, clear)
+    const pdf = el('button', { class: 'wide' }, `${icons.download}<span>Сохранить в PDF (страницы, где что-то есть)</span>`)
+    pdf.addEventListener('click', async () => {
+      closePops()
+      say('Готовим PDF…', 60_000)
+      const blob = await board.exportPdf((done, total) => say(`Готовим PDF: страница ${done} из ${total}`, 60_000))
+      if (!blob) return say('Доска пуста')
+      say('PDF готов')
+      const a = el('a', { href: URL.createObjectURL(blob), download: `доска-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.pdf` })
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.getAttribute('href')!), 30_000)
+    })
+    pop.append(save, pdf, clear)
   })
 
   top.append(
@@ -493,6 +615,7 @@ async function lesson(entry: Entry, name: string) {
     texts,
     el('div', { class: 'grow' }),
     paperBtn,
+    layersBtn,
     ...(teacher ? [followBtn, lockBtn] : []),
     menuBtn,
   )
@@ -501,6 +624,9 @@ async function lesson(entry: Entry, name: string) {
     board.setColor(c)
     swatches.forEach((s, i) => s.classList.toggle('on', COLORS[i] === c))
     custom.value = c
+    const own = !COLORS.includes(c)
+    customWrap.classList.toggle('on', own)
+    customWrap.style.setProperty('--c', own ? c : 'transparent')
   }
   function pickWidth(w: number) {
     board.setWidth(w)
@@ -634,8 +760,29 @@ async function lesson(entry: Entry, name: string) {
     }
   })
   $('#wrap').addEventListener('dragover', (e) => e.preventDefault())
+  $<HTMLInputElement>('#pdf').addEventListener('change', (e) => {
+    const f = (e.target as HTMLInputElement).files?.[0]
+    if (f) importPdf(f)
+    ;(e.target as HTMLInputElement).value = ''
+  })
+  async function importPdf(file: File) {
+    if (board.readOnly) return
+    say('Открываем PDF…')
+    try {
+      const { pdfDialog } = await import('./pdfimport')
+      const pages = await pdfDialog(file)
+      if (!pages?.length) return
+      await board.placePages(pages)
+      say(`Вставлено страниц: ${pages.length}. Они в слое «Подложка», он заблокирован`, 5000)
+    } catch (err) {
+      console.warn(err)
+      say('Не удалось открыть PDF')
+    }
+  }
   $('#wrap').addEventListener('drop', (e) => {
     e.preventDefault()
+    const pdfFile = [...(e.dataTransfer?.files ?? [])].find((x) => x.type === 'application/pdf' || /\.pdf$/i.test(x.name))
+    if (pdfFile) return void importPdf(pdfFile)
     const f = [...(e.dataTransfer?.files ?? [])].find((x) => x.type.startsWith('image/'))
     if (f && !board.readOnly) board.addImage(f)
   })
