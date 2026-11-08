@@ -1588,8 +1588,15 @@ button.primary:hover {
   align-items: center;
   gap: 6px;
   padding: 4px 4px 4px 12px;
-  background: rgba(17, 24, 39, 0.85);
+  /* one solid colour, whatever the tile had (a straightened page is white) */
+  background: var(--accent) !important;
+  color: #fff;
+  box-shadow: var(--shadow);
   cursor: pointer;
+}
+
+#videos figure.collapsed:hover {
+  filter: brightness(1.1);
 }
 
 #videos figure.collapsed > :not(figcaption, .show) {
@@ -1608,6 +1615,8 @@ button.primary:hover {
 #videos figure.collapsed figcaption {
   position: static;
   background: none;
+  color: #fff;
   padding: 0;
   font-size: 13px;
+  font-weight: 600;
 }
