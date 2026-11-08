@@ -21,6 +21,7 @@ import {
 import { MARKS, markFromDrag, type MarkKind } from './marks'
 import { SHAPES, buildShape, dragBox, type ShapeKind } from './shapes'
 import { drawPaper, renderPaper, type Paper } from './paper'
+import { applyCrop, cropFrame, isCropped, uncrop } from './crop'
 
 FabricObject.customProperties = ['id', 'locked']
 
@@ -45,7 +46,11 @@ export type Op =
   | { op: 'del'; id: string }
   | { op: 'order'; ids: string[] }
   | { op: 'paper'; paper: Paper }
-  | { op: 'sync'; objs: any[]; paper?: Paper }
+  | { op: 'bookmarks'; list: Bookmark[] }
+  | { op: 'sync'; objs: any[]; paper?: Paper; bookmarks?: Bookmark[] }
+
+/** A remembered place on the board: what was in the middle of the screen, and the zoom */
+export type Bookmark = { id: string; name: string; x: number; y: number; z: number }
 
 export interface TextStyle {
   fontSize: number
@@ -109,6 +114,13 @@ export class Board {
   onSelection: () => void = () => {}
   onHistory: () => void = () => {}
   onPipette: (color: string) => void = () => {}
+  /** a text uses a font that may not be loaded yet */
+  onFont: (t: IText) => void = () => {}
+  onBookmarks: () => void = () => {}
+  onCrop: () => void = () => {}
+
+  bookmarks: Bookmark[] = []
+  cropping: { img: FabricImage; frame: Obj } | null = null
 
   private applying = false
   private draft: Obj | null = null
@@ -208,6 +220,7 @@ export class Board {
     if (this.readOnly && t !== 'hand' && t !== 'pointer') t = 'hand'
     if (t === 'pipette' && this.tool !== 'pipette') this.beforePipette = this.tool
     if (t !== 'polygon') this.cancelPolygon()
+    if (this.cropping) this.finishCrop(false)
     this.tool = t
     const c = this.canvas
     if (t !== 'select') c.discardActiveObject()
@@ -277,6 +290,7 @@ export class Board {
       o.set(s)
       o.initDimensions()
       o.setCoords()
+      this.onFont(o)
     })
   }
 
@@ -543,6 +557,10 @@ export class Board {
     } else if (mod && e.code === 'KeyA' && this.tool === 'select') {
       e.preventDefault()
       this.selectAll()
+    } else if (e.key === 'Enter' && this.cropping) {
+      this.finishCrop(true)
+    } else if (e.key === 'Escape' && this.cropping) {
+      this.finishCrop(false)
     } else if (e.key === 'Enter' && this.tool === 'polygon') {
       this.finishPolygon()
     } else if (e.key === 'Escape') {
@@ -841,6 +859,81 @@ export class Board {
     c.setActiveObject(img)
   }
 
+  get canCrop() {
+    return !this.cropping && this.canvas.getActiveObject() instanceof FabricImage
+  }
+
+  get canUncrop() {
+    const a = this.canvas.getActiveObject()
+    return !this.cropping && a instanceof FabricImage && isCropped(a)
+  }
+
+  /** A frame over the selected picture; move and resize it, then finishCrop(true) */
+  startCrop() {
+    const c = this.canvas
+    const img = c.getActiveObject()
+    if (!(img instanceof FabricImage) || this.cropping) return
+    c.discardActiveObject()
+    const frame = cropFrame(img) as Obj
+    frame._pending = true
+    this.applying = true
+    c.add(frame)
+    this.applying = false
+    c.forEachObject((o) => (o.evented = o === frame))
+    frame.selectable = true
+    this.cropping = { img, frame }
+    c.setActiveObject(frame)
+    c.requestRenderAll()
+    this.onCrop()
+  }
+
+  finishCrop(apply: boolean) {
+    const cr = this.cropping
+    if (!cr) return
+    const c = this.canvas
+    this.cropping = null
+    this.applying = true
+    c.discardActiveObject()
+    c.remove(cr.frame)
+    this.applying = false
+    if (apply) applyCrop(cr.img, cr.frame as unknown as Rect)
+    c.forEachObject((o) => this.interactivity(o))
+    if (this.tool === 'select') c.setActiveObject(cr.img)
+    c.requestRenderAll()
+    if (apply) this.commit(cr.img)
+    this.onCrop()
+  }
+
+  uncropSelection() {
+    const img = this.canvas.getActiveObject()
+    if (!(img instanceof FabricImage)) return
+    uncrop(img)
+    this.canvas.requestRenderAll()
+    this.commit(img)
+  }
+
+  // ---------- bookmarks ----------
+
+  addBookmark(name: string) {
+    const c = this.viewCenter()
+    this.bookmarks.push({ id: newId(), name, x: c.x, y: c.y, z: this.canvas.getZoom() })
+    this.bookmarksChanged()
+  }
+
+  removeBookmark(id: string) {
+    this.bookmarks = this.bookmarks.filter((b) => b.id !== id)
+    this.bookmarksChanged()
+  }
+
+  goTo(b: Bookmark) {
+    this.lookAt(b.x, b.y, Math.min(5, Math.max(0.2, b.z)))
+  }
+
+  private bookmarksChanged() {
+    this.onBookmarks()
+    this.onOp({ op: 'bookmarks', list: this.bookmarks })
+  }
+
   // ---------- sync ----------
 
   /** Full state of an object, in board coordinates even when it sits in a selection */
@@ -873,7 +966,7 @@ export class Board {
   }
 
   snapshot(): Op {
-    return { op: 'sync', objs: this.canvas.getObjects().filter((o) => !(o as Obj)._pending).map((o) => this.serialize(o)), paper: this.paper }
+    return { op: 'sync', objs: this.canvas.getObjects().filter((o) => !(o as Obj)._pending).map((o) => this.serialize(o)), paper: this.paper, bookmarks: this.bookmarks }
   }
 
   setPaper(p: Paper, send = true) {
@@ -885,6 +978,10 @@ export class Board {
   async apply(op: Op): Promise<void> {
     const c = this.canvas
     if (op.op === 'paper') return this.setPaper(op.paper, false)
+    if (op.op === 'bookmarks') {
+      this.bookmarks = op.list.filter(validBookmark)
+      return this.onBookmarks()
+    }
     if (op.op === 'order') {
       const pos = new Map(op.ids.map((id, i) => [id, i]))
       const sorted = [...(c.getObjects() as Obj[])].sort((a, b) => (pos.get(a.id!) ?? 1e9) - (pos.get(b.id!) ?? 1e9))
@@ -905,12 +1002,23 @@ export class Board {
       const props = { ...op.obj }
       for (const k of NOT_SYNCED_ON_MOD) delete props[k]
       o.set(props)
-      if (o instanceof IText) o.initDimensions()
+      if (o instanceof IText) {
+        o.initDimensions()
+        this.onFont(o)
+      }
       o.setCoords()
       this.interactivity(o)
       this.known.set(op.obj.id, { ...(this.known.get(op.obj.id) ?? {}), ...op.obj })
     } else {
       if (op.op === 'sync' && op.paper) this.setPaper(op.paper, false)
+      if (op.op === 'sync' && op.bookmarks?.length) {
+        const have = new Set(this.bookmarks.map((b) => b.id))
+        const add = op.bookmarks.filter((b) => validBookmark(b) && !have.has(b.id))
+        if (add.length) {
+          this.bookmarks.push(...add)
+          this.onBookmarks()
+        }
+      }
       const list = op.op === 'add' ? [op.obj] : op.objs
       const fresh = list.filter((x) => x?.id && !this.find(x.id))
       if (!fresh.length) return
@@ -979,6 +1087,10 @@ export class Board {
 const POINTER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="6" fill="#ef4444" fill-opacity=".85" stroke="#fff" stroke-width="2"/></svg>',
 )}") 10 10, crosshair`
+
+function validBookmark(b: Bookmark) {
+  return b && typeof b.id === 'string' && typeof b.name === 'string' && [b.x, b.y, b.z].every(Number.isFinite) && b.z > 0
+}
 
 function isCut(o: FabricObject) {
   return o.globalCompositeOperation === 'destination-out'

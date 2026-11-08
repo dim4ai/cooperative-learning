@@ -736,3 +736,141 @@ button.primary:hover {
 #topbar select[title='Шрифт'] {
   max-width: 128px;
 }
+
+#selbar .labeled {
+  width: auto;
+  padding: 0 10px 0 6px;
+  gap: 4px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+/* bottom left of the sheet: bookmarks and the map */
+#corner {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+#corner .corner-bar {
+  position: static;
+  padding: 3px;
+}
+
+#corner .corner-bar button {
+  width: 34px;
+  height: 34px;
+}
+
+#corner .corner-bar button.has {
+  color: var(--accent);
+}
+
+#minimap {
+  border: 1px solid var(--dock-line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  touch-action: none;
+  background: #f1f5f9;
+}
+
+.mark-form {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.mark-form input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.mark-form button:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.mark-form button {
+  width: auto;
+  height: 34px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.mark-row {
+  display: flex;
+  align-items: center;
+}
+
+.mark-row .wide {
+  flex: 1;
+}
+
+.mark-row .wide span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pop-hint {
+  margin: 4px 6px 2px;
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 240px;
+  line-height: 1.4;
+}
+
+.pop {
+  min-width: 260px;
+}
+
+/* snapshot button on a video: shown on hover */
+#videos .shot {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#videos figure:hover .shot,
+#videos .shot:focus-visible {
+  opacity: 1;
+}
+
+#videos .shot svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (hover: none) {
+  #videos .shot {
+    opacity: 0.8;
+  }
+}

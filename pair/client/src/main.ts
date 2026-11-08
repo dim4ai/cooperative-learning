@@ -8,10 +8,12 @@ import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
 import { PAPERS } from './paper'
 import { Laser } from './laser'
+import { FONTS, watchFonts } from './fonts'
+import { Minimap } from './minimap'
 
 const app = document.getElementById('app')!
 
-type ToolId = Exclude<Tool, 'pipette'> | 'image'
+type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot'
 const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'select', title: 'Выбор', key: 'V' },
   { id: 'lock', title: 'Закрепление: щёлкните объект, чтобы закрепить или открепить его', key: 'K' },
@@ -26,7 +28,8 @@ const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   ...SHAPE_KINDS.map((id) => ({ id, title: SHAPES[id], key: ({ rect: 'R', ellipse: 'O', triangle: 'Y' } as Record<string, string>)[id] })),
   { id: 'polygon', title: 'Многоугольник по точкам: щелчок — вершина; замкнуть — щелчок по первой точке, двойной щелчок или Enter', key: 'G' },
   { id: 'text', title: 'Текст', key: 'T' },
-  { id: 'image', title: 'Картинка (или вставить Ctrl+V, перетащить файл)', key: 'I' },
+  { id: 'image', title: 'Картинка из файла (или вставить Ctrl+V, перетащить файл)', key: 'I' },
+  { id: 'snapshot', title: 'Снимок со своей камеры на доску (снимок с камеры собеседника — кнопкой на его видео)' },
 ]
 /** The left panel: single tools and groups that open sideways; a group shows its last used tool. */
 const PANEL: { members: ToolId[]; title?: string }[] = [
@@ -39,17 +42,11 @@ const PANEL: { members: ToolId[]; title?: string }[] = [
   { members: WORD_MARKS, title: 'Разбор слова' },
   { members: [...SHAPE_KINDS, 'polygon'], title: 'Фигуры' },
   { members: ['text'] },
-  { members: ['image'] },
+  { members: ['image', 'snapshot'] },
 ]
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
 const WIDTHS = [2, 4, 8]
-const FONTS = [
-  { label: 'Обычный', value: 'Inter, system-ui, sans-serif' },
-  { label: 'С засечками', value: "Georgia, 'Times New Roman', serif" },
-  { label: 'Моноширинный', value: "ui-monospace, 'Cascadia Mono', Consolas, monospace" },
-  { label: 'Рукописный', value: "'Segoe Print', 'Comic Sans MS', 'Marker Felt', cursive" },
-]
 const SIZES = [16, 20, 24, 28, 36, 48, 64, 96]
 
 function savedName() {
@@ -213,7 +210,7 @@ async function lesson(entry: Entry, name: string) {
       fill(pop)
       const r = button.getBoundingClientRect()
       pop.hidden = false
-      pop.style.top = `${r.bottom + 6}px`
+      pop.style.top = `${r.bottom + pop.offsetHeight + 8 > innerHeight ? r.top - pop.offsetHeight - 6 : r.bottom + 6}px`
       pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`
     })
     return pop
@@ -226,7 +223,12 @@ async function lesson(entry: Entry, name: string) {
     const t = info(id)
     return t.key ? `${t.title} · ${t.key}` : t.title
   }
-  const pick = (id: ToolId) => (id === 'image' ? $<HTMLInputElement>('#file').click() : board.setTool(id))
+  const pick = (id: ToolId) => {
+    if (board.readOnly && id !== 'hand' && id !== 'pointer') return
+    if (id === 'image') $<HTMLInputElement>('#file').click()
+    else if (id === 'snapshot') snapshot(null)
+    else board.setTool(id)
+  }
   type G = { members: ToolId[]; current: ToolId; button: HTMLButtonElement; flyout: HTMLElement | null; show: () => void }
   const groups: G[] = []
   const closeFlyouts = () => groups.forEach((g) => g.flyout?.setAttribute('hidden', ''))
@@ -266,7 +268,7 @@ async function lesson(entry: Entry, name: string) {
     button.addEventListener('click', () => {
       const open = g.flyout && g.flyout.hidden
       closeFlyouts()
-      if (g.current === 'image' || board.tool !== g.current) pick(g.current)
+      if (g.current === 'image' || g.current === 'snapshot' || board.tool !== g.current) pick(g.current)
       if (open) g.flyout!.hidden = false
     })
     groups.push(g)
@@ -357,7 +359,7 @@ async function lesson(entry: Entry, name: string) {
   })
   const fills = section('fills edit', fillBtn)
 
-  const fontSel = el('select', { title: 'Шрифт', 'aria-label': 'Шрифт' }, FONTS.map((f) => `<option value="${f.value}">${f.label}</option>`).join('')) as HTMLSelectElement
+  const fontSel = el('select', { title: 'Шрифт', 'aria-label': 'Шрифт' }, FONTS.map((f) => `<option value="${f.value}" style="font-family:${f.value.replace(/"/g, '')}">${f.label}</option>`).join('')) as HTMLSelectElement
   const sizeSel = el('select', { title: 'Размер шрифта', 'aria-label': 'Размер шрифта' }, SIZES.map((s) => `<option>${s}</option>`).join('')) as HTMLSelectElement
   fontSel.addEventListener('change', () => board.setTextStyle({ fontFamily: fontSel.value }))
   sizeSel.addEventListener('change', () => board.setTextStyle({ fontSize: +sizeSel.value }))
@@ -388,7 +390,13 @@ async function lesson(entry: Entry, name: string) {
   const ungroupBtn = btn(icons.ungroup, 'Разгруппировать', () => board.ungroup())
   // actions on the selection float above it rather than crowding the top bar
   const sel = el('div', { id: 'selbar', class: 'panel edit', hidden: '' })
-  sel.append(
+  const cropBtn = btn(icons.crop, 'Обрезать картинку', () => board.startCrop())
+  const uncropBtn = btn(icons.uncrop, 'Вернуть картинку целиком', () => board.uncropSelection())
+  const cropDone = btn(`${icons.check}<span>Обрезать</span>`, 'Обрезать по рамке · Enter', () => board.finishCrop(true), 'labeled')
+  const cropCancel = btn(icons.close, 'Отмена · Esc', () => board.finishCrop(false))
+  const selActions = [
+    cropBtn,
+    uncropBtn,
     btn(icons.duplicate, 'Дублировать · Ctrl+D', () => board.duplicate()),
     btn(icons.front, 'На передний план', () => board.bringToFront()),
     btn(icons.back, 'На задний план', () => board.sendToBack()),
@@ -397,12 +405,22 @@ async function lesson(entry: Entry, name: string) {
     ungroupBtn,
     btn(icons.lock, 'Закрепить (открепить — инструментом «Закрепление»)', () => board.lockSelection()),
     btn(icons.trash, 'Удалить · Delete', () => board.deleteSelection()),
-  )
+  ]
+  sel.append(...selActions, cropDone, cropCancel)
   $('#wrap').append(sel)
   function placeSelbar() {
     const a = board.canvas.getActiveObject()
     if (!a || (a as { isEditing?: boolean }).isEditing) return void (sel.hidden = true)
     sel.hidden = false
+    const cropping = !!board.cropping
+    selActions.forEach((b) => (b.hidden = cropping))
+    cropDone.hidden = cropCancel.hidden = !cropping
+    if (!cropping) {
+      cropBtn.hidden = !board.canCrop
+      uncropBtn.hidden = !board.canUncrop
+      groupBtn.hidden = !board.canGroup
+      ungroupBtn.hidden = !board.canUngroup
+    }
     const pts = a.getCoords().map((p) => board.sceneToScreen(p.x, p.y))
     const x0 = Math.min(...pts.map((p) => p.x))
     const x1 = Math.max(...pts.map((p) => p.x))
@@ -509,8 +527,6 @@ async function lesson(entry: Entry, name: string) {
     texts.hidden = !(t === 'text' || hasText)
     placeSelbar()
     widths.hidden = t === 'text' || t === 'pointer' || t === 'hand' || (objs.length > 0 && objs.every((o) => o.type === 'i-text' || o.type === 'image'))
-    groupBtn.hidden = !board.canGroup
-    ungroupBtn.hidden = !board.canUngroup
     if (objs.length === 1 && hasText) {
       const o = objs[0] as unknown as Record<string, unknown>
       Object.assign(board.text, {
@@ -524,6 +540,55 @@ async function lesson(entry: Entry, name: string) {
     }
   }
   board.onSelection = refreshBar
+  board.onCrop = refreshBar
+  board.onFont = watchFonts(board.canvas)
+
+  // ---------- bottom left: bookmarks and the board map ----------
+  const corner = el('div', { id: 'corner' })
+  const minimap = new Minimap(board)
+  minimap.el.id = 'minimap'
+  minimap.el.hidden = true
+  const marksBtn = btn(icons.bookmark, 'Закладки: запомнить место на доске и вернуться к нему', () => {})
+  const mapBtn = btn(icons.map, 'Карта доски', () => {
+    minimap.show(Boolean(minimap.el.hidden))
+    mapBtn.classList.toggle('on', !minimap.el.hidden)
+  })
+  const cornerBar = el('div', { class: 'panel corner-bar' })
+  cornerBar.append(marksBtn, mapBtn)
+  corner.append(minimap.el, cornerBar)
+  $('#wrap').append(corner)
+  popover(marksBtn, (pop) => {
+    const form = el('form', { class: 'mark-form' }) as HTMLFormElement
+    const input = el('input', { placeholder: `Закладка ${board.bookmarks.length + 1}`, maxlength: '40', 'aria-label': 'Название закладки' }) as HTMLInputElement
+    const add = el('button', { type: 'submit', title: 'Запомнить то, что сейчас на экране' }, 'Добавить')
+    form.append(input, add)
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      board.addBookmark(input.value.trim() || input.placeholder)
+      closePops()
+      say('Закладка добавлена: она видна обоим')
+    })
+    pop.append(form)
+    if (!board.bookmarks.length) pop.append(el('p', { class: 'pop-hint' }, 'Закладка запоминает, какая часть доски сейчас на экране и в каком масштабе.'))
+    for (const b of board.bookmarks) {
+      const row = el('div', { class: 'mark-row' })
+      const go = el('button', { class: 'wide' }, `${icons.bookmark}<span></span>`)
+      go.querySelector('span')!.textContent = b.name
+      go.addEventListener('click', () => {
+        board.goTo(b)
+        closePops()
+      })
+      const del = el('button', { title: 'Удалить закладку', 'aria-label': 'Удалить закладку', class: 'edit' }, icons.close)
+      del.addEventListener('click', () => {
+        board.removeBookmark(b.id)
+        row.remove()
+      })
+      row.append(go, del)
+      pop.append(row)
+    }
+    setTimeout(() => input.focus())
+  })
+  board.onBookmarks = () => marksBtn.classList.toggle('has', board.bookmarks.length > 0)
 
   board.onToolChange = (tool) => {
     for (const g of groups) {
@@ -617,12 +682,30 @@ async function lesson(entry: Entry, name: string) {
     let t = videos.querySelector<HTMLElement>(`[data-key="${key}"]`)
     if (!t) {
       t = el('figure', { 'data-key': key }, `<video autoplay playsinline></video><figcaption></figcaption>`)
+      const shot = el('button', { class: 'shot edit', title: 'Снимок с этой камеры на доску', 'aria-label': 'Снимок на доску' }, icons.snapshot)
+      const v = t.querySelector('video')!
+      shot.addEventListener('click', () => snapshot(v))
+      t.append(shot)
       if (mirrored) t.classList.add('me')
       key === 'me' ? videos.append(t) : videos.prepend(t)
     }
     t.querySelector('figcaption')!.textContent = label
     return t
   }
+  /** A frame from a camera onto the board; my own camera when no video is given */
+  function snapshot(video: HTMLVideoElement | null) {
+    if (board.readOnly) return
+    video ??= videos.querySelector<HTMLVideoElement>('[data-key="me"] video')
+    if (!video || !video.videoWidth) return say('Камера выключена или недоступна')
+    const cv = document.createElement('canvas')
+    cv.width = video.videoWidth
+    cv.height = video.videoHeight
+    const ctx = cv.getContext('2d')!
+    // my own video is shown mirrored, the snapshot is not: writing in a notebook reads right
+    ctx.drawImage(video, 0, 0)
+    cv.toBlob((b) => b && board.addImage(b), 'image/jpeg', 0.9)
+  }
+
   if (local?.getVideoTracks().length) {
     const v = tile('me', name || 'Вы', true).querySelector('video')!
     v.muted = true
@@ -692,6 +775,7 @@ async function lesson(entry: Entry, name: string) {
 
   board.onViewport = () => {
     placeCursors()
+    minimap.draw()
     placeSelbar()
     zLabel.textContent = `${Math.round(board.canvas.getZoom() * 100)}%`
     if (following) sendView()
