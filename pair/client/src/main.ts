@@ -616,6 +616,7 @@ async function lesson(entry: Entry, name: string) {
     pop.append(el('p', { class: 'pop-hint' }, 'Скрытое от ученика всё равно передаётся в его браузер: для заготовок и ответов, а не для секретов.'))
   })
   board.onLayers = () => refreshLayers()
+  board.onNotice = (text) => say(text, 3500)
   board.canvas.on('selection:created', () => refreshLayers())
   board.canvas.on('selection:cleared', () => refreshLayers())
 

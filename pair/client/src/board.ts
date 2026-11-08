@@ -143,6 +143,8 @@ export class Board {
   /** set by the page: the teacher sees layers hidden from the student (dimmed) */
   isTeacher = false
   onLayers: () => void = () => {}
+  /** a short message for the person at this screen, without stopping them */
+  onNotice: (text: string) => void = () => {}
   onSheet: () => void = () => {}
   cropping: { img: FabricImage; frame: Obj } | null = null
 
@@ -414,6 +416,10 @@ export class Board {
       t = { id: 'L' + newId(), name: `Слой ${this.layers.length + 1}` }
       this.layers.push(t)
       this.layersChanged()
+    }
+    if (act) {
+      const why = act.locked ? 'заблокирован' : this.hiddenForMe.has(act.id) ? 'скрыт у вас' : 'скрыт от ученика'
+      this.onNotice(`Слой «${act.name}» ${why}, рисую в «${t.name}»`)
     }
     this.activeLayer = t.id
     this.onLayers()
