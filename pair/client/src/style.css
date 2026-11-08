@@ -331,15 +331,21 @@ button.primary:hover {
   position: absolute;
   top: 62px;
   right: 66px;
-  width: 240px;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
   z-index: 5;
+  /* tiles can be made big: the column scrolls rather than run off the screen */
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 #videos figure {
   position: relative;
+  flex: none;
+  width: 240px;
   margin: 0;
   aspect-ratio: 4 / 3;
   border-radius: 12px;
@@ -349,8 +355,7 @@ button.primary:hover {
 }
 
 #videos figure.me {
-  width: 50%;
-  align-self: flex-end;
+  width: 120px;
 }
 
 #videos figure.me video {
@@ -370,7 +375,8 @@ button.primary:hover {
 
 #videos figcaption {
   position: absolute;
-  left: 6px;
+  /* clear of the resize corner */
+  left: 24px;
   bottom: 6px;
   max-width: calc(100% - 12px);
   font-size: 12px;
@@ -472,7 +478,16 @@ button.primary:hover {
   }
   #videos {
     right: 8px;
-    width: 120px;
+  }
+  /* on a phone-sized screen the tiles stay small, whatever was set on a big one */
+  #videos figure {
+    width: 120px !important;
+  }
+  #videos figure.me {
+    width: 60px !important;
+  }
+  #videos .grip {
+    display: none;
   }
   #topbar {
     right: 0;
@@ -1279,7 +1294,6 @@ button.primary:hover {
 /* the whole sheet matters, not a face: show it uncropped */
 #videos figure.notebook {
   aspect-ratio: 3 / 4;
-  max-height: 50vh;
   background: #1f2937;
 }
 
@@ -1497,4 +1511,31 @@ button.primary:hover {
   align-items: center;
   gap: 4px;
   font-size: 14px;
+}
+
+/* resizing a video tile: the corner away from the screen's edge */
+#videos .grip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  cursor: nesw-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background:
+    linear-gradient(45deg, transparent 0 30%, rgba(255, 255, 255, 0.9) 30% 38%, transparent 38% 52%, rgba(255, 255, 255, 0.9) 52% 60%, transparent 60%)
+      no-repeat;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+  z-index: 2;
+}
+
+#videos figure:hover .grip,
+#videos figure.resizing .grip {
+  opacity: 1;
+}
+
+#videos figure.resizing {
+  outline: 2px solid var(--accent, #2563eb);
 }

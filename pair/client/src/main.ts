@@ -975,6 +975,8 @@ async function lesson(entry: Entry, name: string) {
     if (!v.videoWidth) return
     const fix = fixes.get(cam.tag)
     cam.tile.style.aspectRatio = cam.fixed && fix ? String(pageAspect(fix, v.videoWidth, v.videoHeight)) : `${v.videoWidth} / ${v.videoHeight}`
+    // a tall page at a width set for a wide one may not fit the screen
+    sizeTile(cam.tile)
   }
   function setMyFix(fix: Fix | null) {
     if (fix) fixes.set(camTag, fix)
@@ -1014,11 +1016,78 @@ async function lesson(entry: Entry, name: string) {
       shot.addEventListener('click', () => snapshot(v, key))
       t.append(shot)
       if (mirrored) t.classList.add('me')
+      t.append(grip(t))
       key === 'me' ? videos.append(t) : videos.prepend(t)
+      sizeTile(t)
     }
     t.querySelector('figcaption')!.textContent = label
     return t
   }
+  // tiles are resized by their corner; each kind (me, the other person, a notebook) keeps its own width
+  const TILES_KEY = 'pair.tiles'
+  const tileWidths: Record<string, number> = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(TILES_KEY) ?? '{}')
+      return v && typeof v === 'object' ? v : {}
+    } catch {
+      return {}
+    }
+  })()
+  const tileKind = (t: HTMLElement) => (t.classList.contains('me') ? 'me' : t.classList.contains('notebook') ? 'cam' : 'peer')
+  /** the widest a tile may get: most of the board across, and its height on the screen */
+  function maxTileWidth(t: HTMLElement) {
+    const r = t.getBoundingClientRect()
+    const aspect = r.height ? r.width / r.height : 4 / 3
+    return Math.max(120, Math.min(window.innerWidth - 200, (window.innerHeight - 160) * aspect))
+  }
+  function sizeTile(t: HTMLElement) {
+    const w = tileWidths[tileKind(t)]
+    t.style.width = typeof w === 'number' && w >= 80 ? `${Math.min(w, maxTileWidth(t))}px` : ''
+  }
+  window.addEventListener('resize', () => videos.querySelectorAll<HTMLElement>('figure').forEach(sizeTile))
+  function grip(t: HTMLElement) {
+    const g = el('div', { class: 'grip', title: 'Потяните, чтобы изменить размер. Двойной щелчок — обычный размер' })
+    g.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      g.setPointerCapture(e.pointerId)
+      const x0 = e.clientX
+      const y0 = e.clientY
+      const r = t.getBoundingClientRect()
+      const aspect = r.width / r.height
+      const max = maxTileWidth(t)
+      t.classList.add('resizing')
+      const move = (ev: PointerEvent) => {
+        // the tile hangs from the right edge: dragging left or down makes it bigger
+        const dx = x0 - ev.clientX
+        const dy = (ev.clientY - y0) * aspect
+        const w = Math.round(Math.min(max, Math.max(80, r.width + (Math.abs(dx) >= Math.abs(dy) ? dx : dy))))
+        t.style.width = `${w}px`
+        tileWidths[tileKind(t)] = w
+      }
+      const up = () => {
+        t.classList.remove('resizing')
+        g.removeEventListener('pointermove', move)
+        g.removeEventListener('pointerup', up)
+        g.removeEventListener('pointercancel', up)
+        try {
+          localStorage.setItem(TILES_KEY, JSON.stringify(tileWidths))
+        } catch {}
+      }
+      g.addEventListener('pointermove', move)
+      g.addEventListener('pointerup', up)
+      g.addEventListener('pointercancel', up)
+    })
+    g.addEventListener('dblclick', () => {
+      delete tileWidths[tileKind(t)]
+      sizeTile(t)
+      try {
+        localStorage.setItem(TILES_KEY, JSON.stringify(tileWidths))
+      } catch {}
+    })
+    return g
+  }
+
   /** A frame from a camera onto the board; my own camera when no video is given */
   function snapshot(video: HTMLVideoElement | null, key = 'me') {
     if (board.readOnly) return
@@ -1138,7 +1207,7 @@ async function lesson(entry: Entry, name: string) {
     },
     stream: (peer, stream) => {
       const t = tile(peer.id, peerName(peer), false)
-      t.classList.toggle('notebook', peer.role === 'cam')
+      if (t.classList.toggle('notebook', peer.role === 'cam')) sizeTile(t)
       const v = t.querySelector('video')!
       if (peer.role === 'cam' && !cams.has(peer.id)) {
         const cam = { tag: camOwner(peer.name).tag, rect: new Rectifier(v), tile: t, video: v, fixed: false }
