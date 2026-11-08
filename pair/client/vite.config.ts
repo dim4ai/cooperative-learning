@@ -12,5 +12,15 @@ export default defineConfig(({ mode }) => {
         '/ws': { target: `http://127.0.0.1:${env.PAIR_SIGNAL_PORT || 13119}`, ws: true },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // the pdf.js worker ships as .mjs, which nginx serves as octet-stream (and browsers refuse
+          // to run it as a module); as .js it gets a JavaScript type everywhere
+          assetFileNames: (info: { names?: string[]; name?: string }) =>
+            /\.mjs$/.test(info.names?.[0] ?? info.name ?? '') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]',
+        },
+      },
+    },
   }
 })
