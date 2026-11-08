@@ -248,7 +248,21 @@ function renderBorders(ctx: CanvasRenderingContext2D, W: number, H: number, shee
     ctx.lineTo(W, Y)
   }
   ctx.stroke()
+  // page coordinates [column:row] in the top-left corner of each page, while there's room for them
+  if (w * z >= 90) {
+    ctx.fillStyle = sheet.borderColor
+    ctx.font = '12px Inter, system-ui, sans-serif'
+    ctx.textBaseline = 'top'
+    for (let i = Math.floor(x0 / w); i * w <= x1; i++)
+      for (let j = Math.floor(y0 / h); j * h <= y1; j++) ctx.fillText(`[${i}:${j}]`, (i * w - x0) * z + 6, (j * h - y0) * z + 5)
+  }
   ctx.restore()
+}
+
+/** The page (column, row) under a board point */
+export function pageAt(sheet: Sheet, x: number, y: number): [number, number] {
+  const { w, h } = pageBox(sheet)
+  return [Math.floor(x / w), Math.floor(y / h)]
 }
 
 /** Which pages (column, row) a scene rectangle touches */

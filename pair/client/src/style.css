@@ -1223,3 +1223,21 @@ button.primary:hover {
     overflow: visible;
   }
 }
+
+#topbar .page-at {
+  width: auto;
+  min-width: 38px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mark-form .num {
+  flex: 0 0 64px;
+}
+
+.pop-label {
+  align-self: center;
+  font-size: 14px;
+  color: var(--muted);
+}

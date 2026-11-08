@@ -1397,6 +1397,14 @@ export class Board {
     this.updateView()
   }
 
+  /** Shows a whole page (column, row) */
+  goToPage(i: number, j: number) {
+    const c = this.canvas
+    const { w, h } = pageBox(this.sheet)
+    const zoom = Math.min(5, Math.max(0.2, Math.min(c.width / w, c.height / h) * 0.95))
+    this.lookAt(i * w + w / 2, j * h + h / 2, zoom)
+  }
+
   /** Back to the start of the board: its top-left corner at 100% */
   home() {
     this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0])

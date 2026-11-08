@@ -6,7 +6,7 @@ import { icons } from './icons'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
-import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, type Sheet } from './paper'
+import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, pageAt, type Sheet } from './paper'
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
@@ -336,6 +336,31 @@ async function lesson(entry: Entry, name: string) {
     btn(icons.zoomIn, 'Приблизить', () => board.zoomBy(1.25)),
     btn(icons.home, 'К началу доски', () => board.home()),
   )
+  // the page in the middle of the screen, [column:row] as written on the pages; click to go to another one
+  const pageBtn = btn('0:0', 'Лист в центре экрана (столбец:строка). Нажмите, чтобы перейти к листу', () => {}, 'page-at')
+  view.append(pageBtn)
+  popover(pageBtn, (pop) => {
+    const [ci, cj] = pageAt(board.sheet, board.viewCenter().x, board.viewCenter().y)
+    const form = el('form', { class: 'mark-form' }) as HTMLFormElement
+    const col = el('input', { type: 'number', value: String(ci), 'aria-label': 'Столбец', class: 'num' }) as HTMLInputElement
+    const row = el('input', { type: 'number', value: String(cj), 'aria-label': 'Строка', class: 'num' }) as HTMLInputElement
+    const go = el('button', { type: 'submit' }, 'Перейти')
+    form.append(el('span', { class: 'pop-label' }, 'Лист'), col, el('span', { class: 'pop-label' }, ':'), row, go)
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      board.goToPage(Math.round(+col.value || 0), Math.round(+row.value || 0))
+      closePops()
+    })
+    pop.append(form, el('p', { class: 'pop-hint' }, 'Столбец и строка листа, как в метке в углу листа: [0:0] — первый лист, [1:0] — справа от него, [0:1] — под ним.'))
+    setTimeout(() => col.select())
+  })
+  const showPage = () => {
+    const [i, j] = pageAt(board.sheet, board.viewCenter().x, board.viewCenter().y)
+    pageBtn.textContent = `${i}:${j}`
+    pageBtn.hidden = !board.sheet.borders
+    pageBtn.style.color = board.sheet.borderColor
+  }
+  showPage()
 
   const swatches = COLORS.map((c) => {
     const b = btn('', `Цвет ${c}`, () => pickColor(c), 'swatch')
@@ -511,7 +536,10 @@ async function lesson(entry: Entry, name: string) {
     }
     pop.append(el('p', { class: 'pop-hint' }, 'Доска делится на страницы выбранного размера. В PDF сохраняются страницы, на которых что-то есть.'))
   })
-  board.onSheet = () => refreshSheet()
+  board.onSheet = () => {
+    refreshSheet()
+    showPage()
+  }
 
   // layers, as in the lesson editor
   const layersBtn = btn(icons.layers, 'Слои', () => {})
@@ -973,6 +1001,7 @@ async function lesson(entry: Entry, name: string) {
   }
 
   board.onViewport = () => {
+    showPage()
     placeCursors()
     minimap.draw()
     placeSelbar()
