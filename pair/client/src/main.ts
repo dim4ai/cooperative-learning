@@ -43,8 +43,10 @@ const PANEL: { members: ToolId[]; title?: string }[] = [
   { members: WORD_MARKS, title: 'Разбор слова' },
   { members: [...SHAPE_KINDS, 'polygon'], title: 'Фигуры' },
   { members: ['text'] },
-  { members: ['image', 'pdf', 'snapshot'] },
+  { members: ['image', 'pdf', 'snapshot'], title: 'Вставить: картинку, PDF или снимок с камеры' },
 ]
+/** Not tools but one-off actions */
+const ACTIONS: ToolId[] = ['image', 'pdf', 'snapshot']
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
 const WIDTHS = [2, 4, 8]
@@ -246,7 +248,7 @@ async function lesson(entry: Entry, name: string) {
   const pick = (id: ToolId) => {
     if (board.readOnly && id !== 'hand' && id !== 'pointer') return
     if (id === 'image') $<HTMLInputElement>('#file').click()
-    else if (id === 'pdf') $<HTMLInputElement>('#pdf').click()
+    else if (id === 'pdf') importPdf()
     else if (id === 'snapshot') snapshot(null)
     else board.setTool(id)
   }
@@ -263,7 +265,7 @@ async function lesson(entry: Entry, name: string) {
       flyout: null,
       show() {
         button.innerHTML = icons[g.current] + (members.length > 1 ? '<i class="more"></i>' : '')
-        button.title = title ? `${title}: ${label(g.current)}` : label(g.current)
+        button.title = !title ? label(g.current) : members.every((id) => ACTIONS.includes(id)) ? title : `${title}: ${label(g.current)}`
         button.setAttribute('aria-label', info(g.current).title)
         button.dataset.tool = g.current
       },
@@ -286,10 +288,16 @@ async function lesson(entry: Entry, name: string) {
       wrap.append(flyout)
       g.flyout = flyout
     }
+    // a group of one-off actions (picture, PDF, snapshot) only opens its row: nothing pops up by surprise
+    const actions = members.every((id) => ACTIONS.includes(id))
     button.addEventListener('click', () => {
       const open = g.flyout && g.flyout.hidden
       closeFlyouts()
-      if (g.current === 'image' || g.current === 'snapshot' || g.current === 'pdf' || board.tool !== g.current) pick(g.current)
+      if (actions && g.flyout) {
+        if (open) g.flyout.hidden = false
+        return
+      }
+      if (ACTIONS.includes(g.current) || board.tool !== g.current) pick(g.current)
       if (open) g.flyout!.hidden = false
     })
     groups.push(g)
@@ -845,9 +853,9 @@ async function lesson(entry: Entry, name: string) {
     if (f) importPdf(f)
     ;(e.target as HTMLInputElement).value = ''
   })
-  async function importPdf(file: File) {
+  async function importPdf(file?: File) {
     if (board.readOnly) return
-    say('Открываем PDF…')
+    if (file) say('Открываем PDF…')
     try {
       const { pdfDialog } = await import('./pdfimport')
       const pages = await pdfDialog(file)

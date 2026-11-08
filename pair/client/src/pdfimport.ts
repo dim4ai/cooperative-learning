@@ -58,8 +58,64 @@ async function renderPage(doc: PDFDocumentProxy, n: number, width: number) {
   return cv
 }
 
-/** Opens the dialog; resolves with the chosen pages as pictures, or null if cancelled. */
-export async function pdfDialog(file: File): Promise<Blob[] | null> {
+/** First step without a file: say what this is, take a dropped file or open the file picker on request. */
+function chooseFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const overlay = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Вставка PDF' })
+    const card = h('div', { class: 'modal-card pdf-pick' })
+    const head = h('div', { class: 'modal-head' })
+    head.append(h('b', {}, 'Вставка PDF'))
+    const zone = h('div', { class: 'pdf-drop' })
+    zone.append(
+      h('p', { class: 'pdf-drop-title' }, 'Перетащите PDF-файл сюда'),
+      h('p', { class: 'muted' }, 'Потом можно будет выбрать страницы и обрезать поля. Страницы лягут по листам доски, в заблокированный слой «Подложка».'),
+    )
+    const input = h('input', { type: 'file', accept: 'application/pdf,.pdf', hidden: '' }) as HTMLInputElement
+    const pick = h('button', { class: 'primary-sm' }, 'Выбрать файл…')
+    zone.append(pick, input)
+    const foot = h('div', { class: 'modal-foot' })
+    const cancel = h('button', { class: 'secondary' }, 'Отмена')
+    foot.append(h('div', { class: 'grow' }), cancel)
+    card.append(head, zone, foot)
+    overlay.append(card)
+    document.body.append(overlay)
+    const close = (f: File | null) => {
+      document.removeEventListener('keydown', onKey, true)
+      overlay.remove()
+      resolve(f)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        close(null)
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name)
+    pick.addEventListener('click', () => input.click())
+    input.addEventListener('change', () => input.files?.[0] && close(input.files[0]))
+    cancel.addEventListener('click', () => close(null))
+    overlay.addEventListener('pointerdown', (e) => e.target === overlay && close(null))
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      zone.classList.add('over')
+    })
+    zone.addEventListener('dragleave', () => zone.classList.remove('over'))
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      zone.classList.remove('over')
+      const f = [...(e.dataTransfer?.files ?? [])].find(isPdf)
+      if (f) close(f)
+      else zone.querySelector('.muted')!.textContent = 'Это не PDF. Нужен файл с расширением .pdf'
+    })
+  })
+}
+
+/** Opens the dialog (asking for the file first if none given); resolves with the chosen pages as pictures, or null if cancelled. */
+export async function pdfDialog(given?: File): Promise<Blob[] | null> {
+  const file = given ?? (await chooseFile())
+  if (!file) return null
   const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
   const doc = await task.promise
   const n = doc.numPages

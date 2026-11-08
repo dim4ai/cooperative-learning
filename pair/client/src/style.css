@@ -1241,3 +1241,35 @@ button.primary:hover {
   font-size: 14px;
   color: var(--muted);
 }
+
+.pdf-pick {
+  width: min(520px, 100%);
+}
+
+.pdf-drop {
+  margin: 16px;
+  padding: 28px 20px;
+  border: 2px dashed var(--panel-border);
+  border-radius: 12px;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.pdf-drop.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pdf-drop-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pdf-drop .muted {
+  max-width: 380px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
