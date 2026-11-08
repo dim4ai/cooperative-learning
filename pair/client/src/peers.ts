@@ -24,10 +24,14 @@ class PeerLink {
   private ignoreOffer = false
   private timer: number
   private restarted = false
+  /** set once a remote description has been applied; until then only the initiator may offer */
+  private negotiated = false
 
   constructor(
     readonly peer: PeerInfo,
     private polite: boolean,
+    /** the newcomer makes the first offer; the other side waits for it, so the first offers never collide */
+    private initiator: boolean,
     private sig: Signaling,
     local: MediaStream | null,
     iceServers: RTCIceServer[],
@@ -51,6 +55,8 @@ class PeerLink {
     pc.ontrack = ({ streams }) => streams[0] && on.stream(peer, streams[0])
     pc.onicecandidate = ({ candidate }) => sig.send(peer.id, { candidate })
     pc.onnegotiationneeded = async () => {
+      // the browser asks again once the first exchange is done, if anything is still left to negotiate
+      if (!this.initiator && !this.negotiated) return
       try {
         this.makingOffer = true
         await pc.setLocalDescription()
@@ -102,6 +108,7 @@ class PeerLink {
         this.ignoreOffer = !this.polite && collision
         if (this.ignoreOffer) return
         await pc.setRemoteDescription(d)
+        this.negotiated = true
         if (d.type === 'offer') {
           await pc.setLocalDescription()
           this.sig.send(this.peer.id, { description: pc.localDescription })
@@ -125,7 +132,7 @@ class PeerLink {
 }
 
 export class Peers {
-  private links = new Map<string, PeerLink>()
+  readonly links = new Map<string, PeerLink>()
   private myId = ''
   private iceServers: RTCIceServer[] = []
   private sig: Signaling
@@ -133,32 +140,34 @@ export class Peers {
   constructor(
     room: string,
     name: string,
+    key: string | null,
     private local: MediaStream | null,
-    private on: PeerEvents & { waiting: () => void; full: () => void; offline: () => void },
+    private on: PeerEvents & { waiting: () => void; full: () => void; badKey: () => void; offline: () => void },
   ) {
-    this.sig = new Signaling(room, 'main', name, {
+    this.sig = new Signaling(room, 'main', name, key, {
       joined: (id, peers, iceServers) => {
         this.iceServers = iceServers
         // after a reconnect we get a new id: old links are dead
         for (const l of this.links.values()) this.drop(l.peer.id)
         this.myId = id
         if (peers.length === 0) on.waiting()
-        for (const p of peers) this.link(p)
+        for (const p of peers) this.link(p, true)
       },
-      peerJoined: (p) => this.link(p),
+      peerJoined: (p) => this.link(p, false),
       peerLeft: (id) => {
         this.drop(id)
         if (this.links.size === 0) on.waiting()
       },
       signal: (from, data) => this.links.get(from)?.signal(data),
       full: () => on.full(),
+      badKey: () => on.badKey(),
       offline: () => on.offline(),
     })
   }
 
-  private link(p: PeerInfo) {
+  private link(p: PeerInfo, initiator: boolean) {
     this.drop(p.id)
-    this.links.set(p.id, new PeerLink(p, this.myId > p.id, this.sig, this.local, this.iceServers, this.on))
+    this.links.set(p.id, new PeerLink(p, this.myId > p.id, initiator, this.sig, this.local, this.iceServers, this.on))
   }
 
   private drop(id: string) {

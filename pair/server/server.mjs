@@ -8,7 +8,7 @@
 // directly, the client tells the user so instead of us paying for their traffic.
 
 import http from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 
 const PORT = Number(process.env.PORT ?? 13119)
@@ -19,8 +19,9 @@ export const LIMITS = {
   roomSize: 4, // two people, plus a phone camera each later
   maxRooms: 5000,
   maxSockets: 10000,
-  socketsPerIp: 12,
-  connectsPerIpPerMinute: 30,
+  // a whole school often sits behind one IP; a signaling socket costs almost nothing
+  socketsPerIp: Number(process.env.SOCKETS_PER_IP ?? 100),
+  connectsPerIpPerMinute: Number(process.env.CONNECTS_PER_IP_PER_MINUTE ?? 120),
   msgsPerSecond: 30, // token bucket per socket; ICE trickle bursts fit comfortably
   msgsBurst: 120,
   roomTtlMs: 12 * 60 * 60 * 1000, // nobody holds a lesson for 12 hours
@@ -28,7 +29,22 @@ export const LIMITS = {
 }
 
 const ROOM_RE = /^[a-z0-9]{6,32}$/
+const KEY_RE = /^[a-z0-9]{16,40}$/
 const ROLES = new Set(['main', 'cam'])
+const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
+
+/**
+ * The teacher's link carries a secret key; the room code is derived from it.
+ * Holding the key proves you're the teacher, and the student's link (the code)
+ * can't be turned back into the key. Nothing is stored on the server.
+ * Must match roomFromKey() in client/src/roles.ts.
+ */
+export function roomFromKey(key) {
+  const h = createHash('sha256').update(`co-learn-pair:${key}`).digest()
+  let code = ''
+  for (let i = 0; i < 12; i++) code += ALPHABET[h[i] % 36]
+  return code
+}
 
 export function createServer({ log = console.log, iceServers = [] } = {}) {
   /** @type {Map<string, {peers: Map<string, any>, created: number}>} */
@@ -123,6 +139,12 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
         if (typeof msg.room !== 'string' || !ROOM_RE.test(msg.room)) return send(ws, { t: 'error', error: 'bad room' })
         const role = ROLES.has(msg.role) ? msg.role : 'main'
         const name = typeof msg.name === 'string' ? msg.name.slice(0, 40) : ''
+        let teacher = false
+        if (msg.key !== undefined) {
+          if (typeof msg.key !== 'string' || !KEY_RE.test(msg.key) || roomFromKey(msg.key) !== msg.room)
+            return send(ws, { t: 'error', error: 'bad key' })
+          teacher = true
+        }
         let room = rooms.get(msg.room)
         if (!room) {
           if (rooms.size >= LIMITS.maxRooms) return send(ws, { t: 'error', error: 'server busy' })
@@ -132,12 +154,13 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
         if (room.peers.size >= LIMITS.roomSize) return send(ws, { t: 'full' })
         ws.role = role
         ws.name = name
-        const others = [...room.peers.values()].map((p) => ({ id: p.id, role: p.role, name: p.name }))
+        ws.teacher = teacher
+        const others = [...room.peers.values()].map((p) => ({ id: p.id, role: p.role, name: p.name, teacher: p.teacher }))
         room.peers.set(ws.id, ws)
         ws.room = msg.room
-        send(ws, { t: 'joined', id: ws.id, peers: others, iceServers })
+        send(ws, { t: 'joined', id: ws.id, peers: others, teacher, iceServers })
         for (const other of room.peers.values()) {
-          if (other !== ws) send(other, { t: 'peer-joined', id: ws.id, role, name })
+          if (other !== ws) send(other, { t: 'peer-joined', id: ws.id, role, name, teacher })
         }
         return
       }

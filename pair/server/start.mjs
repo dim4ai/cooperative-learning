@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs'
-import { createServer } from './server.mjs'
-import { createStunServer } from './stun.mjs'
 
-// addresses live only in .env on the machine, never in the repo (see .env.example)
+// addresses live only in .env on the machine, never in the repo (see .env.example);
+// loaded before importing the server, which reads its limits at import time
 const envFile = new URL('./.env', import.meta.url).pathname
 if (existsSync(envFile)) process.loadEnvFile(envFile)
+
+const { createServer } = await import('./server.mjs')
+const { createStunServer } = await import('./stun.mjs')
 
 function iceServers() {
   const raw = process.env.ICE_SERVERS

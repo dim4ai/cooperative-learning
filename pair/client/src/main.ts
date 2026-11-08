@@ -1,8 +1,9 @@
 import './style.css'
-import { Board, newId, type Tool } from './board'
+import { Board, type Tool } from './board'
 import { Peers, type LinkState } from './peers'
 import type { PeerInfo } from './signaling'
 import { icons } from './icons'
+import { entryFromHash, newKey, studentLink, type Entry } from './roles'
 
 const app = document.getElementById('app')!
 
@@ -22,11 +23,6 @@ const TOOLS: { id: Tool | 'image'; title: string; key: string }[] = [
 ]
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const WIDTHS = [2, 4, 8]
-
-const roomFromHash = () => {
-  const h = location.hash.slice(1).toLowerCase()
-  return /^[a-z0-9]{6,32}$/.test(h) ? h : null
-}
 
 function savedName() {
   try {
@@ -52,24 +48,48 @@ function startScreen() {
       <h1>Занятие вдвоём</h1>
       <p>Общая доска, видео и звук для учителя и ученика. Бесплатно и без регистрации: связь идёт напрямую между вашими браузерами.</p>
       <button class="primary" id="create">Начать занятие</button>
-      <p class="hint">После начала отправьте ученику ссылку из адресной строки.</p>
+      <p class="hint">Вы получите две ссылки: свою, учительскую, и ссылку для ученика.</p>
     </main>`
   app.querySelector('#create')!.addEventListener('click', () => {
-    location.hash = newId() + newId().slice(0, 3)
+    location.hash = 't.' + newKey()
   })
 }
 
-function joinScreen(room: string) {
+function joinScreen(entry: Entry) {
+  const teacher = !!entry.key
   app.className = 'screen'
   app.innerHTML = `
     <main class="card">
-      <h1>Занятие вдвоём</h1>
+      <h1>${teacher ? 'Вы учитель' : 'Занятие вдвоём'}</h1>
+      ${
+        teacher
+          ? `<div class="links">
+        <p><b>Ссылка для ученика</b> — отправьте её ученику:</p>
+        <div class="copyline"><code id="student-link"></code><button id="copy-student">Скопировать</button></div>
+        <p class="hint">Ваша ссылка — та, что сейчас в адресной строке. Сохраните её в закладки, чтобы заходить учителем
+        в это же занятие, и никому не отправляйте. Обе ссылки можно использовать снова в следующий раз.</p>
+      </div>`
+          : ''
+      }
       <label>Как вас подписать
         <input id="name" maxlength="40" autocomplete="name" placeholder="Например, Анна Сергеевна">
       </label>
       <button class="primary" id="join">Войти</button>
       <p class="hint">Браузер спросит доступ к камере и микрофону. Без них доска тоже работает.</p>
     </main>`
+  if (teacher) {
+    const link = studentLink(entry.room)
+    app.querySelector('#student-link')!.textContent = link
+    const btn = app.querySelector<HTMLButtonElement>('#copy-student')!
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(link)
+        btn.textContent = 'Скопировано'
+      } catch {
+        getSelection()?.selectAllChildren(app.querySelector('#student-link')!)
+      }
+    })
+  }
   const input = app.querySelector<HTMLInputElement>('#name')!
   input.value = savedName()
   const go = () => {
@@ -77,7 +97,7 @@ function joinScreen(room: string) {
     try {
       localStorage.setItem('pair.name', name)
     } catch {}
-    lesson(room, name)
+    lesson(entry, name)
   }
   app.querySelector('#join')!.addEventListener('click', go)
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go())
@@ -96,7 +116,9 @@ async function getMedia(): Promise<MediaStream | null> {
 
 // ---------- the lesson ----------
 
-async function lesson(room: string, name: string) {
+async function lesson(entry: Entry, name: string) {
+  const { room, key } = entry
+  const teacher = !!key
   app.className = 'lesson'
   app.innerHTML = `
     <div id="wrap"><canvas id="board"></canvas><div id="cursors"></div></div>
@@ -200,7 +222,7 @@ async function lesson(room: string, name: string) {
   const local = await getMedia()
   const camBtn = el('button', { title: 'Камера', 'aria-label': 'Камера' }, icons.cam)
   const micBtn = el('button', { title: 'Микрофон', 'aria-label': 'Микрофон' }, icons.mic)
-  const linkBtn = el('button', { title: 'Скопировать ссылку на занятие', 'aria-label': 'Ссылка' }, icons.link)
+  const linkBtn = el('button', { title: 'Скопировать ссылку для ученика', 'aria-label': 'Ссылка для ученика' }, icons.link)
   const leaveBtn = el('button', { class: 'leave', title: 'Выйти', 'aria-label': 'Выйти' }, icons.leave)
   const toggle = (kind: 'audio' | 'video', btn: HTMLElement, on: string, off: string) => {
     const tracks = local?.getTracks().filter((t) => t.kind === kind) ?? []
@@ -232,10 +254,10 @@ async function lesson(room: string, name: string) {
   }
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(location.href)
-      say('Ссылка скопирована — отправьте её собеседнику')
+      await navigator.clipboard.writeText(studentLink(room))
+      say(teacher ? 'Ссылка для ученика скопирована' : 'Ссылка на занятие скопирована')
     } catch {
-      say(location.href)
+      say(studentLink(room))
     }
   }
 
@@ -252,7 +274,7 @@ async function lesson(room: string, name: string) {
     return t
   }
   if (local?.getVideoTracks().length) {
-    const v = tile('me', name || 'Вы', true).querySelector('video')!
+    const v = tile('me', label(name || 'Вы', teacher), true).querySelector('video')!
     v.muted = true
     v.srcObject = local
   }
@@ -267,7 +289,8 @@ async function lesson(room: string, name: string) {
   }
   function refreshStatus() {
     const list = [...states.values()]
-    if (!list.length) return showStatus('Ждём собеседника. <button data-copy>Скопировать ссылку</button>')
+    if (!list.length)
+      return showStatus(teacher ? 'Ждём ученика. <button data-copy>Скопировать ссылку для ученика</button>' : 'Ждём учителя…')
     const failed = list.find((s) => s.state === 'failed')
     if (failed)
       return showStatus(
@@ -293,16 +316,17 @@ async function lesson(room: string, name: string) {
     zLabel.textContent = `${Math.round(board.canvas.getZoom() * 100)}%`
   }
 
-  const peers = new Peers(room, name, local, {
+  const peers = new Peers(room, name, key, local, {
     waiting: () => refreshStatus(),
     full: () => showStatus('В этом занятии уже двое. Попросите новую ссылку.'),
+    badKey: () => showStatus('Ссылка учителя повреждена. Скопируйте её заново целиком.'),
     offline: () => showStatus('Нет связи с сервером, переподключаемся…'),
     state: (peer, state) => {
       states.set(peer.id, { peer, state })
       refreshStatus()
     },
     stream: (peer, stream) => {
-      const t = tile(peer.id, peer.name || 'Собеседник', false)
+      const t = tile(peer.id, label(peer.name || (peer.teacher ? 'Учитель' : 'Ученик'), peer.teacher), false)
       const v = t.querySelector('video')!
       if (v.srcObject !== stream) v.srcObject = stream
       t.classList.toggle('novideo', !stream.getVideoTracks().length)
@@ -312,7 +336,7 @@ async function lesson(room: string, name: string) {
       if (msg.op === 'cur') {
         let c = cursorAt.get(peer.id)
         if (!c) {
-          const e = el('div', { class: 'cursor' }, `<span>${escapeHtml(peer.name || 'Собеседник')}</span>`)
+          const e = el('div', { class: 'cursor' }, `<span>${escapeHtml(peer.name || (peer.teacher ? 'Учитель' : 'Ученик'))}</span>`)
           cursors.append(e)
           c = { x: 0, y: 0, el: e, timer: 0 }
           cursorAt.set(peer.id, c)
@@ -338,6 +362,7 @@ async function lesson(room: string, name: string) {
   })
   refreshStatus()
 
+  if (import.meta.env.DEV) Object.assign(window, { peers })
   board.onOp = (op) => peers.broadcast(op)
   board.onCursor = (x, y) => peers.broadcastVolatile({ op: 'cur', x, y })
 
@@ -351,13 +376,18 @@ async function lesson(room: string, name: string) {
   window.addEventListener('beforeunload', () => peers.leave())
 }
 
+/** Caption under a video: the name, with a mark for the teacher. */
+function label(name: string, teacher: boolean) {
+  return teacher && name !== 'Учитель' ? `${name} · учитель` : name
+}
+
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 }
 
-function route() {
-  const room = roomFromHash()
-  if (room) joinScreen(room)
+async function route() {
+  const entry = await entryFromHash()
+  if (entry) joinScreen(entry)
   else startScreen()
 }
 window.addEventListener('hashchange', () => location.reload())

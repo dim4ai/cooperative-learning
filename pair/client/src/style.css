@@ -426,3 +426,49 @@ button.primary:hover {
     max-width: calc(100% - 32px);
   }
 }
+
+.links {
+  background: #f8fafc;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.links p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.links .hint {
+  margin: 10px 0 0;
+}
+
+.copyline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.copyline code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 13px;
+  background: #fff;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  user-select: all;
+}
+
+.copyline button {
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 7px 12px;
+  font-size: 14px;
+}

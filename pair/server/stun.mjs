@@ -71,6 +71,7 @@ function ipv6Bytes(addr) {
 
 export function createStunServer({ port = 3478, log = console.log } = {}) {
   const buckets = new Map() // ip -> { tokens, last }
+  const dropped = new Map() // ip -> count, reported once a minute
 
   function allowed(ip) {
     const now = Date.now()
@@ -78,7 +79,10 @@ export function createStunServer({ port = 3478, log = console.log } = {}) {
     b.tokens = Math.min(STUN_LIMITS.burst, b.tokens + ((now - b.last) / 1000) * STUN_LIMITS.perIpPerSecond)
     b.last = now
     buckets.set(ip, b)
-    if (b.tokens < 1) return false
+    if (b.tokens < 1) {
+      dropped.set(ip, (dropped.get(ip) ?? 0) + 1)
+      return false
+    }
     b.tokens -= 1
     return true
   }
@@ -88,6 +92,14 @@ export function createStunServer({ port = 3478, log = console.log } = {}) {
     for (const [ip, b] of buckets) if (now - b.last > 10_000) buckets.delete(ip)
   }, 10_000)
   sweeper.unref()
+
+  const reporter = setInterval(() => {
+    if (!dropped.size) return
+    const total = [...dropped.values()].reduce((a, b) => a + b, 0)
+    log(`stun: rate limit dropped ${total} requests from ${dropped.size} ip(s)`)
+    dropped.clear()
+  }, 60_000)
+  reporter.unref()
 
   // dual-stack socket: IPv4 clients arrive as ::ffff:a.b.c.d
   let socket = dgram.createSocket({ type: 'udp6', ipv6Only: false })
@@ -118,6 +130,7 @@ export function createStunServer({ port = 3478, log = console.log } = {}) {
     },
     close() {
       clearInterval(sweeper)
+      clearInterval(reporter)
       return new Promise((resolve) => socket.close(() => resolve()))
     },
   }

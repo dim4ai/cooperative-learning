@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WebSocket } from 'ws'
-import { createServer, LIMITS } from './server.mjs'
+import { createServer, LIMITS, roomFromKey } from './server.mjs'
 
 async function withServer(fn) {
   const server = createServer({ log: () => {} })
@@ -198,4 +198,31 @@ test('stun encodes ipv6 addresses', () => {
   const res = bindingResponse(req, '2001:db8::1', 40000)
   assert.equal(res.readUInt8(20 + 5), 0x02)
   assert.equal(res.readUInt16BE(20 + 2), 20)
+})
+
+test('teacher is recognised by the key, never by the bare code', async () => {
+  await withServer(async (url) => {
+    const key = 'k3y0fth3t3ach3rabcdef'
+    const room = roomFromKey(key)
+    assert.match(room, /^[a-z0-9]{12}$/)
+
+    const t = await connect(url)
+    t.sendJson({ t: 'join', room, key, name: 'Учитель' })
+    const jt = await t.next('joined')
+    assert.equal(jt.teacher, true)
+
+    const s = await connect(url)
+    s.sendJson({ t: 'join', room, name: 'Ученик' })
+    const js = await s.next('joined')
+    assert.equal(js.teacher, false)
+    assert.equal(js.peers[0].teacher, true)
+    const pj = await t.next('peer-joined')
+    assert.equal(pj.teacher, false)
+
+    // a wrong key for this room is refused
+    const fake = await connect(url)
+    fake.sendJson({ t: 'join', room, key: 'notthekeynotthekey00' })
+    assert.equal((await fake.next('error')).error, 'bad key')
+    for (const p of [t, s, fake]) p.close()
+  })
 })
