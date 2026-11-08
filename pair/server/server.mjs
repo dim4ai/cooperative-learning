@@ -31,7 +31,7 @@ export const LIMITS = {
 const ROOM_RE = /^[a-z0-9]{6,32}$/
 const KEY_RE = /^[a-z0-9]{16,40}$/
 const ROLES = new Set(['main', 'cam'])
-const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
+const ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz' // no look-alikes: codes are dictated and typed
 
 /**
  * The teacher's link carries a secret key; the room code is derived from it.
@@ -42,7 +42,7 @@ const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 export function roomFromKey(key) {
   const h = createHash('sha256').update(`co-learn-pair:${key}`).digest()
   let code = ''
-  for (let i = 0; i < 12; i++) code += ALPHABET[h[i] % 36]
+  for (let i = 0; i < 12; i++) code += ALPHABET[h[i] % ALPHABET.length]
   return code
 }
 

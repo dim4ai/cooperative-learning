@@ -3,7 +3,7 @@ import { Board, type Tool } from './board'
 import { Peers, type LinkState } from './peers'
 import type { PeerInfo } from './signaling'
 import { icons } from './icons'
-import { entryFromHash, newKey, studentLink, type Entry } from './roles'
+import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 
 const app = document.getElementById('app')!
 
@@ -41,18 +41,47 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 
 // ---------- start / join ----------
 
-function startScreen() {
+function startScreen(error = '') {
   app.className = 'screen'
   app.innerHTML = `
     <main class="card">
       <h1>Занятие вдвоём</h1>
       <p>Общая доска, видео и звук для учителя и ученика. Бесплатно и без регистрации: связь идёт напрямую между вашими браузерами.</p>
       <button class="primary" id="create">Начать занятие</button>
-      <p class="hint">Вы получите две ссылки: свою, учительскую, и ссылку для ученика.</p>
+      <p class="hint">Вы получите два кода: свой, учительский, и код для ученика.</p>
+      <form id="enter" class="enter">
+        <label for="code">Войти по коду занятия</label>
+        <div class="copyline">
+          <input id="code" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxx-xxxx-xxxx">
+          <button type="submit">Войти</button>
+        </div>
+        <p class="hint" id="code-hint">Код ученика — 12 знаков, код учителя — 20. Можно вставить и ссылку целиком.</p>
+      </form>
     </main>`
   app.querySelector('#create')!.addEventListener('click', () => {
     location.hash = 't.' + newKey()
   })
+  const input = app.querySelector<HTMLInputElement>('#code')!
+  const hint = app.querySelector<HTMLElement>('#code-hint')!
+  const fail = (text: string) => {
+    hint.textContent = text
+    hint.classList.add('error')
+    input.focus()
+  }
+  if (error) fail(error)
+  app.querySelector('#enter')!.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const entry = await parseCode(input.value)
+    if (!entry) return fail('Код не распознан. Проверьте его: 12 знаков у ученика, 20 у учителя.')
+    location.hash = entry.key ? `t.${entry.key}` : entry.room
+  })
+}
+
+function codeBlock(title: string, code: string, link: string, id: string) {
+  return `<div class="code-block">
+      <p>${title}</p>
+      <div class="copyline"><code class="code">${pretty(code)}</code><button data-copy-link="${link}" id="${id}">Скопировать ссылку</button></div>
+    </div>`
 }
 
 function joinScreen(entry: Entry) {
@@ -64,12 +93,11 @@ function joinScreen(entry: Entry) {
       ${
         teacher
           ? `<div class="links">
-        <p><b>Ссылка для ученика</b> — отправьте её ученику:</p>
-        <div class="copyline"><code id="student-link"></code><button id="copy-student">Скопировать</button></div>
-        <p class="hint">Ваша ссылка — та, что сейчас в адресной строке. Сохраните её в закладки, чтобы заходить учителем
-        в это же занятие, и никому не отправляйте. Обе ссылки можно использовать снова в следующий раз.</p>
+        ${codeBlock('<b>Код для ученика</b> — продиктуйте его или отправьте ссылку:', entry.room, studentLink(entry.room), 'copy-student')}
+        ${codeBlock('Ваш код учителя — сохраните и никому не давайте:', entry.key!, teacherLink(entry.key!), 'copy-teacher')}
+        <p class="hint">Оба кода можно использовать снова в следующий раз: занятие то же, доска новая.</p>
       </div>`
-          : ''
+          : `<p class="hint code-line">Код занятия: <code class="code">${pretty(entry.room)}</code></p>`
       }
       <label>Как вас подписать
         <input id="name" maxlength="40" autocomplete="name" placeholder="Например, Анна Сергеевна">
@@ -77,16 +105,13 @@ function joinScreen(entry: Entry) {
       <button class="primary" id="join">Войти</button>
       <p class="hint">Браузер спросит доступ к камере и микрофону. Без них доска тоже работает.</p>
     </main>`
-  if (teacher) {
-    const link = studentLink(entry.room)
-    app.querySelector('#student-link')!.textContent = link
-    const btn = app.querySelector<HTMLButtonElement>('#copy-student')!
+  for (const btn of app.querySelectorAll<HTMLButtonElement>('[data-copy-link]')) {
     btn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(link)
+        await navigator.clipboard.writeText(btn.dataset.copyLink!)
         btn.textContent = 'Скопировано'
       } catch {
-        getSelection()?.selectAllChildren(app.querySelector('#student-link')!)
+        btn.textContent = btn.dataset.copyLink!
       }
     })
   }
@@ -290,7 +315,9 @@ async function lesson(entry: Entry, name: string) {
   function refreshStatus() {
     const list = [...states.values()]
     if (!list.length)
-      return showStatus(teacher ? 'Ждём ученика. <button data-copy>Скопировать ссылку для ученика</button>' : 'Ждём учителя…')
+      return showStatus(
+        teacher ? `Ждём ученика. Код для ученика: <b>${pretty(room)}</b> <button data-copy>Скопировать ссылку</button>` : 'Ждём учителя…',
+      )
     const failed = list.find((s) => s.state === 'failed')
     if (failed)
       return showStatus(
@@ -388,7 +415,7 @@ function escapeHtml(s: string) {
 async function route() {
   const entry = await entryFromHash()
   if (entry) joinScreen(entry)
-  else startScreen()
+  else startScreen(location.hash.length > 1 ? 'Ссылка не распознана — возможно, она скопирована не целиком. Введите код занятия.' : '')
 }
 window.addEventListener('hashchange', () => location.reload())
 route()

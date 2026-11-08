@@ -204,7 +204,7 @@ test('teacher is recognised by the key, never by the bare code', async () => {
   await withServer(async (url) => {
     const key = 'k3y0fth3t3ach3rabcdef'
     const room = roomFromKey(key)
-    assert.match(room, /^[a-z0-9]{12}$/)
+    assert.match(room, /^[23456789abcdefghjkmnpqrstuvwxyz]{12}$/)
 
     const t = await connect(url)
     t.sendJson({ t: 'join', room, key, name: 'Учитель' })

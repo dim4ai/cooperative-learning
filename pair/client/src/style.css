@@ -472,3 +472,62 @@ button.primary:hover {
   padding: 7px 12px;
   font-size: 14px;
 }
+
+.enter {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.enter label {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.enter input {
+  flex: 1;
+  min-width: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+
+.copyline input + button {
+  padding: 10px 16px;
+  font-size: 15px;
+}
+
+.hint.error {
+  color: var(--danger);
+}
+
+.code {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.code-block + .code-block {
+  margin-top: 12px;
+}
+
+.code-line .code {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+#status b {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+
+/* the whole code must stay visible; the button wraps below when there is no room */
+.code-block .copyline {
+  flex-wrap: wrap;
+}
+
+.code-block .copyline code {
+  flex: 1 0 auto;
+  overflow: visible;
+}
