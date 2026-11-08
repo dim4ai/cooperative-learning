@@ -123,11 +123,13 @@ export function drawPaper(cv: HTMLCanvasElement, sheet: Sheet, v: number[]) {
 }
 
 type Box = { x0: number; y0: number; x1: number; y1: number }
+type Steps = { gx: number; gy: number; p: number; k: number } // cell width/height, row period, row-offset scale
 
 /**
  * Draws the ruling into a W×H (CSS pixels) area of ctx for viewport transform v.
- * Aligned: each page holds a whole number of cells or rows, centred, the leftover strip
- * stays blank at the edges as a margin (like a notebook); otherwise the ruling is endless.
+ * Aligned: the cell (or row) size is fitted to the page so that every page holds whole
+ * cells and rows; the ruling stays one continuous sheet across page borders, and the
+ * darker every-fifth lines run on uninterrupted. The fit changes sizes by about 1%.
  */
 export function renderPaper(
   ctx: CanvasRenderingContext2D,
@@ -142,57 +144,30 @@ export function renderPaper(
   const r = RULINGS[sheet.paper]
   const z = v[0]
   const view: Box = { x0: -v[4] / z, y0: -v[5] / z, x1: -v[4] / z + W / z, y1: -v[5] / z + H / z }
-  const lw = sheet.weight * lineScale
-  if (!aligned) {
-    drawRuling(ctx, r, sheet, z, view, view, lw, { x: 0, y: 0 })
-    ctx.globalAlpha = 1
-    return
-  }
-  const { w, h } = pageBox(sheet)
-  const a = innerArea(r, w, h)
-  for (let i = Math.floor(view.x0 / w); i * w <= view.x1; i++) {
-    for (let j = Math.floor(view.y0 / h); j * h <= view.y1; j++) {
-      const area: Box = { x0: i * w + a.ox, y0: j * h + a.oy, x1: i * w + a.ox + a.cw, y1: j * h + a.oy + a.ch }
-      const vis: Box = { x0: Math.max(view.x0, area.x0), y0: Math.max(view.y0, area.y0), x1: Math.min(view.x1, area.x1), y1: Math.min(view.y1, area.y1) }
-      if (vis.x0 > vis.x1 + 1 || vis.y0 > vis.y1 + 1) continue
-      ctx.save()
-      ctx.beginPath()
-      ctx.rect((area.x0 - view.x0) * z - lw, (area.y0 - view.y0) * z - lw, (area.x1 - area.x0) * z + 2 * lw, (area.y1 - area.y0) * z + 2 * lw)
-      ctx.clip()
-      drawRuling(ctx, r, sheet, z, view, vis, lw, { x: area.x0, y: area.y0 })
-      ctx.restore()
-    }
-  }
+  drawRuling(ctx, r, sheet, z, view, sheet.weight * lineScale, aligned ? fitted(r, sheet) : plainSteps(r))
   ctx.globalAlpha = 1
 }
 
-/** The part of a w×h page the ruling fills: whole cells, or whole rows, centred */
-function innerArea(r: Ruling, w: number, h: number) {
-  const g = r.grid ?? r.dots
-  if (g) {
-    const cw = Math.floor(w / g) * g
-    const ch = Math.floor(h / g) * g
-    return { ox: (w - cw) / 2, oy: (h - ch) / 2, cw, ch }
-  }
-  const p = r.period!
-  const last = Math.max(...r.rows!.map(([dy]) => dy))
-  const n = Math.max(1, Math.floor((h - last - p * 0.5) / p) + 1) // keep half a row of margin at least
-  const span = (n - 1) * p + last
-  return { ox: 0, oy: (h - span) / 2, cw: w, ch: span }
+function plainSteps(r: Ruling): Steps {
+  const g = r.grid ?? r.dots ?? 0
+  return { gx: g, gy: g, p: r.period ?? 0, k: 1 }
 }
 
-/**
- * The ruling's lines anchored at `origin`, drawn over `vis` (board coordinates);
- * `view` maps the board to the screen.
- */
-function drawRuling(ctx: CanvasRenderingContext2D, r: Ruling, sheet: Sheet, z: number, view: Box, vis: Box, lw: number, origin: { x: number; y: number }) {
+/** Steps that divide the page exactly */
+function fitted(r: Ruling, sheet: Sheet): Steps {
+  const { w, h } = pageBox(sheet)
+  const fit = (len: number, step: number) => len / Math.max(1, Math.round(len / step))
+  const g = r.grid ?? r.dots
+  const p = r.period ? fit(h, r.period) : 0
+  return { gx: g ? fit(w, g) : 0, gy: g ? fit(h, g) : 0, p, k: r.period ? p / r.period : 1 }
+}
+
+function drawRuling(ctx: CanvasRenderingContext2D, r: Ruling, sheet: Sheet, z: number, view: Box, lw: number, st: Steps) {
   const odd = Math.round(lw) % 2 === 1 ? 0.5 : 0 // odd widths sit on pixel centres
   const sx = (x: number) => Math.round((x - view.x0) * z) + odd // board → screen, pixel-aligned
   const sy = (y: number) => Math.round((y - view.y0) * z) + odd
-  const top = (vis.y0 - view.y0) * z - lw
-  const bottom = (vis.y1 - view.y0) * z + lw
-  const left = (vis.x0 - view.x0) * z - lw
-  const right = (vis.x1 - view.x0) * z + lw
+  const W = (view.x1 - view.x0) * z
+  const H = (view.y1 - view.y0) * z
   ctx.lineWidth = lw
   const stroke = (alpha: number, draw: () => void) => {
     ctx.globalAlpha = alpha
@@ -201,50 +176,50 @@ function drawRuling(ctx: CanvasRenderingContext2D, r: Ruling, sheet: Sheet, z: n
     draw()
     ctx.stroke()
   }
-  // first multiple of step from the origin at or before `start`
-  const from = (start: number, o: number, step: number) => o + Math.floor((start - o) / step) * step
-  const nth = (val: number, o: number, step: number, m: number) => ((Math.round((val - o) / step) % m) + m) % m === 0
+  // lines are counted from the board's origin, so every 5th is the same one on every page
+  const first = (start: number, step: number) => Math.floor(start / step)
 
   if (r.grid) {
-    const g = r.grid
-    const fine = g * z >= 6 // too dense when zoomed out: keep only major lines
+    const fine = Math.min(st.gx, st.gy) * z >= 6 // too dense when zoomed out: keep only major lines
+    const isMajor = (i: number) => !!r.major && ((i % r.major) + r.major) % r.major === 0
     const each = (major: boolean) => {
-      for (let x = from(vis.x0, origin.x, g); x <= vis.x1 + 0.01; x += g) {
-        if ((!!r.major && nth(x, origin.x, g, r.major)) === major) { ctx.moveTo(sx(x), top); ctx.lineTo(sx(x), bottom) }
+      for (let i = first(view.x0, st.gx); i * st.gx <= view.x1; i++) {
+        if (isMajor(i) === major) { ctx.moveTo(sx(i * st.gx), 0); ctx.lineTo(sx(i * st.gx), H) }
       }
-      for (let y = from(vis.y0, origin.y, g); y <= vis.y1 + 0.01; y += g) {
-        if ((!!r.major && nth(y, origin.y, g, r.major)) === major) { ctx.moveTo(left, sy(y)); ctx.lineTo(right, sy(y)) }
+      for (let j = first(view.y0, st.gy); j * st.gy <= view.y1; j++) {
+        if (isMajor(j) === major) { ctx.moveTo(0, sy(j * st.gy)); ctx.lineTo(W, sy(j * st.gy)) }
       }
     }
     if (fine) stroke(r.major ? 0.6 : 1, () => each(false))
     if (r.major) stroke(1, () => each(true))
   }
   if (r.dots) {
-    const g = r.dots
-    if (g * z >= 6) {
+    if (Math.min(st.gx, st.gy) * z >= 6) {
       ctx.globalAlpha = 1
       ctx.fillStyle = sheet.color
       const s = Math.max(1.5, 2 * Math.min(z, 1.5)) * Math.max(1, lw)
-      for (let x = from(vis.x0, origin.x, g); x <= vis.x1 + 0.01; x += g)
-        for (let y = from(vis.y0, origin.y, g); y <= vis.y1 + 0.01; y += g) ctx.fillRect(sx(x) - s / 2, sy(y) - s / 2, s, s)
+      for (let i = first(view.x0, st.gx); i * st.gx <= view.x1; i++)
+        for (let j = first(view.y0, st.gy); j * st.gy <= view.y1; j++) ctx.fillRect(sx(i * st.gx) - s / 2, sy(j * st.gy) - s / 2, s, s)
     }
   }
   if (r.period && r.rows) {
-    const p = r.period
-    for (const [dy, alpha] of r.rows) {
+    const p = st.p
+    for (const [d, alpha] of r.rows) {
+      const dy = d * st.k
       stroke(alpha, () => {
-        for (let y = from(vis.y0, origin.y + dy, p); y <= vis.y1 + 0.01; y += p) { ctx.moveTo(left, sy(y)); ctx.lineTo(right, sy(y)) }
+        for (let j = first(view.y0 - dy, p); j * p + dy <= view.y1; j++) { ctx.moveTo(0, sy(j * p + dy)); ctx.lineTo(W, sy(j * p + dy)) }
       })
     }
   }
   if (r.slant) {
     const { angle, step, alpha } = r.slant
     const k = 1 / Math.tan((angle * Math.PI) / 180) // x shift per unit of height
-    // a slanted line through (x, origin.y) runs to x - k*(y - origin.y); it crosses vis for x in [x0 + k*(y0-oy), x1 + k*(y1-oy)]
+    // a slanted line through (x, 0) runs to x - k*y; it crosses the view for x in [x0 + k*y0, x1 + k*y1]
     stroke(alpha, () => {
-      for (let x = from(vis.x0 + k * (vis.y0 - origin.y), origin.x, step); x <= vis.x1 + k * (vis.y1 - origin.y); x += step) {
-        ctx.moveTo((x - k * (vis.y0 - origin.y) - view.x0) * z, (vis.y0 - view.y0) * z)
-        ctx.lineTo((x - k * (vis.y1 - origin.y) - view.x0) * z, (vis.y1 - view.y0) * z)
+      for (let i = first(view.x0 + k * view.y0, step); i * step <= view.x1 + k * view.y1; i++) {
+        const x = i * step
+        ctx.moveTo((x - k * view.y0 - view.x0) * z, 0)
+        ctx.lineTo((x - k * view.y1 - view.x0) * z, H)
       }
     })
   }
