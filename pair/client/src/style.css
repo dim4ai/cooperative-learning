@@ -50,7 +50,7 @@ button {
 }
 
 .card {
-  width: min(440px, 100%);
+  width: min(500px, 100%);
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
@@ -522,12 +522,42 @@ button.primary:hover {
   letter-spacing: 0.04em;
 }
 
-/* the whole code must stay visible; the button wraps below when there is no room */
-.code-block .copyline {
-  flex-wrap: wrap;
+/* code and its button on one line; on narrow phones the button wraps below rather than hiding the code */
+.code-block p {
+  font-weight: 600;
+  margin-bottom: 6px;
 }
 
 .code-block .copyline code {
   flex: 1 0 auto;
   overflow: visible;
+}
+
+.code-block .short {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 22px 18px;
+  }
+  .links {
+    padding: 12px 10px;
+  }
+  .code-block .code {
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  .code-block .long {
+    display: none;
+  }
+  .code-block .short {
+    display: inline;
+  }
+}
+
+@media (max-width: 340px) {
+  .code-block .copyline {
+    flex-wrap: wrap;
+  }
 }

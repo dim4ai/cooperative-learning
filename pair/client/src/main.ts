@@ -47,8 +47,7 @@ function startScreen(error = '') {
     <main class="card">
       <h1>Занятие вдвоём</h1>
       <p>Общая доска, видео и звук для учителя и ученика. Бесплатно и без регистрации: связь идёт напрямую между вашими браузерами.</p>
-      <button class="primary" id="create">Начать занятие</button>
-      <p class="hint">Вы получите два кода: свой, учительский, и код для ученика.</p>
+      <button class="primary" id="create">Начать занятие с новым кодом</button>
       <form id="enter" class="enter">
         <label for="code">Войти по коду занятия</label>
         <div class="copyline">
@@ -80,9 +79,10 @@ function startScreen(error = '') {
 function codeBlock(title: string, code: string, link: string, id: string) {
   return `<div class="code-block">
       <p>${title}</p>
-      <div class="copyline"><code class="code">${pretty(code)}</code><button data-copy-link="${link}" id="${id}">Скопировать ссылку</button></div>
+      <div class="copyline"><code class="code">${pretty(code)}</code><button data-copy-link="${link}" id="${id}"><span class="long">Скопировать ссылку</span><span class="short">Ссылка</span></button></div>
     </div>`
 }
+
 
 function joinScreen(entry: Entry) {
   const teacher = !!entry.key
@@ -93,13 +93,14 @@ function joinScreen(entry: Entry) {
       ${
         teacher
           ? `<div class="links">
-        ${codeBlock('<b>Код для ученика</b> — продиктуйте его или отправьте ссылку:', entry.room, studentLink(entry.room), 'copy-student')}
-        ${codeBlock('Ваш код учителя — сохраните и никому не давайте:', entry.key!, teacherLink(entry.key!), 'copy-teacher')}
-        <p class="hint">Оба кода можно использовать снова в следующий раз: занятие то же, доска новая.</p>
+        ${codeBlock('Код для ученика', entry.room, studentLink(entry.room), 'copy-student')}
+        ${codeBlock('Код для учителя', entry.key!, teacherLink(entry.key!), 'copy-teacher')}
+        <p class="hint">Код для ученика продиктуйте ученику или отправьте ему ссылку. Код для учителя сохраните
+        и никому не давайте: по нему входят учителем. Оба кода можно использовать снова — занятие то же, доска новая.</p>
       </div>`
           : `<p class="hint code-line">Код занятия: <code class="code">${pretty(entry.room)}</code></p>`
       }
-      <label>Как вас подписать
+      <label>Ваше имя (будет отображаться на уроке)
         <input id="name" maxlength="40" autocomplete="name" placeholder="Например, Анна Сергеевна">
       </label>
       <button class="primary" id="join">Войти</button>

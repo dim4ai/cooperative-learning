@@ -77,19 +77,14 @@
   .hero-cta{ margin-top: 1.9rem; display:flex; align-items:center; gap: 1rem; flex-wrap: wrap; }
 
   .pair{
-    margin-top: 2.2rem; padding: 1.1rem 1.2rem 1.2rem; max-width: 34rem;
+    margin-top: 2.2rem; width: 13.5rem; aspect-ratio: 1; padding: 1.2rem;
+    display: flex; flex-direction: column; justify-content: space-between;
     background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--ink); text-decoration: none; transition: transform 0.15s ease, border-color 0.15s ease;
   }
-  .pair h2{ font-family: var(--font-display); font-size: 1.3rem; margin: 0 0 0.25em; }
-  .pair p{ color: var(--ink-soft); margin: 0 0 0.9em; font-size: 0.98rem; }
-  .pair-row{ display:flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
-  .pair-row input{
-    flex: 1 1 12rem; min-width: 0; font: 500 0.95rem var(--font-mono); letter-spacing: 0.04em;
-    padding: 0.62em 0.8em; border-radius: 3px; border: 1px solid var(--line);
-    background: var(--ground); color: var(--ink);
-  }
-  .pair-row input:focus{ outline: 2px solid var(--amber); outline-offset: -1px; }
-  .pair-or{ color: var(--ink-soft); font-size: 0.9rem; }
+  .pair:hover{ transform: translateY(-2px); border-color: var(--amber); }
+  .pair span{ font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.15; }
+  .pair i{ font-style: normal; font-size: 1.4rem; color: var(--amber); align-self: flex-end; }
 
   .stage-canvas-box{
     position: relative; background: var(--surface); border: 1px solid var(--line);
@@ -123,16 +118,7 @@
         <a href="https://teacher.co-learn.ru" class="btn btn-soft">Учителям</a>
         <a href="https://student.co-learn.ru" class="btn btn-soft">Ученикам</a>
       </div>
-      <section class="pair" aria-labelledby="pair-title">
-        <h2 id="pair-title">Занятие вдвоём</h2>
-        <p>Индивидуальный урок: общая доска, видео и звук для учителя и ученика. Бесплатно, без регистрации.</p>
-        <form class="pair-row" id="pairForm" action="https://pair.co-learn.ru/">
-          <input id="pairCode" aria-label="Код занятия" placeholder="Код занятия" autocomplete="off" autocapitalize="off" spellcheck="false">
-          <button class="btn btn-soft" type="submit">Войти</button>
-          <span class="pair-or">или</span>
-          <a href="https://pair.co-learn.ru/" class="btn btn-primary">Начать занятие</a>
-        </form>
-      </section>
+      <a class="pair" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
     </div>
     <div class="stage-canvas-box">
       <canvas id="formationCanvas" aria-hidden="true"></canvas>
@@ -140,16 +126,6 @@
     </div>
   </div>
 </header>
-
-<script>
-// the code is checked and decoded on pair.co-learn.ru; here it only travels in the link's #fragment
-document.getElementById('pairForm').addEventListener('submit', function(e){
-  e.preventDefault();
-  var code = document.getElementById('pairCode').value.trim();
-  if (code.indexOf('#') >= 0) code = code.slice(code.indexOf('#') + 1);
-  location.href = 'https://pair.co-learn.ru/' + (code ? '#' + encodeURIComponent(code) : '');
-});
-</script>
 
 <script>
 (function(){
