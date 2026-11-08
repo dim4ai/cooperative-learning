@@ -10,6 +10,7 @@ import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, pageAt, t
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
+import { camEntry, camLink, camOwner, myCamTag, phoneScreen, qrSvg } from './phonecam'
 
 const app = document.getElementById('app')!
 
@@ -881,6 +882,7 @@ async function lesson(entry: Entry, name: string) {
   const local = await getMedia()
   const camBtn = el('button', { title: 'Камера', 'aria-label': 'Камера' }, icons.cam)
   const micBtn = el('button', { title: 'Микрофон', 'aria-label': 'Микрофон' }, icons.mic)
+  const phoneBtn = el('button', { title: 'Подключить смартфон как камеру для тетради', 'aria-label': 'Подключить смартфон' }, icons.phone)
   const linkBtn = el('button', { title: 'Скопировать ссылку для ученика', 'aria-label': 'Ссылка для ученика' }, icons.link)
   const leaveBtn = el('button', { class: 'leave', title: 'Выйти', 'aria-label': 'Выйти' }, icons.leave)
   const toggle = (kind: 'audio' | 'video', btn: HTMLElement, on: string, off: string) => {
@@ -901,7 +903,52 @@ async function lesson(entry: Entry, name: string) {
   toggle('video', camBtn, icons.cam, icons.camOff)
   toggle('audio', micBtn, icons.mic, icons.micOff)
   linkBtn.addEventListener('click', copyLink)
-  side.append(camBtn, micBtn, linkBtn, el('div', { class: 'grow' }), leaveBtn)
+  side.append(camBtn, micBtn, phoneBtn, linkBtn, el('div', { class: 'grow' }), leaveBtn)
+
+  // ---------- notebook camera: a phone joins by a QR code ----------
+  const camTag = myCamTag()
+  const isMyCam = (peer: PeerInfo) => peer.role === 'cam' && camOwner(peer.name).tag === camTag
+  let closePhoneDialog: (() => void) | null = null
+  phoneBtn.addEventListener('click', () => {
+    const link = camLink(room, `${camTag}:${name || (teacher ? 'Учитель' : 'Ученик')}`.slice(0, 40))
+    const overlay = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Подключить смартфон' })
+    overlay.innerHTML = `<div class="modal-card phone-pick">
+        <div class="modal-head"><b>Подключить смартфон</b></div>
+        <div class="phone-body">
+          <div class="qr">${qrSvg(link)}</div>
+          <ol>
+            <li>Отсканируйте код камерой телефона и откройте ссылку.</li>
+            <li>Нажмите на телефоне «Подключиться» и разрешите доступ к камере.</li>
+            <li>Поставьте телефон так, чтобы камера смотрела на лист. Подойдёт любая подставка, хоть катушка скотча.</li>
+          </ol>
+        </div>
+        <p class="muted">Или откройте на телефоне ссылку:</p>
+        <div class="copyline"><code class="link">${escapeHtml(link)}</code><button data-copy>Скопировать</button></div>
+        <p class="muted">Картинка идёт с телефона напрямую вам и собеседнику, как видео. Если не соединяется, подключите телефон к той же сети Wi-Fi, что и компьютер.</p>
+        <div class="modal-foot"><div class="grow"></div><button class="secondary" data-close>Закрыть</button></div>
+      </div>`
+    document.body.append(overlay)
+    const close = () => {
+      document.removeEventListener('keydown', onKey, true)
+      overlay.remove()
+      closePhoneDialog = null
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      close()
+    }
+    document.addEventListener('keydown', onKey, true)
+    overlay.addEventListener('pointerdown', (e) => e.target === overlay && close())
+    overlay.querySelector('[data-close]')!.addEventListener('click', close)
+    overlay.querySelector('[data-copy]')!.addEventListener('click', async (e) => {
+      try {
+        await navigator.clipboard.writeText(link)
+        ;(e.target as HTMLElement).textContent = 'Скопировано'
+      } catch {}
+    })
+    closePhoneDialog = close
+  })
 
   async function copyLink() {
     try {
@@ -958,7 +1005,7 @@ async function lesson(entry: Entry, name: string) {
   }
   function refreshStatus() {
     const list = [...states.values()]
-    if (!list.length)
+    if (!list.some((s) => s.peer.role !== 'cam') && !list.some((s) => s.state === 'failed'))
       return showStatus(
         teacher ? `Ждём ученика. Код для ученика: <b>${pretty(room)}</b> <button data-copy>Скопировать ссылку</button>` : 'Ждём учителя…',
       )
@@ -1019,7 +1066,12 @@ async function lesson(entry: Entry, name: string) {
   }
   board.onViewport()
 
-  const peerName = (peer: PeerInfo) => peer.name || (peer.teacher ? 'Учитель' : 'Ученик')
+  const peerName = (peer: PeerInfo) => {
+    if (peer.role !== 'cam') return peer.name || (peer.teacher ? 'Учитель' : 'Ученик')
+    if (isMyCam(peer)) return 'Ваша тетрадь'
+    const owner = camOwner(peer.name).name
+    return owner ? `Тетрадь: ${owner}` : 'Тетрадь'
+  }
   const peers = new Peers(room, name, key, local, {
     waiting: () => refreshStatus(),
     full: () => showStatus('В этом занятии уже двое. Попросите новую ссылку.'),
@@ -1028,14 +1080,26 @@ async function lesson(entry: Entry, name: string) {
     state: (peer, state) => {
       states.set(peer.id, { peer, state })
       refreshStatus()
+      if (state === 'connected' && isMyCam(peer) && closePhoneDialog) {
+        closePhoneDialog()
+        say('Телефон подключён', 3000)
+      }
     },
     stream: (peer, stream) => {
       const t = tile(peer.id, peerName(peer), false)
+      t.classList.toggle('notebook', peer.role === 'cam')
       const v = t.querySelector('video')!
+      if (peer.role === 'cam') {
+        // a phone may be held either way: the tile takes the picture's shape
+        const fit = () => v.videoWidth && (t.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`)
+        v.onloadedmetadata = fit
+        v.onresize = fit
+      }
       if (v.srcObject !== stream) v.srcObject = stream
       t.classList.toggle('novideo', !stream.getVideoTracks().length)
     },
-    channelOpen: (_peer, ch) => {
+    channelOpen: (peer, ch) => {
+      if (peer.role === 'cam') return
       ch.send(board.snapshot())
       if (teacher && boardLocked) ch.send({ op: 'lock', on: true })
       if (teacher && following) {
@@ -1044,6 +1108,7 @@ async function lesson(entry: Entry, name: string) {
       }
     },
     message: (peer, msg) => {
+      if (peer.role === 'cam') return // a phone camera has nothing to say to the board
       switch (msg.op) {
         case 'cur': {
           let c = cursorAt.get(peer.id)
@@ -1113,6 +1178,8 @@ function escapeHtml(s: string) {
 }
 
 async function route() {
+  const cam = camEntry()
+  if (cam) return phoneScreen(app, cam.room, cam.owner)
   const entry = await entryFromHash()
   if (entry) joinScreen(entry)
   else startScreen(location.hash.length > 1 ? 'Ссылка не распознана — возможно, она скопирована не целиком. Введите код занятия.' : '')

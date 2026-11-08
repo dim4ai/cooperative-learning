@@ -78,6 +78,7 @@ export const icons = {
   zoomOut: svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4M8.5 11h5"/>'),
   mic: svg('<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v2.5"/>'),
   micOff: svg('<path d="M15 10V6.5a3 3 0 00-5.6-1.5M9 9v2.5a3 3 0 004.6 2.5"/><path d="M5.5 11.5a6.5 6.5 0 0010.8 4.9M18.5 11.5a6.4 6.4 0 01-.4 2.2M12 18v2.5M4 4l16 16"/>'),
+  phone: svg('<rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/><circle cx="12" cy="9" r="2.3"/><path d="M14 5.5h.01"/>'),
   cam: svg('<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="M15.5 10.5l5-3v9l-5-3"/>'),
   camOff: svg('<path d="M9 6.5h4.5a2 2 0 012 2v4M15.5 15.5a2 2 0 01-2 2H5a2 2 0 01-2-2v-7a2 2 0 011.5-1.9M15.5 10.5l5-3v9l-3-1.8M3 3l18 18"/>'),
   link: svg('<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'),

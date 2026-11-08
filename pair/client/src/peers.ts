@@ -45,7 +45,11 @@ class PeerLink {
     this.channel = new JsonChannel(dc, (msg) => on.message(peer, msg))
     dc.addEventListener('open', () => on.channelOpen(peer, this.channel))
 
-    if (local) for (const track of local.getTracks()) pc.addTrack(track, local)
+    if (peer.role === 'cam') {
+      // a notebook camera: the phone sends its picture (local), the computer only receives it (no local)
+      if (!local) pc.addTransceiver('video', { direction: 'recvonly' })
+      else for (const track of local.getVideoTracks()) pc.addTrack(track, local)
+    } else if (local) for (const track of local.getTracks()) pc.addTrack(track, local)
     else {
       // still ask for the other side's camera and microphone
       pc.addTransceiver('audio', { direction: 'recvonly' })
@@ -143,17 +147,19 @@ export class Peers {
     key: string | null,
     private local: MediaStream | null,
     private on: PeerEvents & { waiting: () => void; full: () => void; badKey: () => void; offline: () => void },
+    /** 'cam': a phone that only sends its camera to the people in the lesson */
+    private role: 'main' | 'cam' = 'main',
   ) {
-    this.sig = new Signaling(room, 'main', name, key, {
+    this.sig = new Signaling(room, role, name, key, {
       joined: (id, peers, iceServers) => {
         this.iceServers = iceServers
         // after a reconnect we get a new id: old links are dead
         for (const l of this.links.values()) this.drop(l.peer.id)
         this.myId = id
-        if (peers.length === 0) on.waiting()
-        for (const p of peers) this.link(p, true)
+        if (!peers.some((p) => this.wants(p))) on.waiting()
+        for (const p of peers) if (this.wants(p)) this.link(p, true)
       },
-      peerJoined: (p) => this.link(p, false),
+      peerJoined: (p) => this.wants(p) && this.link(p, false),
       peerLeft: (id) => {
         this.drop(id)
         if (this.links.size === 0) on.waiting()
@@ -165,9 +171,19 @@ export class Peers {
     })
   }
 
+  /** people link with everyone; a phone camera only with people, never with another phone */
+  private wants(p: PeerInfo) {
+    return this.role === 'main' || p.role === 'main'
+  }
+
   private link(p: PeerInfo, initiator: boolean) {
     this.drop(p.id)
-    this.links.set(p.id, new PeerLink(p, this.myId > p.id, initiator, this.sig, this.local, this.iceServers, this.on))
+    // a phone's link is described by the phone's role, so both ends set it up the same way
+    const peer = this.role === 'cam' ? { ...p, role: 'cam' } : p
+    // nothing of ours goes to a phone: it only shows its own picture
+    const local = this.role === 'main' && p.role === 'cam' ? null : this.local
+    const link = new PeerLink(peer, this.myId > p.id, initiator, this.sig, local, this.iceServers, this.on)
+    this.links.set(p.id, link)
   }
 
   private drop(id: string) {
@@ -178,12 +194,17 @@ export class Peers {
     this.on.gone(l.peer)
   }
 
+  /** the board goes only to people; phone cameras don't need it */
+  private people() {
+    return [...this.links.values()].filter((l) => l.peer.role !== 'cam')
+  }
+
   broadcast(msg: unknown) {
-    for (const l of this.links.values()) l.channel.send(msg)
+    for (const l of this.people()) l.channel.send(msg)
   }
 
   broadcastVolatile(msg: unknown) {
-    for (const l of this.links.values()) l.channel.sendVolatile(msg)
+    for (const l of this.people()) l.channel.sendVolatile(msg)
   }
 
   leave() {
