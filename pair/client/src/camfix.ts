@@ -9,6 +9,8 @@ export type Fix = {
   /** quarter turns clockwise */
   rot: number
   mirror: boolean
+  /** the page's width:height chosen by hand (upright, the short side across); absent = from the corners */
+  ratio?: number
 }
 
 export function validFix(x: any): Fix | null {
@@ -16,7 +18,8 @@ export function validFix(x: any): Fix | null {
   if (!x.c.every((n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > -1 && n < 2)) return null
   const rot = Number(x.rot)
   if (![0, 1, 2, 3].includes(rot)) return null
-  return { c: x.c.slice(), rot, mirror: !!x.mirror }
+  const ratio = Number(x.ratio)
+  return { c: x.c.slice(), rot, mirror: !!x.mirror, ...(ratio > 0.1 && ratio <= 1 ? { ratio } : {}) }
 }
 
 type M3 = number[] // row-major 3×3
@@ -56,13 +59,51 @@ function displayToFrame(fix: Fix): M3 {
   return mul(m, mirror)
 }
 
-/** Width:height of the page, judged from the marked corners (the nearer, longer edges win). */
+/** Page shapes to pick by hand, width:height upright; 0 = worked out from the corners. */
+export const SHAPES: { ratio: number; label: string }[] = [
+  { ratio: 0, label: 'по углам' },
+  { ratio: 1 / Math.SQRT2, label: 'А4, А5' },
+  { ratio: 170 / 205, label: 'тетрадь' },
+  { ratio: 1, label: 'квадрат' },
+]
+
+/**
+ * Width:height of the marked rectangle as it really is, not as the camera foreshortens it.
+ * After Zhang & He, "Whiteboard scanning and image enhancement" (2007): knowing the camera's
+ * focal length, the four corners give the true shape. Their method also guesses the focal length
+ * from the corners, but a phone on a stand tilts the page only one way, and then the guess is
+ * hopeless (one pair of edges stays parallel; a few pixels off swing it wildly). So we take the
+ * focal length of a phone's main camera instead: about a 26 mm equivalent lens, ≈ 0.75 of the
+ * frame's long side. On projected test pages it's within a few percent.
+ */
+export function cornerAspect(c: number[], frameW: number, frameH: number) {
+  const pt = (i: number): [number, number, number] => [(c[i * 2] - 0.5) * frameW, (c[i * 2 + 1] - 0.5) * frameH, 1]
+  // their order: m1 top-left, m2 top-right, m3 bottom-left, m4 bottom-right
+  const m1 = pt(0)
+  const m2 = pt(1)
+  const m3 = pt(3)
+  const m4 = pt(2)
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const m14 = cross(m1, m4)
+  const k2 = dot(m14, m3) / dot(cross(m2, m4), m3)
+  const k3 = dot(m14, m2) / dot(cross(m3, m4), m2)
+  const n2 = m2.map((v, i) => k2 * v - m1[i])
+  const n3 = m3.map((v, i) => k3 * v - m1[i])
+  const f2 = (0.75 * Math.max(frameW, frameH)) ** 2
+  const len = (n: number[]) => (n[0] * n[0] + n[1] * n[1]) / f2 + n[2] * n[2]
+  let r = Math.sqrt(len(n2) / len(n3))
+  // nonsense corners (a twisted quad) fall back to the edges
+  if (!Number.isFinite(r) || r <= 0.1 || r >= 10) {
+    const d = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1])
+    r = Math.max(d(m1, m2), d(m3, m4)) / Math.max(1, Math.max(d(m1, m3), d(m2, m4)))
+  }
+  return r
+}
+
+/** Width:height of the straightened picture, as shown (after turning). */
 export function pageAspect(fix: Fix, frameW: number, frameH: number) {
-  const p = (i: number) => [fix.c[i * 2] * frameW, fix.c[i * 2 + 1] * frameH]
-  const d = (a: number, b: number) => Math.hypot(p(a)[0] - p(b)[0], p(a)[1] - p(b)[1])
-  const w = Math.max(d(0, 1), d(3, 2))
-  const h = Math.max(d(0, 3), d(1, 2))
-  const r = w / Math.max(h, 1)
+  const r = fix.ratio ? (cornerAspect(fix.c, frameW, frameH) >= 1 ? 1 / fix.ratio : fix.ratio) : cornerAspect(fix.c, frameW, frameH)
   return fix.rot % 2 ? 1 / r : r
 }
 
@@ -202,6 +243,8 @@ export function setupFix(stream: MediaStream, current: Fix | null): Promise<Fix 
     const corners = (current?.c ?? DEFAULT_CORNERS).slice()
     let rot = current?.rot ?? 0
     let mirror = current?.mirror ?? false
+    let ratio = current?.ratio ?? 0
+    const fixNow = (): Fix => ({ c: corners.slice(), rot, mirror, ...(ratio ? { ratio } : {}) })
     let rect: Rectifier | null = null
 
     const close = (result: Fix | null | undefined) => {
@@ -300,8 +343,8 @@ export function setupFix(stream: MediaStream, current: Fix | null): Promise<Fix 
       video.onresize = null
       stage.append(box)
       const show = () => {
-        rect!.setFix({ c: corners.slice(), rot, mirror })
-        const r = pageAspect({ c: corners, rot, mirror }, video.videoWidth || 4, video.videoHeight || 3)
+        rect!.setFix(fixNow())
+        const r = pageAspect(fixNow(), video.videoWidth || 4, video.videoHeight || 3)
         fitBox(box, r * 1000, 1000)
       }
       show()
@@ -317,13 +360,22 @@ export function setupFix(stream: MediaStream, current: Fix | null): Promise<Fix 
         show()
       })
       mirrorBox.append(check, document.createTextNode(' зеркально'))
+      const shapeBox = h('label', { class: 'camfix-mirror' }, 'Лист: ')
+      const shape = h('select', { 'aria-label': 'Форма листа' }) as HTMLSelectElement
+      for (const sh of SHAPES) shape.append(new Option(sh.label, String(sh.ratio), false, Math.abs(sh.ratio - ratio) < 1e-6))
+      shape.addEventListener('change', () => {
+        ratio = Number(shape.value)
+        show()
+      })
+      shapeBox.append(shape)
       foot.replaceChildren(
         button('↺', 'secondary turn', turn(-1)),
         button('↻', 'secondary turn', turn(1)),
         mirrorBox,
+        shapeBox,
         h('div', { class: 'grow' }),
         button('Назад', 'secondary', cornersStep),
-        button('Применить', 'primary-sm', () => close({ c: corners.slice(), rot, mirror })),
+        button('Применить', 'primary-sm', () => close(fixNow())),
       )
       foot.querySelectorAll('.turn').forEach((b, i) => b.setAttribute('title', i ? 'Повернуть по часовой' : 'Повернуть против часовой'))
     }
