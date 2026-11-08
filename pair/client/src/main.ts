@@ -10,6 +10,7 @@ import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, pageAt, t
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
+import { Rectifier, setupFix, validFix, pageAspect, type Fix } from './camfix'
 import { camEntry, camLink, camOwner, myCamTag, phoneScreen, qrSvg } from './phonecam'
 
 const app = document.getElementById('app')!
@@ -950,6 +951,49 @@ async function lesson(entry: Entry, name: string) {
     closePhoneDialog = close
   })
 
+  // the page straightening: the owner sets it up, both people see the same
+  const FIX_KEY = 'pair.camFix'
+  const fixes = new Map<string, Fix>()
+  try {
+    const mine = validFix(JSON.parse(sessionStorage.getItem(FIX_KEY) ?? 'null'))
+    if (mine) fixes.set(camTag, mine)
+  } catch {}
+  /** phone tiles by peer id */
+  const cams = new Map<string, { tag: string; rect: Rectifier; tile: HTMLElement; video: HTMLVideoElement; fixed: boolean }>()
+  function applyFix(tag: string) {
+    const fix = fixes.get(tag) ?? null
+    for (const cam of cams.values()) {
+      if (cam.tag !== tag) continue
+      cam.fixed = !!fix && cam.rect.supported
+      cam.rect.setFix(cam.fixed ? fix : null)
+      cam.tile.classList.toggle('fixed', cam.fixed)
+      fitCamTile(cam)
+    }
+  }
+  function fitCamTile(cam: { tag: string; tile: HTMLElement; video: HTMLVideoElement; fixed: boolean }) {
+    const v = cam.video
+    if (!v.videoWidth) return
+    const fix = fixes.get(cam.tag)
+    cam.tile.style.aspectRatio = cam.fixed && fix ? String(pageAspect(fix, v.videoWidth, v.videoHeight)) : `${v.videoWidth} / ${v.videoHeight}`
+  }
+  function setMyFix(fix: Fix | null) {
+    if (fix) fixes.set(camTag, fix)
+    else fixes.delete(camTag)
+    try {
+      sessionStorage.setItem(FIX_KEY, JSON.stringify(fix))
+    } catch {}
+    applyFix(camTag)
+    peers.broadcast({ op: 'camfix', tag: camTag, fix })
+  }
+  let settingUp = false
+  async function setupMyCam(video: HTMLVideoElement) {
+    if (settingUp || !(video.srcObject instanceof MediaStream)) return
+    settingUp = true
+    const result = await setupFix(video.srcObject, fixes.get(camTag) ?? null)
+    settingUp = false
+    if (result !== undefined) setMyFix(result)
+  }
+
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(studentLink(room))
@@ -967,7 +1011,7 @@ async function lesson(entry: Entry, name: string) {
       t = el('figure', { 'data-key': key }, `<video autoplay playsinline></video><figcaption></figcaption>`)
       const shot = el('button', { class: 'shot edit', title: 'Снимок с этой камеры на доску', 'aria-label': 'Снимок на доску' }, icons.snapshot)
       const v = t.querySelector('video')!
-      shot.addEventListener('click', () => snapshot(v))
+      shot.addEventListener('click', () => snapshot(v, key))
       t.append(shot)
       if (mirrored) t.classList.add('me')
       key === 'me' ? videos.append(t) : videos.prepend(t)
@@ -976,10 +1020,17 @@ async function lesson(entry: Entry, name: string) {
     return t
   }
   /** A frame from a camera onto the board; my own camera when no video is given */
-  function snapshot(video: HTMLVideoElement | null) {
+  function snapshot(video: HTMLVideoElement | null, key = 'me') {
     if (board.readOnly) return
     video ??= videos.querySelector<HTMLVideoElement>('[data-key="me"] video')
     if (!video || !video.videoWidth) return say('Камера выключена или недоступна')
+    // a straightened notebook page goes on the board as it is shown
+    const cam = cams.get(key)
+    if (cam?.fixed) {
+      cam.rect.draw()
+      cam.rect.canvas.toBlob((b) => b && board.addImage(b), 'image/jpeg', 0.9)
+      return
+    }
     const cv = document.createElement('canvas')
     cv.width = video.videoWidth
     cv.height = video.videoHeight
@@ -1089,11 +1140,22 @@ async function lesson(entry: Entry, name: string) {
       const t = tile(peer.id, peerName(peer), false)
       t.classList.toggle('notebook', peer.role === 'cam')
       const v = t.querySelector('video')!
-      if (peer.role === 'cam') {
-        // a phone may be held either way: the tile takes the picture's shape
-        const fit = () => v.videoWidth && (t.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`)
-        v.onloadedmetadata = fit
-        v.onresize = fit
+      if (peer.role === 'cam' && !cams.has(peer.id)) {
+        const cam = { tag: camOwner(peer.name).tag, rect: new Rectifier(v), tile: t, video: v, fixed: false }
+        cams.set(peer.id, cam)
+        t.insertBefore(cam.rect.canvas, v.nextSibling)
+        // a phone may be held either way: the tile takes the picture's (or the page's) shape
+        v.onloadedmetadata = v.onresize = () => {
+          fitCamTile(cam)
+          // my own phone, not set up yet: straight to the corners, as the first thing to do
+          if (isMyCam(peer) && !fixes.has(camTag)) setupMyCam(v)
+        }
+        if (isMyCam(peer)) {
+          const setup = el('button', { class: 'setup', title: 'Настроить: углы листа, поворот', 'aria-label': 'Настроить тетрадную камеру' }, icons.crop)
+          setup.addEventListener('click', () => setupMyCam(v))
+          t.append(setup)
+        }
+        applyFix(cam.tag)
       }
       if (v.srcObject !== stream) v.srcObject = stream
       t.classList.toggle('novideo', !stream.getVideoTracks().length)
@@ -1101,6 +1163,7 @@ async function lesson(entry: Entry, name: string) {
     channelOpen: (peer, ch) => {
       if (peer.role === 'cam') return
       ch.send(board.snapshot())
+      if (fixes.has(camTag)) ch.send({ op: 'camfix', tag: camTag, fix: fixes.get(camTag) })
       if (teacher && boardLocked) ch.send({ op: 'lock', on: true })
       if (teacher && following) {
         ch.send({ op: 'follow', on: true })
@@ -1136,6 +1199,14 @@ async function lesson(entry: Entry, name: string) {
         case 'follow':
           if (peer.teacher && !teacher) say(msg.on ? 'Учитель ведёт доску: вы видите то же, что он' : 'Теперь доску можно листать самому', 4000)
           return
+        case 'camfix': {
+          // only for a phone that isn't mine: my own is set up here
+          if (typeof msg.tag !== 'string' || msg.tag === camTag) return
+          const fix = validFix(msg.fix)
+          if (fix) fixes.set(msg.tag, fix)
+          else fixes.delete(msg.tag)
+          return applyFix(msg.tag)
+        }
         case 'lock':
           if (peer.teacher && !teacher && msg.on !== board.readOnly) lockedByTeacher(!!msg.on)
           return
@@ -1147,6 +1218,8 @@ async function lesson(entry: Entry, name: string) {
     gone: (peer) => {
       states.delete(peer.id)
       videos.querySelector(`[data-key="${peer.id}"]`)?.remove()
+      cams.get(peer.id)?.rect.stop()
+      cams.delete(peer.id)
       cursorAt.get(peer.id)?.el.remove()
       cursorAt.delete(peer.id)
       if (peer.teacher && board.readOnly) lockedByTeacher(false)

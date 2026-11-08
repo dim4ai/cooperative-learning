@@ -1380,3 +1380,121 @@ button.primary:hover {
   background: transparent;
   color: #fff;
 }
+
+/* straightened page: the canvas replaces the raw picture */
+#videos figure canvas {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#videos figure.fixed canvas {
+  display: block;
+}
+
+#videos figure.fixed video {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+#videos figure.notebook.fixed {
+  background: #fff;
+}
+
+#videos .setup {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+#videos .setup svg {
+  width: 18px;
+  height: 18px;
+}
+
+.camfix {
+  width: auto;
+  max-width: 100%;
+}
+
+.camfix-hint {
+  padding: 0 16px;
+  max-width: 560px;
+}
+
+.camfix-stage {
+  padding: 4px 16px 12px;
+  display: grid;
+  place-items: center;
+}
+
+.camfix-box {
+  position: relative;
+  background: #111827;
+  touch-action: none;
+  user-select: none;
+}
+
+.camfix-box video,
+.camfix-box svg,
+.camfix-box canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.camfix-box.result video {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.camfix-box svg polygon {
+  fill: rgba(34, 197, 94, 0.12);
+  stroke: #22c55e;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.camfix-dot {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border: 3px solid #22c55e;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  cursor: grab;
+  touch-action: none;
+}
+
+.camfix-dot:active {
+  cursor: grabbing;
+}
+
+.camfix .turn {
+  min-width: 40px;
+  font-size: 18px;
+}
+
+.camfix-mirror {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
