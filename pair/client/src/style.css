@@ -4,6 +4,8 @@
   --grid-major: #cfdae6;
   --panel: #ffffff;
   --panel-border: #e5e7eb;
+  --dock: #f8fafc; /* docked tool panels: a shade off the white sheet */
+  --dock-line: #cbd5e1; /* the line between tools and the sheet; must stand out from the grid */
   --ink: #1f2937;
   --muted: #6b7280;
   --accent: #2563eb;
@@ -118,14 +120,27 @@ button.primary:hover {
   inset: 0;
 }
 
+/* tools are docked: left column and top bar, separated from the sheet by a line, never over it */
 #wrap {
   position: absolute;
-  inset: 0 56px 0 0;
-  background-color: var(--bg);
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-    linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  inset: 52px 56px 0 56px;
+  background: var(--bg);
   overflow: hidden;
   touch-action: none;
+}
+
+/* the ruling sits under the board canvas (so the eraser shows it), the pointer trail above */
+#paper,
+#laser {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#laser {
+  z-index: 2;
 }
 
 .panel {
@@ -159,17 +174,35 @@ button.primary:hover {
   color: var(--accent);
 }
 
+#tools,
+#topbar {
+  border-radius: 0;
+  box-shadow: none;
+  border: 0;
+  background: var(--dock);
+}
+
 #tools {
-  left: 10px;
-  top: 64px;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 56px;
   flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  border-right: 1px solid var(--dock-line);
+  z-index: 6;
 }
 
 #topbar {
-  left: 10px;
-  top: 10px;
+  left: 56px;
+  right: 56px;
+  top: 0;
+  height: 52px;
   align-items: center;
-  max-width: calc(100% - 300px);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--dock-line);
   overflow-x: auto;
 }
 
@@ -266,7 +299,7 @@ button.primary:hover {
 
 #videos {
   position: absolute;
-  top: 10px;
+  top: 62px;
   right: 66px;
   width: 240px;
   display: flex;
@@ -381,7 +414,7 @@ button.primary:hover {
 #toast {
   position: absolute;
   left: 50%;
-  top: 16px;
+  top: 64px;
   transform: translateX(-50%);
   background: var(--ink);
   color: #fff;
@@ -393,7 +426,7 @@ button.primary:hover {
 
 @media (max-width: 700px) {
   #wrap {
-    inset: 0 0 52px 0;
+    inset: 52px 0 52px 56px;
   }
   #side {
     top: auto;
@@ -412,12 +445,10 @@ button.primary:hover {
     width: 120px;
   }
   #topbar {
-    max-width: calc(100% - 20px);
-    top: auto;
-    bottom: 62px;
+    right: 0;
   }
   #tools {
-    top: 10px;
+    bottom: 52px;
   }
   #status {
     bottom: 120px;
@@ -586,6 +617,122 @@ button.primary:hover {
   position: absolute;
   left: calc(100% + 10px);
   top: -4px;
-  flex-direction: row;
-  white-space: nowrap;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 5), 38px);
+}
+
+/* ---------- top bar: sections and popovers ---------- */
+
+#topbar .section {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+#topbar .section + .section:not([hidden]) {
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--panel-border);
+}
+
+#topbar .grow {
+  flex: 1 0 8px;
+}
+
+.panel button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+
+#topbar select {
+  font: inherit;
+  font-size: 13px;
+  height: 32px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 4px;
+  margin: 0 2px;
+}
+
+#topbar .fill-btn.has svg {
+  fill: var(--c);
+}
+
+.pop {
+  position: fixed;
+  z-index: 20;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+}
+
+.pop button.wide {
+  width: 100%;
+  height: auto;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.pop button.danger {
+  color: var(--danger);
+}
+
+.pop .swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 2px;
+  padding: 4px;
+}
+
+.pop .swatch,
+#topbar .swatch {
+  display: grid;
+  place-items: center;
+}
+
+.pop .swatch {
+  width: 32px;
+  height: 32px;
+}
+
+.pop .swatch::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--c);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.pop .swatch.on::before {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent);
+}
+
+/* the teacher locked the student's board: drawing tools and edits are off */
+#app.readonly #tools button:not([data-tool='hand']):not([data-tool='pointer']),
+#app.readonly .edit {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+#selbar {
+  z-index: 4;
+  padding: 3px;
+}
+
+#selbar button {
+  width: 34px;
+  height: 34px;
+}
+
+#topbar select[title='Шрифт'] {
+  max-width: 128px;
 }
