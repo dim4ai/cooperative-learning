@@ -66,6 +66,7 @@ export const icons = {
   down: svg('<path d="M6 10l6 6 6-6"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   moveIn: svg('<path d="M4 12h11M11 8l4 4-4 4"/><path d="M19 5v14"/>'),
+  open: svg('<path d="M3.5 7V5.5a1 1 0 011-1h4.5l2 2.5h8.5a1 1 0 011 1V9"/><path d="M3.5 7v11.5a1 1 0 001 1h14.2a1 1 0 001-.8L21.5 10a.8.8 0 00-.8-1H7.3a1 1 0 00-1 .8L4.5 18"/>'),
   pdf: svg('<path d="M6 3.5h8l4.5 4.5v12a.5.5 0 01-.5.5H6a.5.5 0 01-.5-.5V4a.5.5 0 01.5-.5z"/><path d="M14 3.5V8h4.5"/><path d="M8.5 16.5v-4h1.5a1.2 1.2 0 010 2.4H8.5M13 12.5v4h1a2 2 0 000-4z"/>'),
   menu: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   follow: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),

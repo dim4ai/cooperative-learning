@@ -16,7 +16,7 @@ import { openFeedback } from './feedback'
 
 const app = document.getElementById('app')!
 
-type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot' | 'pdf'
+type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot' | 'pdf' | 'open'
 const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'select', title: 'Выбор', key: 'V' },
   { id: 'lock', title: 'Закрепление: щёлкните объект, чтобы закрепить или открепить его', key: 'K' },
@@ -33,6 +33,7 @@ const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'text', title: 'Текст', key: 'T' },
   { id: 'image', title: 'Картинка из файла (или вставить Ctrl+V, перетащить файл)', key: 'I' },
   { id: 'pdf', title: 'PDF: выбрать страницы, обрезать поля и разложить по страницам доски (или перетащить файл)' },
+  { id: 'open', title: 'Открыть файл: PDF, картинку или доску (или перетащить файл на доску)' },
   { id: 'snapshot', title: 'Снимок со своей камеры на доску (снимок с камеры собеседника — кнопкой на его видео)' },
 ]
 /** The left panel: single tools and groups that open sideways; a group shows its last used tool. */
@@ -46,10 +47,10 @@ const PANEL: { members: ToolId[]; title?: string }[] = [
   { members: WORD_MARKS, title: 'Разбор слова' },
   { members: [...SHAPE_KINDS, 'polygon'], title: 'Фигуры' },
   { members: ['text'] },
-  { members: ['image', 'pdf', 'snapshot'], title: 'Вставить: картинку, PDF или снимок с камеры' },
+  { members: ['open', 'image', 'pdf', 'snapshot'], title: 'Открыть файл или вставить: картинку, PDF, снимок с камеры' },
 ]
 /** Not tools but one-off actions */
-const ACTIONS: ToolId[] = ['image', 'pdf', 'snapshot']
+const ACTIONS: ToolId[] = ['open', 'image', 'pdf', 'snapshot']
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
 const WIDTHS = [2, 4, 8]
@@ -201,7 +202,8 @@ async function lesson(entry: Entry, name: string) {
     <div id="status" hidden></div>
     <div id="toast" hidden></div>
     <input id="file" type="file" accept="image/*" hidden>
-    <input id="pdf" type="file" accept="application/pdf,.pdf" hidden>`
+    <input id="pdf" type="file" accept="application/pdf,.pdf" hidden>
+    <input id="open" type="file" hidden>`
 
   const $ = <T extends HTMLElement>(s: string) => app.querySelector<T>(s)!
   const board = new Board($<HTMLCanvasElement>('#board'), $('#wrap'), $<HTMLCanvasElement>('#paper'))
@@ -255,6 +257,7 @@ async function lesson(entry: Entry, name: string) {
     if (board.readOnly && id !== 'hand' && id !== 'pointer') return
     if (id === 'image') $<HTMLInputElement>('#file').click()
     else if (id === 'pdf') importPdf()
+    else if (id === 'open') $<HTMLInputElement>('#open').click()
     else if (id === 'snapshot') snapshot(null)
     else board.setTool(id)
   }
@@ -874,8 +877,43 @@ async function lesson(entry: Entry, name: string) {
       say('Не удалось открыть PDF')
     }
   }
+  $<HTMLInputElement>('#open').addEventListener('change', (e) => {
+    const f = (e.target as HTMLInputElement).files?.[0]
+    if (f) openFile(f)
+    ;(e.target as HTMLInputElement).value = ''
+  })
+  /** Any file: what it is, is told by its first bytes, not by its name */
+  async function openFile(file: File) {
+    if (board.readOnly) return
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
+    const text = String.fromCharCode(...head)
+    if (text.startsWith('%PDF')) return void importPdf(file)
+    if (text === 'chattern') return void openBoardFile(file)
+    if (file.type.startsWith('image/')) return void board.addImage(file)
+    say('Этот файл не открыть здесь: подходят PDF, картинки и доски')
+  }
+  // a board from another app (Chattern's .chtrn), placed next to ours
+  async function openBoardFile(file: File) {
+    say('Открываем доску…', 60_000)
+    try {
+      const { readChattern } = await import('./chattern')
+      const got = await readChattern(file)
+      const n = await board.placeBoard(got.objects, got.scale)
+      if (!n) return say('На этой доске ничего нет')
+      say(
+        got.landscape !== board.sheet.landscape
+          ? `Доска открыта справа (объектов: ${n}). Она ${got.landscape ? 'альбомная' : 'книжная'}: поменять лист можно в настройках листа.`
+          : `Доска открыта справа (объектов: ${n})`,
+      )
+    } catch (err) {
+      console.warn(err)
+      say('Не удалось открыть доску: файл повреждён')
+    }
+  }
   $('#wrap').addEventListener('drop', (e) => {
     e.preventDefault()
+    const other = [...(e.dataTransfer?.files ?? [])].find((x) => !x.type.startsWith('image/') && x.type !== 'application/pdf')
+    if (other) return void openFile(other)
     const pdfFile = [...(e.dataTransfer?.files ?? [])].find((x) => x.type === 'application/pdf' || /\.pdf$/i.test(x.name))
     if (pdfFile) return void importPdf(pdfFile)
     const f = [...(e.dataTransfer?.files ?? [])].find((x) => x.type.startsWith('image/'))

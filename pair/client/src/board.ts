@@ -1143,6 +1143,54 @@ export class Board {
     this.lookAt(col * w + w / 2, row * h + h / 2, Math.min(5, Math.max(0.2, zoom)))
   }
 
+  /**
+   * Puts a whole board brought from elsewhere (Fabric JSON, its own pixels × `scale` = ours) into a free
+   * column of pages to the right of everything, from the top, into the current layer. Sizes stay
+   * true to the paper. One undo step removes it all. Returns how many objects came in.
+   */
+  async placeBoard(json: Record<string, unknown>[], scale: number): Promise<number> {
+    const c = this.canvas
+    const objs = (await util.enlivenObjects<FabricObject>(json)) as Obj[]
+    if (!objs.length) return 0
+    // group frames were measured with the other app's fonts: fit each group to what it holds now
+    const refit = (o: FabricObject) => {
+      if (o instanceof Group) {
+        o.getObjects().forEach(refit)
+        o.triggerLayout()
+      }
+    }
+    objs.forEach(refit)
+    const { w, h } = pageBox(this.sheet)
+    const used = this.pagesWithContent()
+    const col = used.length ? Math.max(...used.map((p) => p[0])) + 1 : 0
+    let minX = 0
+    let minY = 0
+    for (const o of objs) {
+      o.setCoords()
+      const r = o.getBoundingRect()
+      minX = Math.min(minX, r.left)
+      minY = Math.min(minY, r.top)
+    }
+    this.canvas.discardActiveObject()
+    this.tx(() => {
+      for (const o of objs) {
+        delete o.id // ours, fresh: the same board may be opened twice
+        o.set({
+          left: col * w + (o.left - minX) * scale,
+          top: (o.top - minY) * scale,
+          scaleX: o.scaleX * scale,
+          scaleY: o.scaleY * scale,
+        })
+        o.setCoords()
+        c.add(o)
+      }
+    })
+    this.setTool('select')
+    const zoom = Math.min(c.width / w, c.height / h) * 0.95
+    this.lookAt(col * w + w / 2, h / 2, Math.min(5, Math.max(0.2, zoom)))
+    return objs.length
+  }
+
   // ---------- pictures ----------
 
   async addImage(file: Blob) {
