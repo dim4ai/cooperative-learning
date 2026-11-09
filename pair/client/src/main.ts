@@ -458,17 +458,20 @@ async function lesson(entry: Entry, name: string) {
   const uncropBtn = btn(icons.uncrop, 'Вернуть картинку целиком', () => board.uncropSelection())
   const cropDone = btn(`${icons.check}<span>Обрезать</span>`, 'Обрезать по рамке · Enter', () => board.finishCrop(true), 'labeled')
   const cropCancel = btn(icons.close, 'Отмена · Esc', () => board.finishCrop(false))
+  const dupBtn = btn(icons.duplicate, 'Дублировать · Ctrl+D', () => board.duplicate())
+  const unpinBtn = btn(`${icons.lock}<span>Открепить</span>`, 'Закреплено: не двигается и не удаляется. Открепить', () => board.unpinSelection(), 'labeled')
   const selActions = [
     cropBtn,
     uncropBtn,
-    btn(icons.duplicate, 'Дублировать · Ctrl+D', () => board.duplicate()),
+    dupBtn,
     btn(icons.front, 'На передний план', () => board.bringToFront()),
     btn(icons.back, 'На задний план', () => board.sendToBack()),
     btn(icons.flip, 'Отразить', () => board.flip()),
     groupBtn,
     ungroupBtn,
-    btn(icons.lock, 'Закрепить (открепить — инструментом «Закрепление»)', () => board.lockSelection()),
+    btn(icons.lock, 'Закрепить: выделяется, но не двигается', () => board.lockSelection()),
     btn(icons.trash, 'Удалить · Delete', () => board.deleteSelection()),
+    unpinBtn,
   ]
   sel.append(...selActions, cropDone, cropCancel)
   $('#wrap').append(sel)
@@ -479,7 +482,10 @@ async function lesson(entry: Entry, name: string) {
     const cropping = !!board.cropping
     selActions.forEach((b) => (b.hidden = cropping))
     cropDone.hidden = cropCancel.hidden = !cropping
-    if (!cropping) {
+    if (!cropping && board.pinnedSelected) {
+      selActions.forEach((b) => (b.hidden = b !== dupBtn && b !== unpinBtn))
+    } else if (!cropping) {
+      unpinBtn.hidden = true
       cropBtn.hidden = !board.canCrop
       uncropBtn.hidden = !board.canUncrop
       groupBtn.hidden = !board.canGroup

@@ -232,10 +232,12 @@ export class Board {
 
     canvas.on('mouse:down', (e) => this.down(e))
     canvas.on('mouse:move', (e) => this.move(e))
-    canvas.on('mouse:up', () => this.up())
-    canvas.on('mouse:dblclick', (e) => {
+    canvas.on('mouse:up', (e) => {
+      this.up()
+      this.pickPinned(e)
+    })
+    canvas.on('mouse:dblclick', () => {
       if (this.tool === 'polygon') this.finishPolygon()
-      else if (this.tool === 'select' && !e.target) this.unpinAt(canvas.getScenePoint(e.e))
     })
     canvas.on('mouse:wheel', (e) => this.wheel(e))
     canvas.on('after:render', ({ ctx }) => this.drawLockMarks(ctx))
@@ -336,7 +338,7 @@ export class Board {
   private restyle(fn: (o: FabricObject) => void | false) {
     const sel = this.canvas.getActiveObjects()
     if (!sel.length) return
-    const changed = sel.filter((o) => fn(o) !== false)
+    const changed = sel.filter((o) => !(o as Obj).locked && fn(o) !== false)
     if (!changed.length) return
     this.canvas.requestRenderAll()
     this.commit(...changed)
@@ -363,9 +365,48 @@ export class Board {
       o.evented = !layerLocked
       return
     }
-    const free = !(o as Obj).locked && !layerLocked
+    const pinned = !!(o as Obj).locked
+    const free = !pinned && !layerLocked
+    // pinned (as in Miro): a click picks it (pickPinned) to see, copy or unpin it; it doesn't move, change
+    // or go away, and a drag over it draws a selection frame, which leaves it out
     o.selectable = free && this.tool === 'select'
-    o.evented = free && (this.tool === 'select' || this.tool === 'broom')
+    o.evented = (free && this.tool === 'broom') || (!layerLocked && this.tool === 'select')
+    o.hoverCursor = pinned ? 'pointer' : null
+    o.set({
+      lockMovementX: pinned,
+      lockMovementY: pinned,
+      lockScalingX: pinned,
+      lockScalingY: pinned,
+      lockRotation: pinned,
+      hasControls: !pinned,
+      borderDashArray: pinned ? [6, 4] : null,
+      borderColor: pinned ? '#dc2626' : FabricObject.ownDefaults.borderColor,
+    })
+    if (o instanceof IText) o.editable = !pinned
+  }
+
+  /** A click (not a drag) on a pinned object with the arrow picks it, alone */
+  private pickPinned(e: { target?: FabricObject; isClick?: boolean; e: Event }) {
+    const o = e.target as Obj | undefined
+    if (this.tool !== 'select' || !e.isClick || !o?.locked || !o.evented || (e.e as MouseEvent).shiftKey) return
+    this.canvas.setActiveObject(o)
+    this.canvas.requestRenderAll()
+  }
+
+  /** Is the selection one pinned object */
+  get pinnedSelected() {
+    return !!(this.canvas.getActiveObject() as Obj | undefined)?.locked
+  }
+
+  /** Unpins the selected object and leaves it selected */
+  unpinSelection() {
+    const o = this.canvas.getActiveObject() as Obj | undefined
+    if (!o?.locked) return
+    o.locked = false
+    this.interactivity(o)
+    this.commit(o)
+    this.canvas.requestRenderAll()
+    this.onSelection()
   }
 
   // ---------- layers ----------
@@ -901,15 +942,15 @@ export class Board {
   }
 
   deleteSelection() {
-    const objs = this.canvas.getActiveObjects()
-    if (!objs.length) return
+    const objs = this.canvas.getActiveObjects().filter((o) => !(o as Obj).locked)
+    if (!objs.length) return void (this.pinnedSelected && this.onNotice('Закреплённое не удаляется: сначала открепите'))
     this.canvas.discardActiveObject()
     this.tx(() => this.canvas.remove(...objs))
   }
 
   selectAll() {
     this.canvas.discardActiveObject()
-    this.reselect(this.canvas.getObjects().filter((o) => o.selectable))
+    this.reselect(this.canvas.getObjects().filter((o) => o.selectable && !(o as Obj).locked))
   }
 
   copy() {
@@ -1027,24 +1068,8 @@ export class Board {
     }
     this.commit(...objs)
     this.canvas.requestRenderAll()
-    this.onNotice('Закреплено: больше не выделяется и не двигается. Открепить — двойной щелчок по нему')
-  }
-
-  /** Double click on a pinned object (with the arrow): unpins the topmost one there */
-  private unpinAt(p: Point) {
-    if (this.readOnly) return
-    const o = [...(this.canvas.getObjects() as Obj[])].reverse().find((x) => {
-      if (!x.locked || !x.visible || isCut(x) || x._pending) return false
-      const L = this.layerOf(x)
-      return !L?.locked && this.editable(L ?? { id: '', name: '' }) && x.containsPoint(p)
-    })
-    if (!o) return
-    o.locked = false
-    this.interactivity(o)
-    this.commit(o)
-    this.canvas.setActiveObject(o)
-    this.canvas.requestRenderAll()
-    this.onNotice('Откреплено: снова выделяется и двигается')
+    this.reselect(objs.length === 1 ? objs : []) // one stays selected: its frame shows it's pinned
+    this.onNotice('Закреплено: можно выделить, но не сдвинуть. Открепить — кнопкой «Открепить» у выделения')
   }
 
   private toggleLock(o: Obj) {
@@ -1243,7 +1268,7 @@ export class Board {
   }
 
   get canCrop() {
-    return !this.cropping && this.canvas.getActiveObject() instanceof FabricImage
+    return !this.cropping && this.canvas.getActiveObject() instanceof FabricImage && !this.pinnedSelected
   }
 
   get canUncrop() {
