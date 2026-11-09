@@ -33,9 +33,8 @@ export interface ScreenProps {
   /** how to call a participant: by journal name, nick or "Ученик N" */
   label: (identity: string) => string
   speaking: ReadonlySet<string>
-  /** pictures of the slides from the lesson file, by name in the current slide */
+  /** the slides' pictures from the archive, by name in the current slide */
   resolveMedia: (name: string) => string | undefined
-  picturesKey: string
 }
 
 const NO_REVEALED: ReadonlySet<string> = new Set()
@@ -181,15 +180,11 @@ function Bell({ calling, size = 56 }: { calling: boolean; size?: number }) {
 function SlideUnderlay({ c, width }: { c: Ctx; width: number }) {
   const v = c.view.slides
   if (!v.active) return null
-  const missing = Object.keys(v.media).length > 0 && !c.picturesKey
   return (
     <div data-testid="student-slides" style={{ position: 'relative', width }}>
-      <SlidePlayer key={`${v.scene.id}:${c.picturesKey}`} scene={v.scene} resolveMedia={c.resolveMedia} role="student"
+      <SlidePlayer key={v.scene.id} scene={v.scene} resolveMedia={c.resolveMedia} role="student"
         revealed={NO_REVEALED} positions={c.view.positions} canDrag={false} width={width} />
       {v.count > 1 && <div style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>{v.index + 1} / {v.count}</div>}
-      {missing && <div style={{ position: 'absolute', bottom: 6, left: 8, fontSize: 12, lineHeight: 1, color: '#b9770e' }}>
-        картинки слайдов — откройте файл урока (.colesson)
-      </div>}
     </div>
   )
 }

@@ -1,9 +1,9 @@
 // Lesson recording player. Everything happens in this browser: the files are read from the disk,
 // nothing is uploaded. A recording = the archive .zip (sound of every room, students' actions,
-// урок.json) + the teacher's screen video beside it + optionally the lesson file for slide pictures.
+// урок.json, the slides' pictures) + the teacher's screen video beside it.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Clock, fmt, useClockState, useClockTime } from './clock'
-import { readLessonPictures, readRecording, releasePictures, releaseRecording, type LessonPictures, type Recording } from './recording'
+import { readRecording, releaseRecording, type Recording } from './recording'
 import { STAGE_LABELS, StudentTrack, stageMarks, type Stage } from './replay'
 import { RoomSound, useSpeaking } from './sound'
 import { BoardFeed, ScaledScreen, StudentScreen } from './student/StudentScreen'
@@ -16,13 +16,11 @@ function loadLabels(): Labels {
 }
 
 const isVideo = (f: File) => /^video\//.test(f.type) || /\.(mp4|webm|mkv|mov)$/i.test(f.name)
-const isLesson = (f: File) => /\.colesson$/i.test(f.name)
 const isArchive = (f: File) => /\.zip$/i.test(f.name) || f.type === 'application/zip'
 
 export default function App() {
   const [rec, setRec] = useState<Recording | null>(null)
   const [video, setVideo] = useState<{ name: string; url: string } | null>(null)
-  const [pictures, setPictures] = useState<LessonPictures | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -30,9 +28,8 @@ export default function App() {
     setError('')
     const archive = files.find(isArchive)
     const vid = files.find(isVideo)
-    const lesson = files.find(isLesson)
-    const other = files.filter(f => f !== archive && f !== vid && f !== lesson)
-    if (other.length) setError(`Не подходит: ${other.map(f => f.name).join(', ')}. Нужны архив записи (.zip), видео экрана и файл урока (.colesson)`)
+    const other = files.filter(f => f !== archive && f !== vid)
+    if (other.length) setError(`Не подходит: ${other.map(f => f.name).join(', ')}. Нужны архив записи (.zip) и видео экрана`)
     setBusy(true)
     try {
       if (archive) {
@@ -40,10 +37,6 @@ export default function App() {
         setRec(old => { releaseRecording(old); return r })
       }
       if (vid) setVideo(old => { if (old) URL.revokeObjectURL(old.url); return { name: vid.name, url: URL.createObjectURL(vid) } })
-      if (lesson) {
-        const p = await readLessonPictures(lesson)
-        setPictures(old => { releasePictures(old); return p })
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -61,7 +54,7 @@ export default function App() {
   }, [open])
 
   if (!rec) return <OpenScreen onFiles={open} error={error} busy={busy} />
-  return <Player key={rec.code + rec.recordStart} rec={rec} video={video} pictures={pictures} onFiles={open} error={error} busy={busy} />
+  return <Player key={rec.code + rec.recordStart} rec={rec} video={video} onFiles={open} error={error} busy={busy} />
 }
 
 function FilePick({ onFiles, accept, multiple = true, children, style, testid }: {
@@ -75,7 +68,7 @@ function FilePick({ onFiles, accept, multiple = true, children, style, testid }:
   </>
 }
 
-const ACCEPT_ALL = '.zip,.colesson,.mp4,.webm,video/*,application/zip'
+const ACCEPT_ALL = '.zip,.mp4,.webm,video/*,application/zip'
 
 function OpenScreen({ onFiles, error, busy }: { onFiles: (f: File[]) => void; error: string; busy: boolean }) {
   return (
@@ -90,9 +83,8 @@ function OpenScreen({ onFiles, error, busy }: { onFiles: (f: File[]) => void; er
           <div className="hint">или перетащите их сюда</div>
         </div>
         <ul>
-          <li><b>урок-…zip</b> — архив: звук всех комнат и действия учеников. Обязательно.</li>
+          <li><b>урок-…zip</b> — архив: звук всех комнат, действия учеников, картинки слайдов. Обязательно.</li>
           <li><b>урок-…-экран.mp4</b> (или .webm) — видео экрана учителя. Можно добавить позже.</li>
-          <li><b>урок.colesson</b> — только для старых записей, где ещё нет картинок слайдов: тогда они берутся из файла урока. Новые записи хранят картинки сами.</li>
         </ul>
         <p className="hint">Файлы никуда не загружаются: запись открывается прямо в этом браузере.</p>
         {error && <div className="error">{error}</div>}
@@ -117,8 +109,8 @@ const STAGE_COLORS: Record<Stage, string> = {
   waiting: '#c9ccd3', group: '#7fb3e8', individual: '#b8a3e0', pairs: '#8fd19e', fours: '#f2c27b',
 }
 
-function Player({ rec, video, pictures, onFiles, error, busy }: {
-  rec: Recording; video: { name: string; url: string } | null; pictures: LessonPictures | null
+function Player({ rec, video, onFiles, error, busy }: {
+  rec: Recording; video: { name: string; url: string } | null
   onFiles: (f: File[]) => void; error: string; busy: boolean
 }) {
   const clock = useMemo(() => new Clock(rec.recordStart, rec.recordEnd), [rec])
@@ -204,11 +196,6 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
         <FilePick onFiles={onFiles} accept=".mp4,.webm,video/*" multiple={false} style={videoMissing ? btnPrimary : btn} testid="pick-video">
           {video ? 'Другое видео' : 'Видео экрана…'}
         </FilePick>
-        {rec.pictures.size === 0 && ( // older archives: the pictures come from the lesson file
-          <FilePick onFiles={onFiles} accept=".colesson" multiple={false} style={btn} testid="pick-lesson">
-            {pictures ? 'Другой файл урока' : 'Файл урока…'}
-          </FilePick>
-        )}
         <FilePick onFiles={onFiles} accept={ACCEPT_ALL} style={btn}>Другая запись</FilePick>
       </header>
       {(error || busy) && <div className={error ? 'error bar' : 'bar'}>{busy ? 'Открываем…' : error}</div>}
@@ -259,7 +246,7 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
             <div className="pane">
               {outside
                 ? <div className="placeholder" data-testid="outside">{outside}</div>
-                : <StudentPane key={track.nick} track={track} n={n} t={t} label={label} speaking={speaking} pictures={pictures} kept={rec.pictures} />}
+                : <StudentPane key={track.nick} track={track} n={n} t={t} label={label} speaking={speaking} pictures={rec.pictures} />}
             </div>
           )}
         </section>
@@ -282,10 +269,10 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
   )
 }
 
-function StudentPane({ track, n, t, label, speaking, pictures, kept }: {
-  track: StudentTrack; n: number; t: number; label: (id: string) => string; speaking: ReadonlySet<string>; pictures: LessonPictures | null
-  /** pictures the archive itself holds */
-  kept: Map<string, string>
+function StudentPane({ track, n, t, label, speaking, pictures }: {
+  track: StudentTrack; n: number; t: number; label: (id: string) => string; speaking: ReadonlySet<string>
+  /** the archive's pictures by SHA-256 */
+  pictures: Map<string, string>
 }) {
   const feed = useMemo(() => new BoardFeed(), [track])
   const { view, board } = track.at(n)
@@ -301,13 +288,13 @@ function StudentPane({ track, n, t, label, speaking, pictures, kept }: {
   const media = view.slides.active ? view.slides.media : null
   const resolveMedia = useCallback((name: string) => {
     const h = media?.[name]?.hash
-    return h ? kept.get(h) ?? pictures?.byHash.get(h) : undefined
-  }, [media, pictures, kept])
+    return h ? pictures.get(h) : undefined
+  }, [media, pictures])
 
   return (
     <ScaledScreen>
       <StudentScreen nick={track.nick} view={view} t={t} feed={feed} label={label} speaking={speaking}
-        resolveMedia={resolveMedia} picturesKey={kept.size ? 'archive' : pictures ? String(pictures.byHash.size) : ''} />
+        resolveMedia={resolveMedia} />
     </ScaledScreen>
   )
 }
