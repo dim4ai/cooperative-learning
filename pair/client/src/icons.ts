@@ -84,5 +84,7 @@ export const icons = {
   cam: svg('<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="M15.5 10.5l5-3v9l-5-3"/>'),
   camOff: svg('<path d="M9 6.5h4.5a2 2 0 012 2v4M15.5 15.5a2 2 0 01-2 2H5a2 2 0 01-2-2v-7a2 2 0 011.5-1.9M15.5 10.5l5-3v9l-3-1.8M3 3l18 18"/>'),
   link: svg('<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'),
+  record: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>'),
+  recordStop: svg('<rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none"/>'),
   leave: svg('<path d="M14 4.5h4a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5h-4"/><path d="M10 16l-4-4 4-4M6 12h9"/>'),
 }

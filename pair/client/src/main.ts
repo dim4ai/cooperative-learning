@@ -3,6 +3,7 @@ import { Board, isShape, throttle, type TextStyle, type Tool } from './board'
 import { Peers, type LinkState } from './peers'
 import type { PeerInfo } from './signaling'
 import { icons } from './icons'
+import { LessonRecorder } from './record'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
@@ -1033,7 +1034,33 @@ async function lesson(entry: Entry, name: string) {
   toggle('audio', micBtn, icons.mic, icons.micOff)
   linkBtn.addEventListener('click', copyLink)
   writeBtn.addEventListener('click', () => openFeedback(`занятие, ${teacher ? 'учитель' : 'ученик'}`))
-  side.append(camBtn, micBtn, phoneBtn, linkBtn, el('div', { class: 'grow' }), writeBtn, leaveBtn)
+  side.append(camBtn, micBtn, phoneBtn, linkBtn)
+
+  // ---------- the teacher records the lesson as a video ----------
+  /** the other people's streams (not phones): their voices go into the recording */
+  const remote = new Map<string, MediaStream>()
+  const recorder = new LessonRecorder(() => new Map([...(local ? [['me', local] as const] : []), ...remote]))
+  const recBtn = el('button', { class: 'rec', title: 'Записать занятие на видео', 'aria-label': 'Записать занятие' }, icons.record)
+  let recTimer = 0
+  recorder.onChange = () => {
+    const on = recorder.recording
+    recBtn.classList.toggle('on', on)
+    recBtn.innerHTML = on ? icons.recordStop : icons.record
+    recBtn.title = on ? 'Остановить запись и скачать видео' : 'Записать занятие на видео'
+    clearInterval(recTimer)
+    if (on) recTimer = window.setInterval(() => {
+      const s = Math.floor(recorder.elapsed / 1000)
+      recBtn.title = `Идёт запись, ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}. Остановить и скачать видео`
+    }, 1000)
+  }
+  recorder.onSaved = (name) => say(`Видео занятия скачано: ${name}`, 6000)
+  recBtn.addEventListener('click', async () => {
+    if (recorder.recording) return recorder.stop()
+    if (await recorder.start()) say('Идёт запись: экран и голоса. Остановить — красной кнопкой справа', 5000)
+    else say('Запись не началась: браузер не дал доступ к экрану', 5000)
+  })
+  if (teacher) side.append(recBtn)
+  side.append(el('div', { class: 'grow' }), writeBtn, leaveBtn)
 
   // ---------- notebook camera: a phone joins by a QR code ----------
   const camTag = myCamTag()
@@ -1382,6 +1409,10 @@ async function lesson(entry: Entry, name: string) {
       }
       if (v.srcObject !== stream) v.srcObject = stream
       t.classList.toggle('novideo', !stream.getVideoTracks().length)
+      if (peer.role !== 'cam') {
+        remote.set(peer.id, stream)
+        recorder.addVoice(peer.id, stream)
+      }
     },
     channelOpen: (peer, ch) => {
       if (peer.role === 'cam') return
@@ -1440,6 +1471,8 @@ async function lesson(entry: Entry, name: string) {
     },
     gone: (peer) => {
       states.delete(peer.id)
+      remote.delete(peer.id)
+      recorder.removeVoice(peer.id)
       videos.querySelector(`[data-key="${peer.id}"]`)?.remove()
       cams.get(peer.id)?.rect.stop()
       cams.delete(peer.id)
@@ -1459,14 +1492,19 @@ async function lesson(entry: Entry, name: string) {
     peers.broadcastVolatile({ op: 'laser', x, y, s })
   }
 
-  leaveBtn.addEventListener('click', () => {
+  leaveBtn.addEventListener('click', async () => {
+    await recorder.stop()
     peers.leave()
     local?.getTracks().forEach((t) => t.stop())
     app.className = 'screen'
     app.innerHTML = `<main class="card"><h1>Вы вышли из занятия</h1><p>Доска хранилась только в ваших браузерах.</p><button class="primary" id="back">Вернуться</button></main>`
     app.querySelector('#back')!.addEventListener('click', () => location.reload())
   })
-  window.addEventListener('beforeunload', () => peers.leave())
+  window.addEventListener('beforeunload', (e) => {
+    // the video lives only in this tab until «Стоп»: ask before it is lost
+    if (recorder.recording) return e.preventDefault()
+    peers.leave()
+  })
 }
 
 function escapeHtml(s: string) {

@@ -322,6 +322,22 @@ button.primary:hover {
   flex: 1;
 }
 
+#side .rec {
+  color: #f87171;
+}
+
+#side .rec.on {
+  background: var(--danger);
+  color: #fff;
+  animation: rec-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
 #side .leave:hover {
   background: var(--danger);
   color: #fff;
