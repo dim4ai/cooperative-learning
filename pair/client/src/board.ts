@@ -1290,6 +1290,28 @@ export class Board {
     this.lookAt(b.x, b.y, Math.min(5, Math.max(0.2, b.z)))
   }
 
+  /** Bookmarks from an opened file, besides mine */
+  mergeBookmarks(list: unknown) {
+    if (!Array.isArray(list)) return
+    const have = new Set(this.bookmarks.map((b) => b.id))
+    const add = list.filter((b) => validBookmark(b) && !have.has(b.id))
+    if (!add.length) return
+    this.bookmarks.push(...add)
+    this.bookmarksChanged()
+  }
+
+  /** Everything on the board to save, bottom to top, each object with the page its middle is on */
+  contents(skipLayers = new Set<string>()) {
+    const { w, h } = pageBox(this.sheet)
+    return (this.canvas.getObjects() as Obj[])
+      .filter((o) => !o._pending && !skipLayers.has(o.layer ?? BASE_LAYER))
+      .map((o) => {
+        const r = o.getBoundingRect()
+        const page: [number, number] = [Math.floor((r.left + r.width / 2) / w), Math.floor((r.top + r.height / 2) / h)]
+        return { obj: { ...this.serialize(o), layer: o.layer ?? BASE_LAYER }, page }
+      })
+  }
+
   private bookmarksChanged() {
     this.onBookmarks()
     this.onOp({ op: 'bookmarks', list: this.bookmarks })

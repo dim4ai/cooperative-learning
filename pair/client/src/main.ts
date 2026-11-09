@@ -643,6 +643,11 @@ async function lesson(entry: Entry, name: string) {
       closePops()
       $<HTMLInputElement>('#open').click()
     })
+    const keep = el('button', { class: 'wide' }, `${icons.download}<span>Сохранить урок…</span>`)
+    keep.addEventListener('click', () => {
+      closePops()
+      saveLesson()
+    })
     const save = el('button', { class: 'wide' }, `${icons.download}<span>Сохранить доску картинкой</span>`)
     save.addEventListener('click', async () => {
       closePops()
@@ -673,7 +678,7 @@ async function lesson(entry: Entry, name: string) {
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.getAttribute('href')!), 30_000)
     })
-    pop.append(open, save, pdf, clear)
+    pop.append(open, keep, save, pdf, clear)
   })
 
   top.append(
@@ -885,6 +890,56 @@ async function lesson(entry: Entry, name: string) {
       say('Не удалось открыть PDF')
     }
   }
+  /** the name of the lesson opened last: saving offers it */
+  let lessonTitle = ''
+  /**
+   * Saves the board as a lesson file, to open later and go on. Where the browser can, the teacher picks
+   * the name and the folder; otherwise it downloads. The student's copy leaves out what is hidden from them.
+   */
+  async function saveLesson() {
+    if (!board.canvas.getObjects().length) return say('Доска пуста')
+    const stamp = new Date().toLocaleDateString('ru-RU')
+    const suggested = `${(lessonTitle || `Урок ${stamp}`).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80).trim()}.colesson`
+    const pick = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker
+    let handle: FileSystemFileHandle | null = null
+    if (pick) {
+      try {
+        handle = await pick({ suggestedName: suggested, types: [{ description: 'Урок', accept: { 'application/vnd.colearn.lesson+zip': ['.colesson'] } }] })
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return
+        handle = null // not allowed here: download instead
+      }
+    }
+    const name = handle?.name ?? suggested
+    say('Сохраняем…', 60_000)
+    try {
+      const { writeLesson } = await import('./lesson')
+      const hidden = new Set(teacher ? [] : board.layers.filter((l) => l.studentHidden).map((l) => l.id))
+      const title = name.replace(/\.colesson$/i, '')
+      const blob = await writeLesson({
+        title,
+        items: board.contents(hidden),
+        layers: board.layers.filter((l) => !hidden.has(l.id)),
+        sheet: board.sheet,
+        bookmarks: board.bookmarks,
+        page: pageBox(board.sheet),
+      })
+      if (handle) {
+        const w = await handle.createWritable()
+        await w.write(blob)
+        await w.close()
+      } else {
+        const a = el('a', { href: URL.createObjectURL(blob), download: name })
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.getAttribute('href')!), 30_000)
+      }
+      lessonTitle = title
+      say(`Урок сохранён: ${name}. Открыть его снова — «Открыть урок…»`, 6000)
+    } catch (err) {
+      console.warn(err)
+      say('Не удалось сохранить урок')
+    }
+  }
   $<HTMLInputElement>('#open').addEventListener('change', (e) => {
     const f = (e.target as HTMLInputElement).files?.[0]
     if (f) openFile(f)
@@ -907,8 +962,12 @@ async function lesson(entry: Entry, name: string) {
       let n = 0
       let note = ''
       if (lessonFile) {
-        const { readLesson } = await import('./lesson')
+        const { readLesson, lessonBoard } = await import('./lesson')
+        const saved = await lessonBoard(file)
+        if (saved?.sheet && typeof saved.sheet === 'object') board.setSheet(saved.sheet) // the board saved here: its own sheet
         const got = await readLesson(file, pageBox(board.sheet))
+        if (saved) board.mergeBookmarks(saved.bookmarks)
+        lessonTitle = got.title || file.name.replace(/\.colesson$/i, '')
         n = await board.replaceWith(got.objects, got.layers)
         note = `Открыт урок${got.title ? ` «${got.title}»` : ''}: слайдов ${got.slides}, по одному на страницу`
       } else {
@@ -917,6 +976,7 @@ async function lesson(entry: Entry, name: string) {
         const got = await readChattern(file)
         placeJson(got.objects, got.scale, 0, 0)
         n = await board.replaceWith(got.objects)
+        lessonTitle = file.name.replace(/\.[^.]*$/, '')
         note = 'Доска открыта'
         if (got.landscape !== board.sheet.landscape) note += `. Она ${got.landscape ? 'альбомная' : 'книжная'}: лист можно поменять в настройках листа`
       }
