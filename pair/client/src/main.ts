@@ -6,7 +6,7 @@ import { icons } from './icons'
 import { entryFromHash, newKey, parseCode, pretty, studentLink, teacherLink, type Entry } from './roles'
 import { LINE_MARKS, MARKS, WORD_MARKS } from './marks'
 import { SHAPES, SHAPE_KINDS } from './shapes'
-import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, pageAt, type Sheet } from './paper'
+import { BORDER_COLORS, LINE_COLORS, LINE_WEIGHTS, PAGE_SIZES, PAPERS, pageAt, pageBox, type Sheet } from './paper'
 import { Laser } from './laser'
 import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
@@ -16,7 +16,7 @@ import { openFeedback } from './feedback'
 
 const app = document.getElementById('app')!
 
-type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot' | 'pdf' | 'open'
+type ToolId = Exclude<Tool, 'pipette'> | 'image' | 'snapshot' | 'pdf'
 const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'select', title: 'Выбор', key: 'V' },
   { id: 'lock', title: 'Закрепление: щёлкните объект, чтобы закрепить или открепить его', key: 'K' },
@@ -33,7 +33,6 @@ const TOOLS: { id: ToolId; title: string; key?: string }[] = [
   { id: 'text', title: 'Текст', key: 'T' },
   { id: 'image', title: 'Картинка из файла (или вставить Ctrl+V, перетащить файл)', key: 'I' },
   { id: 'pdf', title: 'PDF: выбрать страницы, обрезать поля и разложить по страницам доски (или перетащить файл)' },
-  { id: 'open', title: 'Открыть файл: PDF, картинку или доску (или перетащить файл на доску)' },
   { id: 'snapshot', title: 'Снимок со своей камеры на доску (снимок с камеры собеседника — кнопкой на его видео)' },
 ]
 /** The left panel: single tools and groups that open sideways; a group shows its last used tool. */
@@ -47,10 +46,10 @@ const PANEL: { members: ToolId[]; title?: string }[] = [
   { members: WORD_MARKS, title: 'Разбор слова' },
   { members: [...SHAPE_KINDS, 'polygon'], title: 'Фигуры' },
   { members: ['text'] },
-  { members: ['open', 'image', 'pdf', 'snapshot'], title: 'Открыть файл или вставить: картинку, PDF, снимок с камеры' },
+  { members: ['image', 'pdf', 'snapshot'], title: 'Вставить: картинку, PDF или снимок с камеры' },
 ]
 /** Not tools but one-off actions */
-const ACTIONS: ToolId[] = ['open', 'image', 'pdf', 'snapshot']
+const ACTIONS: ToolId[] = ['image', 'pdf', 'snapshot']
 const COLORS = ['#1f2937', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#9333ea']
 const TINTS = ['#e5e7eb', '#fecaca', '#bfdbfe', '#bbf7d0', '#fed7aa', '#e9d5ff']
 const WIDTHS = [2, 4, 8]
@@ -203,7 +202,7 @@ async function lesson(entry: Entry, name: string) {
     <div id="toast" hidden></div>
     <input id="file" type="file" accept="image/*" hidden>
     <input id="pdf" type="file" accept="application/pdf,.pdf" hidden>
-    <input id="open" type="file" hidden>`
+    <input id="open" type="file" accept=".colesson" hidden>`
 
   const $ = <T extends HTMLElement>(s: string) => app.querySelector<T>(s)!
   const board = new Board($<HTMLCanvasElement>('#board'), $('#wrap'), $<HTMLCanvasElement>('#paper'))
@@ -257,7 +256,6 @@ async function lesson(entry: Entry, name: string) {
     if (board.readOnly && id !== 'hand' && id !== 'pointer') return
     if (id === 'image') $<HTMLInputElement>('#file').click()
     else if (id === 'pdf') importPdf()
-    else if (id === 'open') $<HTMLInputElement>('#open').click()
     else if (id === 'snapshot') snapshot(null)
     else board.setTool(id)
   }
@@ -635,6 +633,16 @@ async function lesson(entry: Entry, name: string) {
   )
   const menuBtn = btn(icons.menu, 'Меню доски', () => {})
   popover(menuBtn, (pop) => {
+    const open = el('button', { class: 'wide edit' }, `${icons.open}<span>Открыть урок…</span>`)
+    open.addEventListener('click', () => {
+      if (board.canvas.getObjects().length && !open.dataset.sure) {
+        open.dataset.sure = '1'
+        open.querySelector('span')!.textContent = 'Урок откроется вместо того, что на доске. Нажмите ещё раз (вернуть — Ctrl+Z)'
+        return
+      }
+      closePops()
+      $<HTMLInputElement>('#open').click()
+    })
     const save = el('button', { class: 'wide' }, `${icons.download}<span>Сохранить доску картинкой</span>`)
     save.addEventListener('click', async () => {
       closePops()
@@ -665,7 +673,7 @@ async function lesson(entry: Entry, name: string) {
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.getAttribute('href')!), 30_000)
     })
-    pop.append(save, pdf, clear)
+    pop.append(open, save, pdf, clear)
   })
 
   top.append(
@@ -882,32 +890,41 @@ async function lesson(entry: Entry, name: string) {
     if (f) openFile(f)
     ;(e.target as HTMLInputElement).value = ''
   })
-  /** Any file: what it is, is told by its first bytes, not by its name */
+  /**
+   * Opens a file as the board to work on, in place of what is there (one Ctrl+Z brings it back).
+   * What it is, is told by its first bytes, not by its name: our lesson, or a board from elsewhere.
+   */
   async function openFile(file: File) {
     if (board.readOnly) return
-    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
-    const text = String.fromCharCode(...head)
-    if (text.startsWith('%PDF')) return void importPdf(file)
-    if (text === 'chattern') return void openBoardFile(file)
-    if (file.type.startsWith('image/')) return void board.addImage(file)
-    say('Этот файл не открыть здесь: подходят PDF, картинки и доски')
-  }
-  // a board from another app (Chattern's .chtrn), placed next to ours
-  async function openBoardFile(file: File) {
-    say('Открываем доску…', 60_000)
+    const head = new Uint8Array(await file.slice(0, 40).arrayBuffer())
+    const { isLesson } = await import('./lesson')
+    const { isChattern } = await import('./chattern')
+    const lessonFile = isLesson(head)
+    if (!lessonFile && !isChattern(head)) return say('Этот файл не поддерживается')
+    const had = board.canvas.getObjects().length > 0
+    say('Открываем…', 60_000)
     try {
-      const { readChattern } = await import('./chattern')
-      const got = await readChattern(file)
-      const n = await board.placeBoard(got.objects, got.scale)
-      if (!n) return say('На этой доске ничего нет')
-      say(
-        got.landscape !== board.sheet.landscape
-          ? `Доска открыта справа (объектов: ${n}). Она ${got.landscape ? 'альбомная' : 'книжная'}: поменять лист можно в настройках листа.`
-          : `Доска открыта справа (объектов: ${n})`,
-      )
+      let n = 0
+      let note = ''
+      if (lessonFile) {
+        const { readLesson } = await import('./lesson')
+        const got = await readLesson(file, pageBox(board.sheet))
+        n = await board.replaceWith(got.objects, got.layers)
+        note = `Открыт урок${got.title ? ` «${got.title}»` : ''}: слайдов ${got.slides}, по одному на страницу`
+      } else {
+        const { readChattern } = await import('./chattern')
+        const { placeJson } = await import('./pictures')
+        const got = await readChattern(file)
+        placeJson(got.objects, got.scale, 0, 0)
+        n = await board.replaceWith(got.objects)
+        note = 'Доска открыта'
+        if (got.landscape !== board.sheet.landscape) note += `. Она ${got.landscape ? 'альбомная' : 'книжная'}: лист можно поменять в настройках листа`
+      }
+      if (!n) note = 'В файле ничего нет'
+      say(had ? `${note}. Прежняя доска вернётся по Ctrl+Z` : note, 6000)
     } catch (err) {
       console.warn(err)
-      say('Не удалось открыть доску: файл повреждён')
+      say('Не удалось открыть: файл повреждён')
     }
   }
   $('#wrap').addEventListener('drop', (e) => {

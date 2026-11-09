@@ -4,6 +4,7 @@
 // JSON: { blobs: [{sha, size}], fc: <Fabric.js 5 canvas JSON> } plus Chattern's own fields:
 // chrnBlobSha256 (a picture's bytes by hash), chrnPinned (fixed in place), chrnPage64pxMm (scale).
 import { gunzipSync, strFromU8 } from 'fflate'
+import { picture, shrinkImage } from './pictures'
 
 export function isChattern(bytes: Uint8Array): boolean {
   return bytes.length > 18 && strFromU8(bytes.subarray(0, 8)) === 'chattern'
@@ -18,22 +19,6 @@ export interface ChatternBoard {
 }
 
 const PX_PER_MM = 96 / 25.4 // ours, as in paper.ts
-const MAX_SIDE = 1800 // like PDF pages: enough for a page, light enough to send to the student
-
-/** A picture's bytes → a data URL no larger than MAX_SIDE, and how much it was shrunk */
-async function picture(data: Uint8Array): Promise<{ url: string; f: number }> {
-  const bmp = await createImageBitmap(new Blob([data as BlobPart]))
-  const f = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height))
-  const cv = document.createElement('canvas')
-  cv.width = Math.max(1, Math.round(bmp.width * f))
-  cv.height = Math.max(1, Math.round(bmp.height * f))
-  cv.getContext('2d')!.drawImage(bmp, 0, 0, cv.width, cv.height)
-  bmp.close()
-  const png = data[0] === 0x89 && data[1] === 0x50
-  let url = cv.toDataURL(png ? 'image/png' : 'image/jpeg', 0.85)
-  if (url.length > 1_500_000) url = cv.toDataURL('image/jpeg', 0.8) // big screenshots: png is wasteful
-  return { url, f: cv.width / bmp.width }
-}
 
 export async function readChattern(file: Blob): Promise<ChatternBoard> {
   const bytes = new Uint8Array(await file.arrayBuffer())
@@ -68,13 +53,7 @@ export async function readChattern(file: Blob): Promise<ChatternBoard> {
       if (String(o.type).toLowerCase() === 'image') {
         const p = typeof sha === 'string' ? await pic(sha) : null
         if (!p) continue // a picture whose bytes are missing: leave it out rather than break the board
-        o.src = p.url
-        if (p.f < 1) {
-          // the same picture on the board, from fewer pixels
-          for (const k of ['width', 'height', 'cropX', 'cropY'] as const) if (typeof o[k] === 'number') o[k] = (o[k] as number) * p.f
-          o.scaleX = ((o.scaleX as number) ?? 1) / p.f
-          o.scaleY = ((o.scaleY as number) ?? 1) / p.f
-        }
+        shrinkImage(o, p)
       }
       if (Array.isArray(o.objects)) o.objects = await prepare(o.objects as Record<string, unknown>[], true)
       out.push(o)

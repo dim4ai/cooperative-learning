@@ -140,6 +140,8 @@ export class Board {
   activeLayer = BASE_LAYER
   /** layers I hid on my screen only */
   hiddenForMe = new Set<string>()
+  /** every layer this board has had, by id: undo may bring back objects of a layer a file replaced */
+  private seenLayers = new Map<string, Layer>()
   /** set by the page: the teacher sees layers hidden from the student (dimmed) */
   isTeacher = false
   onLayers: () => void = () => {}
@@ -831,6 +833,7 @@ export class Board {
     if (!step) return
     this.canvas.discardActiveObject()
     for (const ch of [...step].reverse()) await this.put(ch.id, ch.before)
+    this.reviveLayers()
     this.redoStack.push(step)
     this.onHistory()
   }
@@ -840,6 +843,7 @@ export class Board {
     if (!step) return
     this.canvas.discardActiveObject()
     for (const ch of step) await this.put(ch.id, ch.after)
+    this.reviveLayers()
     this.undoStack.push(step)
     this.onHistory()
   }
@@ -1144,14 +1148,13 @@ export class Board {
   }
 
   /**
-   * Puts a whole board brought from elsewhere (Fabric JSON, its own pixels × `scale` = ours) into a free
-   * column of pages to the right of everything, from the top, into the current layer. Sizes stay
-   * true to the paper. One undo step removes it all. Returns how many objects came in.
+   * Replaces the board with an opened file: Fabric JSON in board coordinates, and the layers it uses
+   * (added on top of mine). Objects without a layer go to the current one. One undo brings back what
+   * was here before. Shows the first page. Returns how many objects came in.
    */
-  async placeBoard(json: Record<string, unknown>[], scale: number): Promise<number> {
+  async replaceWith(json: Record<string, unknown>[], layers: Layer[] = []): Promise<number> {
     const c = this.canvas
     const objs = (await util.enlivenObjects<FabricObject>(json)) as Obj[]
-    if (!objs.length) return 0
     // group frames were measured with the other app's fonts: fit each group to what it holds now
     const refit = (o: FabricObject) => {
       if (o instanceof Group) {
@@ -1160,35 +1163,40 @@ export class Board {
       }
     }
     objs.forEach(refit)
-    const { w, h } = pageBox(this.sheet)
-    const used = this.pagesWithContent()
-    const col = used.length ? Math.max(...used.map((p) => p[0])) + 1 : 0
-    let minX = 0
-    let minY = 0
-    for (const o of objs) {
-      o.setCoords()
-      const r = o.getBoundingRect()
-      minX = Math.min(minX, r.left)
-      minY = Math.min(minY, r.top)
-    }
-    this.canvas.discardActiveObject()
+    // the file's layers replace mine (kept aside: Ctrl+Z brings back the objects, and with them their layers)
+    for (const l of this.layers) this.seenLayers.set(l.id, l)
+    let list = validLayers(layers)
+    const drawable = (l: Layer) => !l.locked && !l.studentHidden
+    if (!list.some(drawable)) list = [...list, { id: 'L' + newId(), name: list.length ? 'Мои записи' : 'Слой 1' }]
+    c.discardActiveObject()
+    const old = c.getObjects()
     this.tx(() => {
+      if (old.length) c.remove(...old)
+      this.layers = list
+      this.activeLayer = list.filter(drawable).at(-1)!.id
+      this.hiddenForMe.clear()
+      this.layersChanged()
       for (const o of objs) {
-        delete o.id // ours, fresh: the same board may be opened twice
-        o.set({
-          left: col * w + (o.left - minX) * scale,
-          top: (o.top - minY) * scale,
-          scaleX: o.scaleX * scale,
-          scaleY: o.scaleY * scale,
-        })
+        delete o.id // ours, fresh: the same file may be opened twice
         o.setCoords()
         c.add(o)
       }
     })
     this.setTool('select')
-    const zoom = Math.min(c.width / w, c.height / h) * 0.95
-    this.lookAt(col * w + w / 2, h / 2, Math.min(5, Math.max(0.2, zoom)))
+    this.goToPage(0, 0)
     return objs.length
+  }
+
+  /** Layers that objects brought back by undo/redo stand in, if a file has replaced them since */
+  private reviveLayers() {
+    const have = new Set(this.layers.map((l) => l.id))
+    const need = new Set<string>()
+    for (const o of this.canvas.getObjects() as Obj[]) if (o.layer && !have.has(o.layer)) need.add(o.layer)
+    if (!need.size) return
+    // in the order they had (the map keeps it), then any never seen
+    for (const [id, l] of this.seenLayers) if (need.delete(id)) this.layers.push(l)
+    for (const id of need) this.layers.push({ id, name: `Слой ${this.layers.length + 1}` })
+    this.layersChanged()
   }
 
   // ---------- pictures ----------
