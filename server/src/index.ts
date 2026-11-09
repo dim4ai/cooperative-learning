@@ -23,7 +23,7 @@ import { Throttle, hashIp } from './demoGuard';
 import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
-import { canSendMail, sendMail } from './mailer';
+import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -2089,6 +2089,33 @@ app.post('/demo/feedback', async (req, res) => {
   if (!saved) { res.status(500).json({ error: 'failed to save feedback' }); return; }
   res.json({ ok: true });
 });
+
+// ---------- «Написать нам»: an error, an idea or a review from our apps, mailed to our box ----------
+// No login needed (the editor has none); a few letters an hour per address.
+const feedbackTimes = new Map<string, number[]>();
+app.post('/feedback', async (req, res) => {
+  if (!canSendFeedback()) { res.status(503).json({ error: 'not configured' }); return; }
+  const letter = cleanFeedback(req.body, req.headers['user-agent']);
+  if ('error' in letter) { res.status(400).json({ error: letter.error }); return; }
+  const ip = clientIpFromReq(req);
+  const now = Date.now();
+  const recent = (feedbackTimes.get(ip) ?? []).filter(t => now - t < 3_600_000);
+  if (recent.length >= FEEDBACK_PER_IP_PER_HOUR) { res.status(429).json({ error: 'too many' }); return; }
+  recent.push(now);
+  feedbackTimes.set(ip, recent);
+  try {
+    await sendFeedback(letter);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('feedback letter not sent:', (e as Error).message);
+    res.status(502).json({ error: 'not sent' });
+  }
+});
+// old entries go, so the map doesn't grow with every address that ever wrote
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, ts] of feedbackTimes) if (!ts.some(t => now - t < 3_600_000)) feedbackTimes.delete(ip);
+}, 10 * 60_000).unref();
 
 // Last in the chain, after every route. Clients only look at the status (413 is
 // "the lesson is too big"), so it stays; the details stay in the server log.

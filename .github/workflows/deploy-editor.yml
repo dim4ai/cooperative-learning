@@ -19,6 +19,8 @@ jobs:
 
       - name: Build lesson editor
         working-directory: client-editor
+        env:
+          VITE_API_URL: https://api.co-learn.ru # «Написать нам» posts there
         run: |
           npm ci
           npm run build

@@ -6,6 +6,7 @@ import { MetaPanel } from './MetaPanel'
 import { nanoid } from './nanoid'
 import { packLesson, unpackLesson, suggestedFileName, type Media } from './lessonFile'
 import { pickLessonFile, saveLessonFile, canSaveInPlace } from './fileAccess'
+import { FeedbackDialog } from './Feedback'
 import { loadDraft, saveDraft } from './draft'
 function emptyBlock(type: BlockType): LessonBlock {
   const base = { id: nanoid(), type, duration: 10, title: BLOCK_LABELS[type], teacherNote: '', attachments: [] }
@@ -25,6 +26,7 @@ export default function App() {
   const [blocks, setBlocks] = useState<LessonBlock[]>([])
   const [media, setMedia] = useState<Media>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null)
   const [handle, setHandle] = useState<FileSystemFileHandle | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -262,6 +264,10 @@ export default function App() {
               + {BLOCK_LABELS[type]}
             </button>
           ))}
+          <button onClick={() => setFeedback(true)} data-testid="feedback-open" title="Ошибка, предложение или отзыв — письмом нам"
+            style={{ ...btnStyle('transparent', '#888'), marginTop: 6, flex: 'none' }}>
+            ✉ Написать нам
+          </button>
         </div>
       </div>
 
@@ -272,6 +278,11 @@ export default function App() {
           : <MetaPanel meta={meta} onChange={m => { setMeta(m); setDirty(true) }} />
         }
       </div>
+
+      {feedback && (
+        <FeedbackDialog onClose={() => setFeedback(false)}
+          where={`редактор: ${selected ? `этап «${BLOCK_LABELS[selected.type]}»` : 'описание урока'}`} />
+      )}
 
       {notice && (
         <div data-testid="notice" style={{
