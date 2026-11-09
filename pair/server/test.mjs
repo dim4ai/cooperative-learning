@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WebSocket } from 'ws'
-import { createServer, LIMITS, roomFromKey } from './server.mjs'
+import { createServer, LIMITS, FEEDBACK, roomFromKey } from './server.mjs'
+import { feedbackMailer } from './mailer.mjs'
 
-async function withServer(fn) {
-  const server = createServer({ log: () => {} })
+async function withServer(fn, opts = {}) {
+  const server = createServer({ log: () => {}, ...opts })
   const port = await server.listen(0, '127.0.0.1')
   try {
     await fn(`ws://127.0.0.1:${port}/ws`, port)
@@ -225,4 +226,49 @@ test('teacher is recognised by the key, never by the bare code', async () => {
     assert.equal((await fake.next('error')).error, 'bad key')
     for (const p of [t, s, fake]) p.close()
   })
+})
+
+test('feedback goes to the mailer cleaned, a few letters an hour per address', async () => {
+  const letters = []
+  await withServer(
+    async (url) => {
+      const ws = await connect(url)
+      ws.sendJson({ t: 'feedback', kind: 'bug', text: '  Доска не грузится\r\nвторая строка ', contact: 'a@b.ru\nBcc: x@y.z', where: 'занятие, учитель' })
+      assert.equal((await ws.next('feedback')).ok, true)
+      assert.deepEqual(letters[0], { kind: 'bug', text: 'Доска не грузится\nвторая строка', contact: 'a@b.ru Bcc: x@y.z', where: 'занятие, учитель', ua: '' })
+
+      ws.sendJson({ t: 'feedback', kind: 'spam', text: 'hello' })
+      assert.equal((await ws.next('feedback')).error, 'bad kind')
+      ws.sendJson({ t: 'feedback', kind: 'idea', text: ' ' })
+      assert.equal((await ws.next('feedback')).error, 'empty')
+      for (let i = 1; i < FEEDBACK.perIpPerHour; i++) {
+        ws.sendJson({ t: 'feedback', kind: 'other', text: `спасибо ${i}` })
+        assert.equal((await ws.next('feedback')).ok, true)
+      }
+      ws.sendJson({ t: 'feedback', kind: 'other', text: 'ещё одно' })
+      assert.equal((await ws.next('feedback')).error, 'too many')
+      assert.equal(letters.length, FEEDBACK.perIpPerHour)
+      ws.close()
+    },
+    { feedback: async (l) => void letters.push(l) },
+  )
+})
+
+test('feedback without mail set up says so, and a failed send is reported', async () => {
+  await withServer(async (url) => {
+    const ws = await connect(url)
+    ws.sendJson({ t: 'feedback', kind: 'idea', text: 'добавьте чат' })
+    assert.equal((await ws.next('feedback')).error, 'not configured')
+    ws.close()
+  })
+  await withServer(
+    async (url) => {
+      const ws = await connect(url)
+      ws.sendJson({ t: 'feedback', kind: 'idea', text: 'добавьте чат' })
+      assert.equal((await ws.next('feedback')).error, 'not sent')
+      ws.close()
+    },
+    { feedback: async () => { throw new Error('smtp down') } },
+  )
+  assert.equal(feedbackMailer({ SMTP_HOST: 'h', SMTP_USER: 'u', SMTP_PASS: 'p' }, () => {}), null)
 })

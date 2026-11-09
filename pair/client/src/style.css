@@ -1620,3 +1620,104 @@ button.primary:hover {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* ---------- write to us ---------- */
+
+.card .write-us {
+  margin: 22px 0 0;
+  text-align: center;
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.feedback {
+  width: min(520px, 100%);
+}
+
+.feedback-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.feedback-kinds {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.feedback-kinds label {
+  cursor: pointer;
+}
+
+.feedback-kinds input {
+  position: absolute;
+  opacity: 0;
+}
+
+.feedback-kinds span {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  font-size: 14px;
+}
+
+.feedback-kinds input:checked + span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.feedback-kinds input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.feedback textarea,
+.feedback-contact input {
+  font: inherit;
+  font-size: 15px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.feedback-contact {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.feedback .muted {
+  margin: 0;
+}
+
+.feedback-state {
+  margin: 0;
+  font-size: 14px;
+  min-height: 1em;
+}
+
+.feedback-state.error {
+  color: #b91c1c;
+}
+
+.feedback-done {
+  margin: 12px 0;
+  font-size: 16px;
+}

@@ -61,6 +61,7 @@ export const icons = {
   eye: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),
   eyeOff: svg('<path d="M10 5.7A9 9 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 01-2.6 3.4M6.6 6.9C4 8.6 2.5 12 2.5 12S6 18.5 12 18.5a9 9 0 004.6-1.3M9.9 9.9a3 3 0 004.2 4.2M3 3l18 18"/>'),
   studentHidden: svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/><path d="M4 4l16 16"/>'),
+  letter: svg('<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>'),
   up: svg('<path d="M6 14l6-6 6 6"/>'),
   down: svg('<path d="M6 10l6 6 6-6"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),

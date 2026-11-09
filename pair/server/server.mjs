@@ -46,13 +46,36 @@ export function roomFromKey(key) {
   return code
 }
 
-export function createServer({ log = console.log, iceServers = [] } = {}) {
+// a letter from the feedback form: what kind, the text, an optional way to answer
+export const FEEDBACK = {
+  kinds: ['bug', 'idea', 'other'],
+  maxText: 4000,
+  maxContact: 200,
+  maxWhere: 300,
+  perIpPerHour: 5,
+}
+
+/** Checks a feedback message from a browser; returns the clean letter or an error word. */
+export function cleanFeedback(msg, ua = '') {
+  const kind = FEEDBACK.kinds.includes(msg.kind) ? msg.kind : null
+  if (!kind) return { error: 'bad kind' }
+  const str = (v, max) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim().slice(0, max) : '')
+  const text = str(msg.text, FEEDBACK.maxText)
+  if (text.length < 3) return { error: 'empty' }
+  // one line each: these end up in the letter's body, never in its headers
+  const line = (v, max) => str(v, max).replace(/[\x00-\x1f\x7f]+/g, ' ')
+  return { kind, text, contact: line(msg.contact, FEEDBACK.maxContact), where: line(msg.where, FEEDBACK.maxWhere), ua: line(ua, FEEDBACK.maxWhere) }
+}
+
+export function createServer({ log = console.log, iceServers = [], feedback = null } = {}) {
   /** @type {Map<string, {peers: Map<string, any>, created: number}>} */
   const rooms = new Map()
   /** @type {Map<string, number>} */
   const socketsByIp = new Map()
   /** @type {Map<string, number[]>} */
   const connectTimes = new Map()
+  /** @type {Map<string, number[]>} */
+  const feedbackTimes = new Map()
 
   const httpServer = http.createServer((req, res) => {
     if (req.url === '/health') {
@@ -92,7 +115,7 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
       socket.end(`HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n`)
       return
     }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, ip))
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, ip, req))
   })
 
   function send(ws, msg) {
@@ -108,9 +131,10 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
     ws.room = null
   }
 
-  wss.on('connection', (ws, ip) => {
+  wss.on('connection', (ws, ip, req) => {
     ws.id = randomUUID().slice(0, 8)
     ws.ip = ip
+    ws.ua = req?.headers['user-agent'] ?? ''
     ws.room = null
     ws.alive = true
     ws.tokens = LIMITS.msgsBurst
@@ -175,6 +199,27 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
 
       if (msg.t === 'leave') return leave(ws)
 
+      // the feedback form: any socket, joined or not; a few letters an hour per address
+      if (msg.t === 'feedback') {
+        if (!feedback) return send(ws, { t: 'feedback', ok: false, error: 'not configured' })
+        const letter = cleanFeedback(msg, ws.ua)
+        if (letter.error) return send(ws, { t: 'feedback', ok: false, error: letter.error })
+        const recent = (feedbackTimes.get(ws.ip) ?? []).filter((t) => now - t < 3_600_000)
+        if (recent.length >= FEEDBACK.perIpPerHour) return send(ws, { t: 'feedback', ok: false, error: 'too many' })
+        recent.push(now)
+        feedbackTimes.set(ws.ip, recent)
+        Promise.resolve()
+          .then(() => feedback(letter))
+          .then(
+            () => send(ws, { t: 'feedback', ok: true }),
+            (e) => {
+              log(`feedback not sent: ${e?.message ?? e}`)
+              send(ws, { t: 'feedback', ok: false, error: 'not sent' })
+            },
+          )
+        return
+      }
+
       ws.close(4003, 'unknown message')
     })
 
@@ -206,6 +251,9 @@ export function createServer({ log = console.log, iceServers = [] } = {}) {
     }
     for (const [ip, times] of connectTimes) {
       if (times.every((t) => now - t >= 60_000)) connectTimes.delete(ip)
+    }
+    for (const [ip, times] of feedbackTimes) {
+      if (times.every((t) => now - t >= 3_600_000)) feedbackTimes.delete(ip)
     }
   }, LIMITS.pingMs)
 

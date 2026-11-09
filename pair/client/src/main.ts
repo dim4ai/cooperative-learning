@@ -12,6 +12,7 @@ import { FONTS, watchFonts } from './fonts'
 import { Minimap } from './minimap'
 import { Rectifier, setupFix, validFix, pageAspect, type Fix } from './camfix'
 import { camEntry, camLink, camOwner, myCamTag, phoneScreen, qrSvg } from './phonecam'
+import { openFeedback } from './feedback'
 
 const app = document.getElementById('app')!
 
@@ -98,7 +99,9 @@ function startScreen(error = '') {
         </div>
         <p class="hint" id="code-hint">Код ученика — 12 знаков, код учителя — 20. Можно вставить и ссылку целиком.</p>
       </form>
+      <p class="write-us"><button type="button" class="link-button" id="write-us">Написать нам: ошибка, предложение, отзыв</button></p>
     </main>`
+  app.querySelector('#write-us')!.addEventListener('click', () => openFeedback('начальный экран'))
   app.querySelector('#create')!.addEventListener('click', () => {
     location.hash = 't.' + newKey()
   })
@@ -885,6 +888,7 @@ async function lesson(entry: Entry, name: string) {
   const micBtn = el('button', { title: 'Микрофон', 'aria-label': 'Микрофон' }, icons.mic)
   const phoneBtn = el('button', { title: 'Подключить смартфон как камеру для тетради', 'aria-label': 'Подключить смартфон' }, icons.phone)
   const linkBtn = el('button', { title: 'Скопировать ссылку для ученика', 'aria-label': 'Ссылка для ученика' }, icons.link)
+  const writeBtn = el('button', { title: 'Написать нам: ошибка, предложение, отзыв', 'aria-label': 'Написать нам' }, icons.letter)
   const leaveBtn = el('button', { class: 'leave', title: 'Выйти', 'aria-label': 'Выйти' }, icons.leave)
   const toggle = (kind: 'audio' | 'video', btn: HTMLElement, on: string, off: string) => {
     const tracks = local?.getTracks().filter((t) => t.kind === kind) ?? []
@@ -904,7 +908,8 @@ async function lesson(entry: Entry, name: string) {
   toggle('video', camBtn, icons.cam, icons.camOff)
   toggle('audio', micBtn, icons.mic, icons.micOff)
   linkBtn.addEventListener('click', copyLink)
-  side.append(camBtn, micBtn, phoneBtn, linkBtn, el('div', { class: 'grow' }), leaveBtn)
+  writeBtn.addEventListener('click', () => openFeedback(`занятие, ${teacher ? 'учитель' : 'ученик'}`))
+  side.append(camBtn, micBtn, phoneBtn, linkBtn, el('div', { class: 'grow' }), writeBtn, leaveBtn)
 
   // ---------- notebook camera: a phone joins by a QR code ----------
   const camTag = myCamTag()

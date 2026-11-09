@@ -7,6 +7,7 @@ if (existsSync(envFile)) process.loadEnvFile(envFile)
 
 const { createServer } = await import('./server.mjs')
 const { createStunServer } = await import('./stun.mjs')
+const { feedbackMailer } = await import('./mailer.mjs')
 
 function iceServers() {
   const raw = process.env.ICE_SERVERS
@@ -25,7 +26,7 @@ function iceServers() {
 }
 
 const ice = iceServers()
-const server = createServer({ iceServers: ice })
+const server = createServer({ iceServers: ice, feedback: feedbackMailer() })
 await server.listen()
 console.log(`ice servers: ${ice.flatMap((s) => [].concat(s.urls)).join(', ') || 'none'}`)
 
