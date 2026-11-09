@@ -1721,3 +1721,17 @@ button.primary:hover {
   margin: 12px 0;
   font-size: 16px;
 }
+
+.card .home-link {
+  display: inline-block;
+  margin-bottom: 14px;
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.card .home-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -88,6 +88,7 @@ function startScreen(error = '') {
   app.className = 'screen'
   app.innerHTML = `
     <main class="card">
+      <a class="home-link" href="https://co-learn.ru/">← На главную co-learn</a>
       <h1>Занятие вдвоём</h1>
       <p>Общая доска, видео и звук для учителя и ученика. Бесплатно и без регистрации: связь идёт напрямую между вашими браузерами.</p>
       <button class="primary" id="create">Начать занятие с новым кодом</button>
