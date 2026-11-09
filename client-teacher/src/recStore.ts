@@ -246,7 +246,13 @@ function readme(meta: RecordingMeta, videoName: string | null): string {
 
 export interface SavedFiles { archive: { name: string; blob: Blob }; video: { name: string; blob: Blob } | null }
 
-export async function buildDownloads(meta: RecordingMeta): Promise<SavedFiles> {
+/** Names from the teacher's journal are in the recording: nick → a different name */
+export const hasJournalNames = (meta: RecordingMeta) => Object.entries(meta.names).some(([nick, name]) => name && name !== nick);
+
+const safeName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '_');
+
+/** withoutJournal: only the students' nicks stay (in names and the sound files' names) — an archive to give to others */
+export async function buildDownloads(meta: RecordingMeta, { withoutJournal = false } = {}): Promise<SavedFiles> {
   const base = baseName(meta);
   const files = await fileNames(meta.id);
   let video: SavedFiles['video'] = null;
@@ -256,7 +262,12 @@ export async function buildDownloads(meta: RecordingMeta): Promise<SavedFiles> {
   }
   const entries: ZipEntry[] = [];
   const enc = new TextEncoder();
-  const segments = meta.segments.filter(s => files.includes(s.file));
+  const stored = meta.segments.filter(s => files.includes(s.file));
+  // a sound file's name is звук/NNN-<name (nick)>-<room>.ext; without the journal — звук/NNN-<nick>-<room>.ext
+  const segments = withoutJournal
+    ? stored.map(s => ({ ...s, file: `звук/${s.file.slice('звук/'.length).split('-')[0]}-${safeName(s.who)}-${safeName(s.room)}.${s.file.split('.').pop()}` }))
+    : stored;
+  const names = withoutJournal ? Object.fromEntries(Object.keys(meta.names).map(n => [n, n])) : meta.names;
   const manifest = {
     format: 'co-learn-recording/1',
     title: meta.title,
@@ -266,14 +277,14 @@ export async function buildDownloads(meta: RecordingMeta): Promise<SavedFiles> {
     recordEnd: meta.recordEnd,
     video: meta.video && video ? { file: video.name, start: meta.video.start, mime: meta.video.mime } : null,
     lessons: meta.lessons,
-    names: meta.names,
+    names,
     audio: segments,
     events: files.includes('events') ? 'действия.jsonl' : null,
   };
   entries.push({ name: 'ПРОЧТИ.txt', parts: [new Blob([enc.encode(readme(meta, video?.name ?? null))])] });
   entries.push({ name: 'урок.json', parts: [new Blob([enc.encode(JSON.stringify(manifest, null, 2))])] });
   if (files.includes('events')) entries.push({ name: 'действия.jsonl', parts: await fileChunks(meta.id, 'events') });
-  for (const s of segments) entries.push({ name: s.file, parts: await fileChunks(meta.id, s.file) });
+  for (const [i, s] of segments.entries()) entries.push({ name: s.file, parts: await fileChunks(meta.id, stored[i].file) });
   return { archive: { name: `${base}.zip`, blob: await buildZip(entries, new Date(meta.createdAt)) }, video };
 }
 

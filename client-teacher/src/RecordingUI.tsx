@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { clearJustFinished, currentRecordingId, startRecording, stopRecording, useRecording } from './recording';
-import { buildDownloads, deleteRecording, download, listRecordings, type RecordingMeta } from './recStore';
+import { buildDownloads, deleteRecording, download, hasJournalNames, listRecordings, type RecordingMeta } from './recStore';
 
 const NOTICE_KEY = 'recordingNoticeSeen';
 
@@ -58,6 +58,9 @@ export function RecordingsDialog({ highlight, onClose }: { highlight?: string | 
         <p style={{ ...text, fontSize: 13, color: '#666' }}>
           Записи хранятся только в этом браузере. «Сохранить» скачивает два файла: видео экрана и архив со звуком и действиями учеников. Сохранив, удалите запись отсюда — она занимает место на диске.
         </p>
+        <p style={{ ...text, fontSize: 13, color: '#666' }}>
+          Посмотреть урок глазами любого ученика — в проигрывателе <a href="https://player.co-learn.ru" target="_blank" rel="noreferrer">player.co-learn.ru</a>: откройте в нём сохранённые файлы.
+        </p>
         {list.length === 0 && <div style={{ fontSize: 14, color: '#888' }}>Записей нет</div>}
         {list.map(m => <RecordingRow key={m.id} meta={m} fresh={m.id === highlight} current={recording && m.id === currentRecordingId()} />)}
       </div>
@@ -70,6 +73,7 @@ function RecordingRow({ meta, fresh, current }: { meta: RecordingMeta; fresh: bo
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [withoutJournal, setWithoutJournal] = useState(false);
   const length = meta.recordEnd ? duration(meta.recordEnd - meta.recordStart) : null;
   const when = new Date(meta.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 
@@ -77,7 +81,7 @@ function RecordingRow({ meta, fresh, current }: { meta: RecordingMeta; fresh: bo
     setBusy(true);
     setError('');
     try {
-      const files = await buildDownloads(meta);
+      const files = await buildDownloads(meta, { withoutJournal });
       if (files.video) download(files.video.name, files.video.blob);
       // two downloads at once are sometimes held back by the browser: the second one a moment later
       setTimeout(() => download(files.archive.name, files.archive.blob), files.video ? 800 : 0);
@@ -109,14 +113,20 @@ function RecordingRow({ meta, fresh, current }: { meta: RecordingMeta; fresh: bo
           <button data-testid="recording-delete-yes" onClick={() => deleteRecording(meta.id).then(() => refreshList())} style={{ ...mainBtn, background: '#e74c3c', padding: '6px 12px' }}>Удалить</button>
           <button onClick={() => setConfirmDelete(false)} style={plainBtn}>Отмена</button>
         </div>
-      ) : (
+      ) : (<>
+        {hasJournalNames(meta) && (
+          <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 13, color: '#444', cursor: 'pointer' }}>
+            <input type="checkbox" data-testid="recording-no-journal" checked={withoutJournal} onChange={e => setWithoutJournal(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>Без имён из журнала: в архиве останутся только ники учеников. <span style={{ color: '#888' }}>Видео экрана так не обезличить — в нём то, что было у вас на экране</span></span>
+          </label>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button data-testid="recording-save" onClick={save} disabled={busy} style={{ ...mainBtn, flex: 1 }}>
             {busy ? 'Готовим файлы…' : saved ? 'Сохранить ещё раз' : 'Сохранить'}
           </button>
           <button data-testid="recording-delete" onClick={() => setConfirmDelete(true)} style={{ ...mainBtn, background: '#fff', color: '#e74c3c', border: '1px solid #e74c3c' }}>Удалить</button>
         </div>
-      ))}
+      </>))}
     </div>
   );
 }
