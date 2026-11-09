@@ -3,7 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
-    # the landing page, the editor and pair have their own deploys: changing them mustn't restart the server mid-lesson
+    # the landing page, the editor, the player and pair have their own deploys: changing them mustn't restart the server mid-lesson
     paths-ignore:
       - 'landing/**'
       - '.github/workflows/deploy-landing.yml'
@@ -11,6 +11,8 @@ on:
       - '.github/workflows/deploy-pair.yml'
       - 'client-editor/**'
       - '.github/workflows/deploy-editor.yml'
+      - 'client-player/**'
+      - '.github/workflows/deploy-player.yml'
 
 jobs:
   deploy:

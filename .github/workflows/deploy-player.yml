@@ -1,0 +1,29 @@
+name: Deploy player
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client-player/**'
+      - '.github/workflows/deploy-player.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # slides, board and avatars are copies; they must match their originals
+      - name: Check shared copies are in sync
+        run: scripts/sync-slides.sh --check
+
+      - name: Build lesson recording player
+        working-directory: client-player
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy lesson recording player
+        run: |
+          mkdir -p ~/co-learn/player
+          rsync -a --delete client-player/dist/ ~/co-learn/player/
