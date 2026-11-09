@@ -56,8 +56,8 @@ export function openFeedback(where: string) {
           ${KINDS.map((k, i) => `<label><input type="radio" name="kind" value="${k.id}"${i === 0 ? ' checked' : ''}><span>${k.label}</span></label>`).join('')}
         </div>
         <textarea name="text" rows="7" maxlength="4000" required aria-label="Текст письма"></textarea>
-        <label class="feedback-contact"><span>Как вам ответить <span class="muted">(необязательно)</span></span>
-          <input name="contact" maxlength="200" autocomplete="email" placeholder="почта, телефон или телеграм">
+        <label class="feedback-contact"><span>Почта для ответа <span class="muted">(необязательно)</span></span>
+          <input name="contact" type="email" maxlength="200" autocomplete="email" placeholder="name@example.ru">
         </label>
         <p class="muted">К письму приложим только название экрана, браузер и размер окна. Код занятия и то, что на доске, не отправляем.</p>
         <p class="feedback-state" role="status"></p>
@@ -102,7 +102,7 @@ export function openFeedback(where: string) {
       state.textContent = error
       return
     }
-    form.querySelector('.feedback-body')!.innerHTML = `<p class="feedback-done">Спасибо! Письмо отправлено${contact.trim() ? ', ответим по указанному адресу' : ''}.</p>`
+    form.querySelector('.feedback-body')!.innerHTML = `<p class="feedback-done">Спасибо! Письмо отправлено${contact.trim() ? ', ответим на вашу почту' : ''}.</p>`
     submit.remove()
     form.querySelector<HTMLButtonElement>('[data-close]')!.focus()
   })
