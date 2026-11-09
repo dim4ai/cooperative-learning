@@ -4,6 +4,8 @@
 //                                              └─▶ wrap key: never leaves the browser
 //   journal key (random, AES-256-GCM) is stored on the server encrypted by the wrap key;
 //   the journal itself — encrypted by the journal key.
+//   recovery code (random, shown to the teacher once) ──HKDF──▶ a second wrap of the same journal key:
+//   with it the journal survives a forgotten password (a new one is set by a code from the mail).
 //
 // AES-256 itself can't be brute-forced, but anyone holding the ciphertext can guess the password
 // instead: that's why the slow PBKDF2 and the password checks (passwordStrength.ts) matter.
@@ -47,6 +49,7 @@ export interface Envelope {
   v: 1;
   key: { iv: string; ct: string }; // the journal key, wrapped by the password
   body: { iv: string; ct: string }; // the journal
+  recovery?: { iv: string; ct: string }; // the journal key, wrapped by the recovery code
 }
 
 export function generateJournalKey(): Promise<CryptoKey> {
@@ -74,4 +77,39 @@ export async function encryptBody(value: unknown, journalKey: CryptoKey): Promis
 export async function decryptBody<T>(body: Envelope['body'], journalKey: CryptoKey): Promise<T> {
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(body.iv) }, journalKey, fromB64(body.ct));
   return JSON.parse(dec.decode(plain));
+}
+
+// Crockford's base32 without the look-alikes: 24 characters = 120 random bits, so no slow hashing
+// is needed — there is nothing to guess. Written in groups of four.
+const RECOVERY_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const RECOVERY_LENGTH = 24;
+
+export function generateRecoveryCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(RECOVERY_LENGTH));
+  const chars = Array.from(bytes, b => RECOVERY_ALPHABET[b & 31]);
+  return chars.join('').replace(/(.{4})(?=.)/g, '$1-');
+}
+
+/** As typed: any case, spaces or dashes; O→0, I/L→1. Null if it can't be a code */
+export function normalizeRecoveryCode(typed: string): string | null {
+  const s = typed.toUpperCase().replace(/[\s-]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  return s.length === RECOVERY_LENGTH && [...s].every(c => RECOVERY_ALPHABET.includes(c)) ? s : null;
+}
+
+async function recoveryWrapKey(code: string): Promise<CryptoKey> {
+  const normalized = normalizeRecoveryCode(code);
+  if (!normalized) throw new Error('not a recovery code');
+  const hkdf = await crypto.subtle.importKey('raw', enc.encode(normalized), 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: enc.encode(`${SCHEME}/recovery`) },
+    hkdf, { name: 'AES-GCM', length: 256 }, false, ['wrapKey', 'unwrapKey']);
+}
+
+export async function wrapByRecoveryCode(journalKey: CryptoKey, code: string): Promise<Envelope['key']> {
+  return wrapJournalKey(journalKey, await recoveryWrapKey(code));
+}
+
+/** Throws if the code is wrong; the key comes extractable, to be wrapped by the new password */
+export async function unwrapByRecoveryCode(recovery: Envelope['key'], code: string): Promise<CryptoKey> {
+  return unwrapJournalKey(recovery, await recoveryWrapKey(code), true);
 }

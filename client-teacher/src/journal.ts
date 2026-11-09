@@ -3,7 +3,8 @@
 // the tab closes, and nothing readable is ever written to disk or sent anywhere.
 import { useSyncExternalStore } from 'react';
 import {
-  decryptBody, derivePasswordKeys, encryptBody, generateJournalKey, unwrapJournalKey, wrapJournalKey,
+  decryptBody, derivePasswordKeys, encryptBody, generateJournalKey, generateRecoveryCode, unwrapByRecoveryCode,
+  unwrapJournalKey, wrapByRecoveryCode, wrapJournalKey,
 } from './journalCrypto';
 import type { Envelope } from './journalCrypto';
 import type { TeacherProfile } from './teacherProfile';
@@ -36,6 +37,9 @@ export type JournalStatus =
 export class WrongPassword extends Error {}
 export class WeakPassword extends Error {}
 export class JournalConflict extends Error {}
+export class WrongCode extends Error {}          // the code from the letter
+export class WrongRecoveryCode extends Error {}
+export class TooManyAttempts extends Error {}
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -43,9 +47,10 @@ interface State {
   status: JournalStatus;
   data: JournalData | null;
   saveError: string;
+  hasRecovery: boolean; // a recovery code was made: the journal outlives a forgotten password
 }
 
-let state: State = { status: 'loading', data: null, saveError: '' };
+let state: State = { status: 'loading', data: null, saveError: '', hasRecovery: false };
 const listeners = new Set<() => void>();
 function set(patch: Partial<State>) {
   state = { ...state, ...patch };
@@ -82,6 +87,7 @@ async function fetchEnvelope(): Promise<boolean> {
   const { journal } = await res.json();
   envelope = journal ? JSON.parse(journal.data) : null;
   version = journal?.version ?? 0;
+  set({ hasRecovery: !!envelope?.recovery });
   return true;
 }
 
@@ -118,7 +124,7 @@ export function forgetJournal() {
   envelope = null;
   version = 0;
   token = '';
-  set({ status: 'loading', data: null, saveError: '' });
+  set({ status: 'loading', data: null, saveError: '', hasRecovery: false });
 }
 
 export async function unlockJournal(email: string, password: string) {
@@ -136,10 +142,12 @@ async function put(baseVersion: number, next: Envelope) {
   if (!res.ok) throw new Error(`journal save: ${res.status}`);
   version = (await res.json()).version;
   envelope = next;
+  if (state.hasRecovery !== !!next.recovery) set({ hasRecovery: !!next.recovery });
 }
 
-/** `vet` runs once the password is known to be right: it is the moment to refuse a weak one */
-export async function createJournal(email: string, password: string, vet: () => Promise<void>) {
+/** `vet` runs once the password is known to be right: it is the moment to refuse a weak one.
+ *  Gives the recovery code: it's shown to the teacher once and kept nowhere in readable form */
+export async function createJournal(email: string, password: string, vet: () => Promise<void>): Promise<string> {
   const { wrapKey: key, authKey } = await derivePasswordKeys(email, password);
   // The journal gets locked by exactly what was typed, so a typo must not get through
   const check = await request('/password/check', 'POST', { authKey });
@@ -148,8 +156,29 @@ export async function createJournal(email: string, password: string, vet: () => 
   await vet();
   const fresh = await generateJournalKey();
   const data: JournalData = { classes: [] };
-  await put(0, { v: 1, key: await wrapJournalKey(fresh, key), body: await encryptBody(data, fresh) });
+  const recoveryCode = generateRecoveryCode();
+  await put(0, {
+    v: 1, key: await wrapJournalKey(fresh, key), body: await encryptBody(data, fresh),
+    recovery: await wrapByRecoveryCode(fresh, recoveryCode),
+  });
   await openEnvelope(key);
+  return recoveryCode;
+}
+
+/** A new recovery code for the open journal; the old one stops working */
+export async function newRecoveryCode(): Promise<string> {
+  const key = wrapKey;
+  if (!key || state.status !== 'open') throw new Error('journal is not open');
+  let code = '';
+  const job = queue.then(async () => {
+    if (!envelope) throw new Error('no journal');
+    const extractable = await unwrapJournalKey(envelope.key, key, true);
+    code = generateRecoveryCode();
+    await put(version, { ...envelope, recovery: await wrapByRecoveryCode(extractable, code) });
+  });
+  queue = job.catch(() => {});
+  await job;
+  return code;
 }
 
 // Saves go one at a time: each is made from the version the previous one produced
@@ -205,4 +234,54 @@ export function seatPlanOf(cls: JournalClass): { capacity?: number; seats: Recor
 
 export function newId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// ---------- forgotten password ----------
+// No session here: the teacher proves the mailbox by a code from a letter. The journal can be
+// kept only with the recovery code — then its key is rewrapped by the new password right here.
+
+async function post(path: string, body: unknown): Promise<Response> {
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (res.status === 429) throw new TooManyAttempts();
+  return res;
+}
+
+export async function requestPasswordReset(email: string) {
+  const res = await post('/password/forgot', { email: email.trim() });
+  if (!res.ok) throw new Error(`password forgot: ${res.status}`);
+}
+
+export interface ResetJournal { version: number; data: string }
+
+/** Is the code right? Then: is there a journal, and can it be kept (was a recovery code made) */
+export async function checkResetCode(email: string, code: string): Promise<{ journal: ResetJournal | null; hasRecovery: boolean }> {
+  const res = await post('/password/reset/check', { email: email.trim(), code });
+  if (res.status === 401) throw new WrongCode();
+  if (!res.ok) throw new Error(`reset check: ${res.status}`);
+  const { journal } = await res.json() as { journal: ResetJournal | null };
+  const parsed: Envelope | null = journal ? JSON.parse(journal.data) : null;
+  return { journal, hasRecovery: !!parsed?.recovery };
+}
+
+/** Without a recovery code the journal is dropped: nobody can open it any more */
+export async function resetPassword(email: string, code: string, password: string, recoveryCode: string | null, journal: ResetJournal | null) {
+  const keys = await derivePasswordKeys(email, password);
+  let kept: ResetJournal | null = null;
+  if (journal && recoveryCode) {
+    const old: Envelope = JSON.parse(journal.data);
+    if (!old.recovery) throw new WrongRecoveryCode();
+    let journalKey: CryptoKey;
+    try {
+      journalKey = await unwrapByRecoveryCode(old.recovery, recoveryCode);
+    } catch {
+      throw new WrongRecoveryCode();
+    }
+    kept = { version: journal.version, data: JSON.stringify({ ...old, key: await wrapJournalKey(journalKey, keys.wrapKey) }) };
+  }
+  const res = await post('/password/reset', { email: email.trim(), code, newAuthKey: keys.authKey, journal: kept });
+  if (res.status === 401) throw new WrongCode();
+  if (res.status === 409) throw new JournalConflict();
+  if (!res.ok) throw new Error(`password reset: ${res.status}`);
 }

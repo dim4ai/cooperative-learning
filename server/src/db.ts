@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import type { BookingRecord } from './booking';
 
 const pool = new Pool({
@@ -91,6 +91,7 @@ let hasTeacherSees = false; // the column's CHECK accepts 'teacherSees'
 
 // Same for the journal table: without it lessons work, only the journal is unavailable
 export let hasJournal = false;
+export let hasPasswordReset = false;
 // Same for the demo tables: without them demo lessons are off, everything else works
 export let hasDemo = false;
 
@@ -164,6 +165,18 @@ export async function migrate(): Promise<void> {
     hasJournal = true;
   } catch (e) {
     console.error('!!! DB migration failed (journal):', e);
+  }
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS password_resets (
+      teacher_id int PRIMARY KEY REFERENCES teachers(id) ON DELETE CASCADE,
+      code_hash text NOT NULL,
+      expires_at timestamptz NOT NULL,
+      sent_at timestamptz NOT NULL DEFAULT now(),
+      attempts int NOT NULL DEFAULT 0
+    )`);
+    hasPasswordReset = true;
+  } catch (e) {
+    console.error('!!! DB migration failed (password reset is off):', e);
   }
   try {
     await pool.query(`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS video_mode text NOT NULL DEFAULT 'all'
@@ -406,6 +419,96 @@ export async function changePassword(
       }
     }
     await client.query('UPDATE teachers SET password_hash = $1 WHERE id = $2', [await hashAuthKey(newAuthKey), teacherId]);
+    await client.query('COMMIT');
+    return 'ok';
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ---------- forgotten password ----------
+// A code goes by mail; only its hash is kept here. It lives RESET_CODE_MINUTES, survives
+// RESET_MAX_ATTEMPTS wrong guesses, and a new one can't be asked for more often than once a minute.
+// The new password comes as a new auth key; the journal, if the teacher kept the recovery code,
+// comes rewrapped by the browser, otherwise it's dropped — nobody could open it any more.
+
+const RESET_CODE_MINUTES = 15;
+const RESET_MAX_ATTEMPTS = 5;
+const RESET_RESEND_SECONDS = 60;
+
+const hashResetCode = (teacherId: number, code: string) =>
+  createHash('sha256').update(`co-learn/reset/${teacherId}/${code}`).digest('hex');
+
+/** The code to mail, or null: no such teacher, or one was sent less than a minute ago */
+export async function startPasswordReset(email: string): Promise<{ email: string; code: string } | null> {
+  const { rows } = await pool.query('SELECT id, email FROM teachers WHERE email = $1', [email]);
+  const teacher = rows[0];
+  if (!teacher) return null;
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const { rowCount } = await pool.query(
+    `INSERT INTO password_resets (teacher_id, code_hash, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))
+     ON CONFLICT (teacher_id) DO UPDATE SET code_hash = $2, expires_at = now() + make_interval(mins => $3), sent_at = now(), attempts = 0
+       WHERE password_resets.sent_at < now() - make_interval(secs => $4)`,
+    [teacher.id, hashResetCode(teacher.id, code), RESET_CODE_MINUTES, RESET_RESEND_SECONDS]
+  );
+  return rowCount ? { email: teacher.email, code } : null;
+}
+
+type ResetCheck = { teacherId: number } | 'wrong code';
+
+/** A wrong code counts against it; the last allowed guess spent, the code is gone */
+async function checkResetCode(q: Pick<Pool, 'query'>, email: string, code: string, lock = false): Promise<ResetCheck> {
+  const { rows } = await q.query(
+    `SELECT r.teacher_id, r.code_hash, r.attempts FROM password_resets r JOIN teachers t ON t.id = r.teacher_id
+     WHERE t.email = $1 AND r.expires_at > now()${lock ? ' FOR UPDATE OF r' : ''}`,
+    [email]
+  );
+  const row = rows[0];
+  if (!row || row.attempts >= RESET_MAX_ATTEMPTS) return 'wrong code';
+  const given = Buffer.from(hashResetCode(row.teacher_id, code));
+  if (!timingSafeEqual(given, Buffer.from(row.code_hash))) {
+    await q.query('UPDATE password_resets SET attempts = attempts + 1 WHERE teacher_id = $1', [row.teacher_id]);
+    return 'wrong code';
+  }
+  return { teacherId: row.teacher_id };
+}
+
+/** Before the new password: is the code right, and what journal is there to keep */
+export async function peekPasswordReset(email: string, code: string): Promise<JournalRecord | null | 'wrong code'> {
+  const check = await checkResetCode(pool, email, code);
+  if (check === 'wrong code') return check;
+  return hasJournal ? getJournal(check.teacherId) : null;
+}
+
+export async function finishPasswordReset(
+  email: string, code: string, newAuthKey: string, journal: JournalRecord | null,
+): Promise<'ok' | 'wrong code' | 'conflict'> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const check = await checkResetCode(client, email, code, true);
+    if (check === 'wrong code') {
+      await client.query('COMMIT'); // the spent attempt stays spent
+      return check;
+    }
+    const { teacherId } = check;
+    if (hasJournal) {
+      const { rows: current } = await client.query('SELECT version FROM teacher_journals WHERE teacher_id = $1 FOR UPDATE', [teacherId]);
+      const version: number | null = current[0]?.version ?? null;
+      if (journal) {
+        if (version !== journal.version) { await client.query('ROLLBACK'); return 'conflict'; }
+        await client.query('UPDATE teacher_journals SET version = version + 1, data = $1, updated_at = now() WHERE teacher_id = $2', [journal.data, teacherId]);
+      } else if (version !== null) {
+        await client.query('DELETE FROM teacher_journals WHERE teacher_id = $1', [teacherId]);
+      }
+    }
+    // a new session version: whoever is logged in with the old password is logged out
+    await client.query('UPDATE teachers SET password_hash = $1, session_version = session_version + 1 WHERE id = $2',
+      [await hashAuthKey(newAuthKey), teacherId]);
+    await client.query('DELETE FROM password_resets WHERE teacher_id = $1', [teacherId]);
     await client.query('COMMIT');
     return 'ok';
   } catch (e) {

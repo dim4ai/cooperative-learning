@@ -18,7 +18,8 @@ import { JournalDialog } from './JournalDialog';
 import { PasswordInput } from './PasswordInput';
 import { StudentName, StudentNames, useStudentName } from './studentNames';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, useJournal } from './journal';
-import { derivePasswordKeys } from './journalCrypto';
+import { logIn, type Teacher } from './login';
+import { ResetPassword } from './ResetPassword';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -205,11 +206,6 @@ function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, c
   );
 }
 
-interface Teacher {
-  id: number;
-  email: string;
-  name: string;
-}
 
 const TEACHER_KEY = 'teacher';
 const TOKEN_KEY = 'teacherToken';
@@ -268,31 +264,33 @@ function LoginForm({ onLogin, onDemo }: { onLogin: (teacher: Teacher, token: str
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgot, setForgot] = useState(false);
 
   async function submit() {
     if (!email.trim() || !password) return;
     setError('');
     setLoading(true);
     try {
-      // The password stays here: the server gets a key derived from it, and another one opens the journal
-      const { authKey, wrapKey } = await derivePasswordKeys(email, password);
-      const post = (extra: object) => fetch(`${import.meta.env.VITE_API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), authKey, ...extra }),
-      });
-      let res = await post({});
-      // an account made before this scheme: the password goes to the server once, to replace its hash
-      if (res.status === 428) res = await post({ password });
-      if (res.status === 429) { setError('Слишком много попыток — подождите минуту и попробуйте снова'); return; }
-      if (!res.ok) { setError('Неверный email или пароль'); return; }
-      const { teacher, token } = await res.json();
-      onLogin(teacher, token, wrapKey);
+      const result = await logIn(email, password);
+      if (!result.ok) {
+        setError(result.error === 'tooMany' ? 'Слишком много попыток — подождите минуту и попробуйте снова' : 'Неверный email или пароль');
+        return;
+      }
+      onLogin(result.teacher, result.token, result.wrapKey);
     } catch {
       setError('Не удалось подключиться к серверу');
     } finally {
       setLoading(false);
     }
+  }
+
+  if (forgot) {
+    return (
+      <div style={formScreenStyle}>
+        <ResetPassword initialEmail={email} inputStyle={formInputStyle} buttonStyle={formButtonStyle}
+          onBack={() => setForgot(false)} onLogin={onLogin} />
+      </div>
+    );
   }
 
   return (
@@ -316,6 +314,9 @@ function LoginForm({ onLogin, onDemo }: { onLogin: (teacher: Teacher, token: str
       <button onClick={submit} disabled={loading || !email.trim() || !password} style={formButtonStyle}>
         {loading ? 'Вход…' : 'Войти'}
       </button>
+      <button data-testid="forgot-open" onClick={() => setForgot(true)} style={{
+        border: 'none', background: 'transparent', color: '#4a90e2', cursor: 'pointer', fontSize: 14, padding: 0,
+      }}>Забыли пароль?</button>
       <button data-testid="demo-open" onClick={onDemo} style={{ ...formButtonStyle, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2' }}>
         Попробовать без регистрации
       </button>

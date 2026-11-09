@@ -9,6 +9,7 @@ import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk'
 import {
   verifyTeacher, checkPassword, getTeacherSessionVersion, createLesson, LessonLimitError, migrate, VIDEO_MODES, type VideoMode, getLessonByCode, cleanupExpiredLessons, setLessonVideoMode,
   isAuthKey, getJournal, saveJournal, changePassword, hasJournal,
+  hasPasswordReset, startPasswordReset, peekPasswordReset, finishPasswordReset,
   hasDemo, deleteLesson, saveDemo, loadCurrentDemos, saveBooking, loadCurrentBookings, saveDemoFeedback, addDemoIpStats, saveLoadSample, cleanupDemoLogs,
   type DemoRecord,
 } from './db';
@@ -22,6 +23,7 @@ import { Throttle, hashIp } from './demoGuard';
 import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
+import { canSendMail, sendMail } from './mailer';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -126,7 +128,7 @@ const MAX_JOURNAL_BYTES = Number(process.env.MAX_JOURNAL_BYTES) || 1024 * 1024;
 const journalJson = express.json({ limit: MAX_JOURNAL_BYTES + 4096 });
 app.use((req, res, next) => (
   /^\/lessons\/[^/]+\/material$/.test(req.path) ? materialJson
-  : req.path === '/journal' || req.path === '/password' ? journalJson
+  : req.path === '/journal' || req.path === '/password' || req.path === '/password/reset' ? journalJson
   : smallJson
 )(req, res, next));
 
@@ -213,7 +215,7 @@ app.put('/journal', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 // Password change: the journal's key rewrapped by the new password comes along. A forgotten
-// password can't be reset here — that's not built yet, and the journal would stay closed anyway.
+// password is reset by mail instead (/password/forgot below).
 app.post('/password', requireAuth, async (req: AuthedRequest, res) => {
   const ip = clientIpFromReq(req);
   if (isLockedOut(loginAttempts, ip)) {
@@ -235,6 +237,71 @@ app.post('/password', requireAuth, async (req: AuthedRequest, res) => {
   if (result === 'conflict') { res.status(409).json({ error: 'journal has changed' }); return; }
   if (result === null) { res.status(500).json({ error: 'failed to change password' }); return; }
   clearAttempts(loginAttempts, ip);
+  res.json({ ok: true });
+});
+
+// Forgotten password: a code by mail, then a new password. The answer to «send the code» is the
+// same whether such an account exists or not, so it can't be used to find out who's registered.
+const resetAttempts = new Map<string, AttemptEntry>();
+const isEmail = (v: unknown): v is string => typeof v === 'string' && v.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(v);
+const isResetCode = (v: unknown): v is string => typeof v === 'string' && /^\d{6}$/.test(v);
+
+app.post('/password/forgot', async (req, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(resetAttempts, ip)) { res.status(429).json({ error: 'too many attempts' }); return; }
+  if (!hasPasswordReset || !canSendMail()) { res.status(503).json({ error: 'password reset unavailable' }); return; }
+  const email = (req.body ?? {}).email;
+  if (!isEmail(email)) { res.status(400).json({ error: 'email is required' }); return; }
+  recordFailedAttempt(resetAttempts, ip); // every request counts: no more than a few letters a minute from one place
+  const reset = await startPasswordReset(email).catch(e => { console.error('password reset:', e); return null; });
+  res.json({ ok: true });
+  if (!reset) return;
+  // sent after the answer, so its timing doesn't tell that the account exists
+  sendMail(reset.email, `Код для смены пароля: ${reset.code}`, [
+    'Здравствуйте!',
+    '',
+    `Код для смены пароля на teacher.co-learn.ru: ${reset.code}`,
+    '',
+    'Код действует 15 минут. Если вы не просили сменить пароль, просто не обращайте внимания на это письмо: без кода пароль не изменить.',
+    '',
+    'Кооперативное обучение',
+  ].join('\n')).catch(e => console.error('password reset mail:', e));
+});
+
+app.post('/password/reset/check', async (req, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(resetAttempts, ip)) { res.status(429).json({ error: 'too many attempts' }); return; }
+  const { email, code } = req.body ?? {};
+  if (!isEmail(email) || !isResetCode(code)) { res.status(400).json({ error: 'email and code are required' }); return; }
+  const result = await peekPasswordReset(email, code).catch(() => undefined);
+  if (result === undefined) { res.status(500).json({ error: 'failed to check the code' }); return; }
+  if (result === 'wrong code') {
+    recordFailedAttempt(resetAttempts, ip);
+    res.status(401).json({ error: 'wrong code' });
+    return;
+  }
+  // the journal is ciphertext: opening it takes the recovery code, which only the teacher has
+  res.json({ journal: result });
+});
+
+app.post('/password/reset', async (req, res) => {
+  const ip = clientIpFromReq(req);
+  if (isLockedOut(resetAttempts, ip)) { res.status(429).json({ error: 'too many attempts' }); return; }
+  const { email, code, newAuthKey, journal } = req.body ?? {};
+  const journalOk = journal === null || (Number.isInteger(journal?.version) && isJournalData(journal?.data));
+  if (!isEmail(email) || !isResetCode(code) || !isAuthKey(newAuthKey) || !journalOk) {
+    res.status(400).json({ error: 'email, code, newAuthKey and journal are required' });
+    return;
+  }
+  const result = await finishPasswordReset(email, code, newAuthKey, journal).catch(e => { console.error('password reset:', e); return null; });
+  if (result === 'wrong code') {
+    recordFailedAttempt(resetAttempts, ip);
+    res.status(401).json({ error: 'wrong code' });
+    return;
+  }
+  if (result === 'conflict') { res.status(409).json({ error: 'journal has changed' }); return; }
+  if (result === null) { res.status(500).json({ error: 'failed to reset the password' }); return; }
+  clearAttempts(resetAttempts, ip);
   res.json({ ok: true });
 });
 
@@ -1857,7 +1924,7 @@ setInterval(() => {
 
 setInterval(() => {
   cleanupExpiredLessons().then(n => { if (n) console.log(`cleaned up ${n} expired lesson code(s)`); }).catch(() => {});
-  sweepAttempts(codeAttempts); sweepAttempts(loginAttempts);
+  sweepAttempts(codeAttempts); sweepAttempts(loginAttempts); sweepAttempts(resetAttempts);
   cleanupDemoLogs().catch(e => console.error('!!! demo logs not cleaned up:', e));
 }, 6 * 60 * 60 * 1000);
 

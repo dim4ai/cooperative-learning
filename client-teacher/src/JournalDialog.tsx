@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  JournalConflict, WeakPassword, WrongPassword, changePassword, createJournal, newId, unlockJournal, updateJournal, useJournal,
+  JournalConflict, WeakPassword, WrongPassword, changePassword, createJournal, newId, newRecoveryCode, unlockJournal, updateJournal, useJournal,
 } from './journal';
 import type { JournalClass, JournalStudent } from './journal';
 import { MIN_PASSWORD_LENGTH, passwordProblem } from './passwordStrength';
 import { PasswordInput } from './PasswordInput';
 
-const FORGOT_WARNING = 'В профиле — журналы классов, ваше имя и фото для учеников. Он зашифрован вашим паролем, и прочитать его можете только вы. Восстановления пароля пока нет: если его забыть, профиль не открыть — никто, включая нас, не сможет этого сделать.';
+const FORGOT_WARNING = 'В профиле — журналы классов, ваше имя и фото для учеников. Он зашифрован вашим паролем, и прочитать его можете только вы. Забытый пароль можно сменить по письму, но профиль тогда откроется только кодом восстановления — мы покажем его сразу после создания.';
 
 /** Someone in the lesson now, as the journal needs them */
 export interface LessonStudent { name: string; uuid: string | null; seat: string | null }
@@ -19,8 +19,10 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
   lesson?: { students: LessonStudent[]; capacity: number };
   onClose: () => void;
 }) {
-  const { status, data, saveError } = useJournal();
+  const { status, data, saveError, hasRecovery } = useJournal();
   const [passwordOpen, setPasswordOpen] = useState(false);
+  // shown once, right after it's made: the profile waits until the teacher has it written down
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   // Looking through classes changes nothing: the class (and its seat plan) applies on «Выбрать»
   const [draftId, setDraftId] = useState(classId);
   return (
@@ -36,24 +38,27 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
           <h3 style={{ margin: 0, flex: 1 }}>Профиль</h3>
           <button onClick={onClose} aria-label="Закрыть" style={{ ...plainBtn, fontSize: 18 }}>✕</button>
         </div>
+        {recoveryCode ? <RecoveryCodeView code={recoveryCode} onDone={() => setRecoveryCode(null)} /> : (<>
         {status === 'loading' && <div style={hint}>Загружаем…</div>}
         {status === 'unavailable' && <div style={errorText}>Профиль сейчас недоступен. Проверьте связь и обновите страницу</div>}
-        {status === 'none' && <CreateJournal email={email} onChangePassword={() => setPasswordOpen(true)} />}
+        {status === 'none' && <CreateJournal email={email} onChangePassword={() => setPasswordOpen(true)} onCreated={setRecoveryCode} />}
         {status === 'locked' && <Unlock email={email} />}
         {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} />}
         {saveError && <div style={errorText}>{saveError}</div>}
         {(status === 'none' || status === 'open') && (passwordOpen
           ? <ChangePassword email={email} onDone={() => setPasswordOpen(false)} />
           : <button onClick={() => setPasswordOpen(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Сменить пароль</button>)}
+        {status === 'open' && <RecoverySection hasRecovery={hasRecovery} onMade={setRecoveryCode} />}
         {status === 'open' && data && (
           <button data-testid="journal-choose" onClick={() => { onClassId(draftId); onClose(); }} style={mainBtn}>Выбрать</button>
         )}
+        </>)}
       </div>
     </div>
   );
 }
 
-function CreateJournal({ email, onChangePassword }: { email: string; onChangePassword: () => void }) {
+function CreateJournal({ email, onChangePassword, onCreated }: { email: string; onChangePassword: () => void; onCreated: (code: string) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [weak, setWeak] = useState(false);
@@ -64,10 +69,10 @@ function CreateJournal({ email, onChangePassword }: { email: string; onChangePas
     setError('');
     setWeak(false);
     try {
-      await createJournal(email, password, async () => {
+      onCreated(await createJournal(email, password, async () => {
         const problem = await passwordProblem(password, email);
         if (problem) throw new WeakPassword(problem);
-      });
+      }));
     } catch (e) {
       if (e instanceof WeakPassword) { setError(`${e.message}. Сначала смените пароль`); setWeak(true); }
       else setError(e instanceof WrongPassword ? 'Неверный пароль: нужен тот же, с которым вы входите' : 'Не удалось создать профиль');
@@ -149,6 +154,83 @@ function ChangePassword({ email, onDone }: { email: string; onDone: () => void }
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={submit} disabled={busy || !current || !next} style={{ ...mainBtn, flex: 1 }}>{busy ? 'Меняем…' : 'Сменить пароль'}</button>
         <button onClick={onDone} style={plainBtn}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+function RecoveryCodeView({ code, onDone }: { code: string; onDone: () => void }) {
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(code); setCopied(true); } catch { /* the code is on screen anyway */ }
+  };
+  const download = () => {
+    const text = `Код восстановления профиля co-learn\n\n${code}\n\nОн нужен, чтобы сохранить профиль, если вы забудете пароль. Храните его отдельно от пароля.\n`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    a.download = 'co-learn-код-восстановления.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return (<>
+    <strong style={{ fontSize: 15 }}>Код восстановления</strong>
+    <div style={{ ...hint, fontSize: 13, color: '#555' }}>
+      Если забудете пароль, его можно сменить по письму, а профиль откроется только с этим кодом. Мы его не храним и показать ещё раз не сможем. Запишите его или сохраните файлом.
+    </div>
+    <div data-testid="recovery-code" style={{
+      fontFamily: 'monospace', fontSize: 17, textAlign: 'center', padding: 12, borderRadius: 6, background: '#f4f1ea',
+      letterSpacing: 1, wordBreak: 'break-all', userSelect: 'all',
+    }}>{code}</div>
+    <div style={{ display: 'flex', gap: 8 }}>
+      <button onClick={copy} style={{ ...smallBtn, flex: 1, background: '#fff', color: '#4a90e2', border: '1px solid #4a90e2' }}>{copied ? 'Скопировано' : 'Скопировать'}</button>
+      <button onClick={download} style={{ ...smallBtn, flex: 1, background: '#fff', color: '#4a90e2', border: '1px solid #4a90e2' }}>Сохранить файлом</button>
+    </div>
+    <label style={{ ...row, fontSize: 13 }}>
+      <input data-testid="recovery-saved" type="checkbox" checked={saved} onChange={e => setSaved(e.target.checked)} />
+      Я сохранил(а) код
+    </label>
+    <button data-testid="recovery-done" onClick={onDone} disabled={!saved} style={{ ...mainBtn, opacity: saved ? 1 : 0.5 }}>Готово</button>
+  </>);
+}
+
+function RecoverySection({ hasRecovery, onMade }: { hasRecovery: boolean; onMade: (code: string) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function make() {
+    setBusy(true);
+    setError('');
+    try {
+      onMade(await newRecoveryCode());
+      setConfirming(false);
+    } catch {
+      setError('Не удалось создать код. Попробуйте ещё раз');
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!hasRecovery) {
+    return (
+      <div data-testid="recovery-missing" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 10, borderRadius: 6, background: '#fdf0e6' }}>
+        <div style={{ fontSize: 13, color: '#8a4b14' }}>Нет кода восстановления: если забудете пароль, профиль пропадёт.</div>
+        {error && <div style={errorText}>{error}</div>}
+        <button data-testid="recovery-make" onClick={make} disabled={busy} style={{ ...smallBtn, alignSelf: 'flex-start' }}>
+          {busy ? 'Создаём…' : 'Создать код восстановления'}
+        </button>
+      </div>
+    );
+  }
+  if (!confirming) {
+    return <button data-testid="recovery-renew" onClick={() => setConfirming(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Новый код восстановления</button>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 13, color: '#555' }}>Старый код перестанет работать. Создать новый?</div>
+      {error && <div style={errorText}>{error}</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button data-testid="recovery-renew-yes" onClick={make} disabled={busy} style={smallBtn}>{busy ? 'Создаём…' : 'Создать'}</button>
+        <button onClick={() => setConfirming(false)} style={plainBtn}>Отмена</button>
       </div>
     </div>
   );
