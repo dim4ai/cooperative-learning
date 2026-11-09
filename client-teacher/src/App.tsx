@@ -131,7 +131,7 @@ function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; o
   );
 }
 
-function CapacityInput({ initial, onSet }: { initial: number; onSet: (n: number) => void }) {
+function CapacityInput({ initial, min = 4, onSet }: { initial: number; min?: number; onSet: (n: number) => void }) {
   const [value, setValue] = useState(String(initial));
   return (
     <div style={{ display: 'flex', gap: 4 }}>
@@ -139,7 +139,7 @@ function CapacityInput({ initial, onSet }: { initial: number; onSet: (n: number)
         type="number"
         value={value}
         onChange={e => setValue(e.target.value)}
-        min={4} max={32} step={4}
+        min={min} max={32} step={4}
         style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 13 }}
         onKeyDown={e => { if (e.key === 'Enter') onSet(Number(value)); }}
       />
@@ -628,7 +628,7 @@ export default function App() {
   // room names are "<lessonCode>:<base>" — check the base, not the full string
   const roomBase = livekit?.room.split(':')[1] ?? '';
   const inSmallRoom = roomBase.startsWith('pair-') || roomBase.startsWith('fours-') || roomBase.startsWith('individual-');
-  const canPreview = state.stage === 'waiting' && !!slides.material && !inSmallRoom && !demo?.solo;
+  const canPreview = state.stage === 'waiting' && !!slides.material && !inSmallRoom;
   const preview = canPreview && previewTab;
   // a bell, or a newcomer on an added desk: worth a look at the seating
   const seatingNeedsYou = callingRooms.size > 0 || seats.some(s => s.extra !== undefined && !!s.occupant);
@@ -690,10 +690,10 @@ export default function App() {
         {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
           lesson={{ students: lessonStudents, capacity: seats.filter(s => s.extra === undefined).length }} onClose={() => setJournalOpen(false)} />}
 
-        {state.stage === 'waiting' && !demo?.solo && (
+        {state.stage === 'waiting' && (
           <>
             <div style={{ fontSize: 11, color: '#222', marginTop: 2 }}>Мест в классе</div>
-            <CapacityInput initial={seats.filter(s => s.extra === undefined).length || currentClass?.capacity || 16} onSet={n => {
+            <CapacityInput key={seats.filter(s => s.extra === undefined).length} min={demo?.solo ? 8 : 4} initial={seats.filter(s => s.extra === undefined).length || currentClass?.capacity || 16} onSet={n => {
               if (!Number.isInteger(n) || n < 0) return;
               socket.emit('setCapacity', n);
               // the class keeps its number of seats for next time
@@ -839,7 +839,7 @@ export default function App() {
         </div>
       </div>
 
-      {(demo?.solo || state.stage !== 'waiting') && (
+      {((demo?.solo && !preview) || state.stage !== 'waiting') && (
         <div data-testid="right-panel" style={{
           width: 'min(270px, 26vw)', flexShrink: 0, padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
           background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',

@@ -12,6 +12,8 @@ export const BOTS = [
 
 /** Twice the class: there is room to move people around, and four desks to gather them from */
 export const SOLO_SEATS = 16;
+/** The teacher may change the number of seats, but every bot needs one */
+export const SOLO_MIN_SEATS = 8;
 const SEAT_PAUSE_MS = 2000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;

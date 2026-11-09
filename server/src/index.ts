@@ -20,7 +20,7 @@ import {
 import type { Block } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
-import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
+import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
@@ -1750,8 +1750,11 @@ io.on('connection', async (socket) => {
 
     socket.on('setCapacity', (n: number) => {
       if (role !== 'teacher' || !Number.isInteger(n) || n < 0) return;
-      const capacity = Math.min(n, MAX_CAPACITY);
+      // the solo demo's class needs a desk per four of its bots at least
+      const capacity = lesson.bots ? Math.max(Math.min(Math.ceil(n / 4) * 4, MAX_CAPACITY), SOLO_MIN_SEATS) : Math.min(n, MAX_CAPACITY);
       createSeats(lesson, capacity);
+      // bots whose seats are gone find new ones, as when the teacher sends them off
+      if (lesson.bots) for (const b of BOTS) if (!lesson.seats.some(s => s.occupant === b.name)) lesson.bots.onUnseated(b.name);
       broadcastSeats(code, lesson);
       settleDesks(code, lesson).catch(e => console.error('desks not settled:', e));
       console.log(`[${code}] capacity -> ${capacity} (${capacity / 4} groups)`);
