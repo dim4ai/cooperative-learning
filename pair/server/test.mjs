@@ -235,7 +235,7 @@ test('feedback goes to the mailer cleaned, a few letters an hour per address', a
       const ws = await connect(url)
       ws.sendJson({ t: 'feedback', kind: 'bug', text: '  Доска не грузится\r\nвторая строка ', contact: 'a@b.ru\nBcc: x@y.z', where: 'занятие, учитель' })
       assert.equal((await ws.next('feedback')).ok, true)
-      assert.deepEqual(letters[0], { kind: 'bug', text: 'Доска не грузится\nвторая строка', contact: 'a@b.ru Bcc: x@y.z', where: 'занятие, учитель', ua: '' })
+      assert.deepEqual(letters[0], { kind: 'bug', text: 'Доска не грузится\nвторая строка', contact: 'a@b.ru Bcc: x@y.z', where: 'занятие, учитель', ua: '', pics: [] })
 
       ws.sendJson({ t: 'feedback', kind: 'spam', text: 'hello' })
       assert.equal((await ws.next('feedback')).error, 'bad kind')
@@ -271,4 +271,67 @@ test('feedback without mail set up says so, and a failed send is reported', asyn
     { feedback: async () => { throw new Error('smtp down') } },
   )
   assert.equal(feedbackMailer({ SMTP_HOST: 'h', SMTP_USER: 'u', SMTP_PASS: 'p' }, () => {}), null)
+})
+
+test('feedback pictures come in parts, only whole JPEGs of limited size', async () => {
+  const letters = []
+  const jpeg = (n) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(n, 7), Buffer.from([0xff, 0xd9])])
+  const sendPic = (ws, n, buf) => {
+    const b64 = buf.toString('base64')
+    for (let i = 0; i < b64.length; i += FEEDBACK.partChars) ws.sendJson({ t: 'feedback-pic', n, data: b64.slice(i, i + FEEDBACK.partChars) })
+  }
+  await withServer(
+    async (url) => {
+      const ws = await connect(url)
+      const a = jpeg(100_000)
+      const b = jpeg(10)
+      sendPic(ws, 0, a)
+      sendPic(ws, 1, b)
+      ws.sendJson({ t: 'feedback', kind: 'bug', text: 'вот снимок', pics: 2 })
+      assert.equal((await ws.next('feedback')).ok, true)
+      assert.equal(letters[0].pics.length, 2)
+      assert.ok(letters[0].pics[0].equals(a) && letters[0].pics[1].equals(b))
+
+      // not a JPEG (a PNG, an SVG, anything): no letter
+      sendPic(ws, 0, Buffer.from('<svg onload="alert(1)"/>'.padEnd(24)))
+      ws.sendJson({ t: 'feedback', kind: 'bug', text: 'вот снимок', pics: 1 })
+      assert.equal((await ws.next('feedback')).error, 'bad picture')
+      // pictures announced but not sent
+      ws.sendJson({ t: 'feedback', kind: 'bug', text: 'вот снимок', pics: 1 })
+      assert.equal((await ws.next('feedback')).error, 'bad picture')
+      // a third picture, a picture out of turn, not base64
+      ws.sendJson({ t: 'feedback-pic', n: 2, data: 'AAAA' })
+      assert.equal((await ws.next('feedback')).error, 'bad picture')
+      ws.sendJson({ t: 'feedback-pic', n: 1, data: 'AAAA' })
+      assert.equal((await ws.next('feedback')).error, 'bad picture')
+      ws.sendJson({ t: 'feedback-pic', n: 0, data: 'A$A=' })
+      assert.equal((await ws.next('feedback')).error, 'bad picture')
+      ws.close()
+
+      // too big
+      const big = await connect(url)
+      sendPic(big, 0, jpeg(FEEDBACK.maxPicBytes))
+      assert.equal((await big.next('feedback')).error, 'picture too big')
+      big.close()
+      assert.equal(letters.length, 1)
+    },
+    { feedback: async (l) => void letters.push(l) },
+  )
+})
+
+test('the mailer attaches the pictures under its own names', async () => {
+  const sent = []
+  const mail = feedbackMailer({ SMTP_HOST: 'h', SMTP_USER: 'u@x.ru', SMTP_PASS: 'p', FEEDBACK_TO: 'to@x.ru' }, () => {})
+  assert.ok(mail)
+  const nodemailer = (await import('nodemailer')).default
+  const orig = nodemailer.createTransport
+  nodemailer.createTransport = () => ({ sendMail: async (m) => void sent.push(m) })
+  try {
+    const m2 = feedbackMailer({ SMTP_HOST: 'h', SMTP_USER: 'u@x.ru', SMTP_PASS: 'p', FEEDBACK_TO: 'to@x.ru' }, () => {})
+    await m2({ kind: 'bug', text: 'текст', contact: 'a@b.ru', where: '', ua: '', pics: [Buffer.from([1]), Buffer.from([2])] })
+  } finally {
+    nodemailer.createTransport = orig
+  }
+  assert.deepEqual(sent[0].attachments.map((a) => [a.filename, a.contentType]), [['картинка-1.jpg', 'image/jpeg'], ['картинка-2.jpg', 'image/jpeg']])
+  assert.match(sent[0].text, /Картинок: 2/)
 })

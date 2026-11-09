@@ -27,7 +27,7 @@ export function feedbackMailer(env = process.env, log = console.log) {
   const from = env.MAIL_FROM || `Занятие вдвоём <${user}>`
   log(`feedback form mails to ${[...new Set(Object.values(to))].join(', ')}`)
 
-  return async ({ kind, text, contact, where, ua }) => {
+  return async ({ kind, text, contact, where, ua, pics = [] }) => {
     const first = text.split('\n')[0].replace(/\s+/g, ' ').slice(0, 60)
     const body = [
       text,
@@ -36,6 +36,7 @@ export function feedbackMailer(env = process.env, log = console.log) {
       `Ответить: ${contact || 'не указано'}`,
       `Где: ${where || '—'}`,
       `Браузер: ${ua || '—'}`,
+      ...(pics.length ? [`Картинок: ${pics.length}`] : []),
       `Время: ${new Date().toISOString()}`,
     ].join('\n')
     await transport.sendMail({
@@ -44,6 +45,8 @@ export function feedbackMailer(env = process.env, log = console.log) {
       subject: `[pair] ${KIND_TITLE[kind]}: ${first}`,
       text: body,
       ...(EMAIL_RE.test(contact) ? { replyTo: contact } : {}),
+      // checked JPEGs, our own names: nothing from the sender's file reaches the letter but the pixels
+      attachments: pics.map((content, i) => ({ filename: `картинка-${i + 1}.jpg`, content, contentType: 'image/jpeg' })),
     })
   }
 }

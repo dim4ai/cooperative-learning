@@ -1707,6 +1707,48 @@ button.primary:hover {
   margin: 0;
 }
 
+.feedback-pics {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.feedback-pics .secondary {
+  flex: none;
+}
+
+.feedback-pic {
+  position: relative;
+  display: inline-block;
+}
+
+.feedback-pic img {
+  display: block;
+  height: 64px;
+  max-width: 140px;
+  object-fit: cover;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.feedback-pic button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #374151;
+  color: #fff;
+  font-size: 15px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
 .feedback-state {
   margin: 0;
   font-size: 14px;

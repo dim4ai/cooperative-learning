@@ -53,6 +53,17 @@ export const FEEDBACK = {
   maxContact: 200,
   maxWhere: 300,
   perIpPerHour: 5,
+  // pictures (a screenshot of the error): JPEG only, made in the browser; sent in parts, as a
+  // socket message stays small (maxPayload); held here only until the letter goes
+  maxPics: 2,
+  maxPicBytes: 1024 * 1024,
+  partChars: 48 * 1024, // base64 characters in one part
+  maxPendingBytes: 32 * 1024 * 1024, // all sockets together
+}
+
+/** Is it a whole JPEG file: starts with FF D8 FF and ends with FF D9 */
+export function isJpeg(b) {
+  return b.length > 4 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff && b[b.length - 2] === 0xff && b[b.length - 1] === 0xd9
 }
 
 /** Checks a feedback message from a browser; returns the clean letter or an error word. */
@@ -76,6 +87,13 @@ export function createServer({ log = console.log, iceServers = [], feedback = nu
   const connectTimes = new Map()
   /** @type {Map<string, number[]>} */
   const feedbackTimes = new Map()
+  let pendingBytes = 0
+  const dropPics = (ws) => {
+    pendingBytes -= ws.picBytes ?? 0
+    ws.pics = []
+    ws.picBytes = 0
+  }
+  const lettersLeft = (ip, now) => FEEDBACK.perIpPerHour - (feedbackTimes.get(ip) ?? []).filter((t) => now - t < 3_600_000).length
 
   const httpServer = http.createServer((req, res) => {
     if (req.url === '/health') {
@@ -199,11 +217,40 @@ export function createServer({ log = console.log, iceServers = [], feedback = nu
 
       if (msg.t === 'leave') return leave(ws)
 
+      // a part of a picture for the next letter: { t, n: which picture, data: base64 }
+      if (msg.t === 'feedback-pic') {
+        const n = msg.n
+        const bad = (error) => {
+          dropPics(ws)
+          send(ws, { t: 'feedback', ok: false, error })
+        }
+        if (!feedback) return bad('not configured')
+        if (lettersLeft(ws.ip, now) <= 0) return bad('too many')
+        if (!Number.isInteger(n) || n < 0 || n >= FEEDBACK.maxPics || n > (ws.pics?.length ?? 0)) return bad('bad picture')
+        if (typeof msg.data !== 'string' || !msg.data || msg.data.length > FEEDBACK.partChars || msg.data.length % 4 || !/^[A-Za-z0-9+/]+=*$/.test(msg.data))
+          return bad('bad picture')
+        const part = Buffer.from(msg.data, 'base64')
+        ws.pics ??= []
+        ws.picBytes ??= 0
+        const have = ws.pics[n]?.reduce((a, b) => a + b.length, 0) ?? 0
+        if (have + part.length > FEEDBACK.maxPicBytes) return bad('picture too big')
+        if (pendingBytes + part.length > FEEDBACK.maxPendingBytes) return bad('busy')
+        ;(ws.pics[n] ??= []).push(part)
+        ws.picBytes += part.length
+        pendingBytes += part.length
+        return
+      }
+
       // the feedback form: any socket, joined or not; a few letters an hour per address
       if (msg.t === 'feedback') {
         if (!feedback) return send(ws, { t: 'feedback', ok: false, error: 'not configured' })
         const letter = cleanFeedback(msg, ws.ua)
+        const pics = (ws.pics ?? []).map((parts) => Buffer.concat(parts))
+        dropPics(ws)
         if (letter.error) return send(ws, { t: 'feedback', ok: false, error: letter.error })
+        if (pics.length !== (Number.isInteger(msg.pics) ? msg.pics : 0) || !pics.every(isJpeg))
+          return send(ws, { t: 'feedback', ok: false, error: 'bad picture' })
+        letter.pics = pics
         const recent = (feedbackTimes.get(ws.ip) ?? []).filter((t) => now - t < 3_600_000)
         if (recent.length >= FEEDBACK.perIpPerHour) return send(ws, { t: 'feedback', ok: false, error: 'too many' })
         recent.push(now)
@@ -225,6 +272,7 @@ export function createServer({ log = console.log, iceServers = [], feedback = nu
 
     ws.on('close', () => {
       leave(ws)
+      dropPics(ws)
       const n = (socketsByIp.get(ip) ?? 1) - 1
       if (n <= 0) socketsByIp.delete(ip)
       else socketsByIp.set(ip, n)
