@@ -2,14 +2,7 @@
 // Other browsers: <input type=file> + download.
 import { LESSON_EXT, LESSON_MIME } from './lessonFile'
 
-/** Chattern boards (imported by chattern.ts, loaded on demand) */
-export const CHATTERN_EXT = '.chtrn'
-
 const PICKER_TYPES: FilePickerAcceptType[] = [{ description: 'Урок', accept: { [LESSON_MIME]: [LESSON_EXT] } }]
-// Open also takes Chattern boards (imported as a new lesson)
-const OPEN_TYPES: FilePickerAcceptType[] = [
-  { description: 'Урок или доска Chattern', accept: { [LESSON_MIME]: [LESSON_EXT], 'application/x-chattern': [CHATTERN_EXT] } },
-]
 
 export const canSaveInPlace = typeof window.showSaveFilePicker === 'function'
 
@@ -22,14 +15,14 @@ export interface Opened {
 export async function pickLessonFile(): Promise<Opened | null> {
   if (window.showOpenFilePicker) {
     try {
-      const [handle] = await window.showOpenFilePicker({ types: OPEN_TYPES })
+      const [handle] = await window.showOpenFilePicker({ types: PICKER_TYPES })
       return { file: await handle.getFile(), handle }
     } catch (e) {
       if (isAbort(e)) return null
       throw e
     }
   }
-  const file = await pickViaInput(`${LESSON_EXT},${CHATTERN_EXT}`)
+  const file = await pickViaInput(LESSON_EXT)
   return file ? { file, handle: null } : null
 }
 

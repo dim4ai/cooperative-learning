@@ -115,7 +115,11 @@ export function SlidesSection({ slides, media, onAddMedia, onChange, onError, sh
         // The editor rebuilds a scene from its canvas and knows nothing of the note
         onChange={scene => onChange(list => list.map(s => (s.id === scene.id ? { ...scene, note: s.note } : s)))}
         onError={onError}
-        onInsertSlides={fresh => insertAfter(current.id, fresh, false)}
+        onInsertSlides={(fresh, replace) => {
+          if (!replace) return insertAfter(current.id, fresh, false)
+          onChange(list => list.flatMap(s => (s.id === current.id ? fresh : [s])))
+          setCurrentId(fresh[0].id)
+        }}
       />
 
       <label style={{ display: 'block', marginTop: 12, fontSize: 12, fontWeight: 600, color: '#6b7280' }}>

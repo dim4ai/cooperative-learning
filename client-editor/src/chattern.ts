@@ -3,12 +3,13 @@
 // JSON: { type: 'board', version, blobs: [{sha, size}], fc: <Fabric.js 5.3 canvas JSON> } with Chattern's
 // own fields: chrnBlobSha256 (image bytes by hash), chrnPinned (background), chrnUuid, chrnBg (ruling).
 //
+// Imported into a block (like a multi-page PDF): the board's slides go after the current one.
 // A board is one long page (A4 width, any height); our slides are 16:9. The board is cut into frames
 // as wide as the page, at empty gaps between objects, one frame → one slide. Groups taller than a
 // frame (Chattern pins whole-board layouts as one group) are taken apart first.
 import { gunzipSync, strFromU8 } from 'fflate'
 import { Group, Line, Point, util, type FabricObject } from 'fabric'
-import type { LessonBlock, LessonFile, Scene, SceneObject } from './types'
+import type { Scene, SceneObject } from './types'
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from './types'
 import { emptyScene, blobUrl, toSceneObject } from './slides/scene'
 import type { Media } from './lessonFile'
@@ -155,8 +156,8 @@ function page(fc: Board['fc'], k: number): Pick<Scene, 'background' | 'paper' | 
   return { background, ...(paper ? { paper, ...(paperColor ? { paperColor } : {}) } : {}) }
 }
 
-/** A .chtrn file → a lesson with one block whose slides are the board cut into frames */
-export async function importChattern(file: Blob, title: string): Promise<{ lesson: LessonFile; media: Media }> {
+/** A .chtrn file → slides (the board cut into frames) and the pictures they use */
+export async function chatternSlides(file: Blob): Promise<{ slides: Scene[]; media: Media }> {
   const { board, media: blobs } = parse(new Uint8Array(await file.arrayBuffer()))
   const names = new Map<string, string>() // sha → media name
   const json = prepare(board.fc.objects!, blobs, names)
@@ -208,16 +209,7 @@ export async function importChattern(file: Blob, title: string): Promise<{ lesso
 
   const media: Media = {}
   for (const [sha, name] of names) media[name] = blobs.get(sha)!
-  const block: LessonBlock = {
-    id: nanoid(), type: 'group', duration: 10, title: 'Объяснение', teacherNote: '', attachments: [],
-    slides: slides.length ? slides : [emptyScene()],
-  }
-  const lesson: LessonFile = {
-    version: 1,
-    meta: { title, subject: '', grade: '', author: '', createdAt: new Date().toISOString().slice(0, 10) },
-    blocks: [block],
-  }
-  return { lesson, media }
+  return { slides, media }
 }
 
 function makeSlide(objs: FabricObject[], place: (o: FabricObject) => void, look: Pick<Scene, 'background' | 'paper' | 'paperColor'>): Scene {

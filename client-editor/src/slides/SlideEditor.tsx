@@ -28,8 +28,8 @@ interface Props {
   onAddMedia: (name: string, blob: Blob) => void
   onChange: (scene: Scene) => void
   onError: (text: string) => void
-  /** New slides to insert right after this one (multi-page PDF) */
-  onInsertSlides: (scenes: Scene[]) => void
+  /** New slides to insert right after this one (multi-page PDF, Chattern board); `replace` — instead of this (empty) one */
+  onInsertSlides: (scenes: Scene[], replace?: boolean) => void
   /** A work block: mark the page as the student's sheet */
   sheet?: boolean
 }
@@ -479,13 +479,22 @@ export function SlideEditor(props: Props) {
               newSlides.push(backgroundSlide(imageObject(name, size, true)))
             }
           }
+        } else if (f.name.toLowerCase().endsWith('.chtrn')) {
+          setBusy('Читаю доску Chattern…')
+          const { chatternSlides } = await import('../chattern')
+          const board = await chatternSlides(f)
+          for (const [name, blob] of Object.entries(board.media)) if (!media.current[name]) addMedia(name, blob) // name = content hash
+          if (!board.slides.length) { live.current.onError(`«${f.name}»: доска пустая`); continue }
+          // An empty slide gives its place to the board
+          if (fc.getObjects().length === 0 && !newSlides.length) { live.current.onInsertSlides(board.slides, true); return }
+          newSlides.push(...board.slides)
         } else if (f.type.startsWith('image/')) {
           setBusy('Добавляю…')
           const name = uniqueName(f.name || 'картинка.png', media.current)
           addMedia(name, f)
           await addImageObject(imageObject(name, await imageSize(f), fc.getObjects().length === 0))
         } else {
-          live.current.onError(`«${f.name}»: на слайд можно добавить картинку или PDF`)
+          live.current.onError(`«${f.name}»: на слайд можно добавить картинку, PDF или доску Chattern (.chtrn)`)
         }
       }
       if (newSlides.length) live.current.onInsertSlides(newSlides)
@@ -988,7 +997,7 @@ export function SlideEditor(props: Props) {
         {/* Tools */}
         <div style={toolbar}>
           <Tool onClick={() => addText()} title="Текст">T&nbsp;Текст</Tool>
-          <Tool onClick={async () => addFiles(await pickMediaFiles('image/*,application/pdf'))} disabled={!!busy} title="Картинка или страницы PDF">
+          <Tool onClick={async () => addFiles(await pickMediaFiles('image/*,application/pdf,.chtrn'))} disabled={!!busy} title="Картинка, страницы PDF или доска Chattern (.chtrn) — её слайды встанут после этого">
             🖼&nbsp;Картинка / PDF
           </Tool>
           <ToolMenu label="◇ Фигуры" title="Фигуры" testId="menu-shapes" on={tool === 'polygon'} sections={[{

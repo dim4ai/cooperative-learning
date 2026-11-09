@@ -5,7 +5,7 @@ import { BlockCard } from './BlockCard'
 import { MetaPanel } from './MetaPanel'
 import { nanoid } from './nanoid'
 import { packLesson, unpackLesson, suggestedFileName, type Media } from './lessonFile'
-import { pickLessonFile, saveLessonFile, canSaveInPlace, CHATTERN_EXT } from './fileAccess'
+import { pickLessonFile, saveLessonFile, canSaveInPlace } from './fileAccess'
 import { loadDraft, saveDraft } from './draft'
 function emptyBlock(type: BlockType): LessonBlock {
   const base = { id: nanoid(), type, duration: 10, title: BLOCK_LABELS[type], teacherNote: '', attachments: [] }
@@ -126,22 +126,6 @@ export default function App() {
     try {
       const picked = await pickLessonFile()
       if (!picked) return
-      if (picked.file.name.toLowerCase().endsWith(CHATTERN_EXT)) {
-        // A Chattern board becomes a new, unsaved lesson: «Сохранить» asks where (never over the .chtrn)
-        flash('Читаю доску Chattern…')
-        const { importChattern } = await import('./chattern')
-        const title = picked.file.name.replace(/\.chtrn$/i, '')
-        const { lesson, media: m } = await importChattern(picked.file, title)
-        setMeta({ ...emptyMeta(), ...lesson.meta })
-        setBlocks(lesson.blocks)
-        setMedia(m)
-        setSelectedId(lesson.blocks[0].id)
-        setFileName(null)
-        setHandle(null)
-        setDirty(true)
-        flash(`Доска Chattern «${title}» → ${lesson.blocks[0].slides!.length} слайдов. Сохраните её как урок.`)
-        return
-      }
       const { lesson, media: m, missing } = await unpackLesson(picked.file)
       setMeta({ ...emptyMeta(), ...lesson.meta })
       setBlocks(lesson.blocks)
