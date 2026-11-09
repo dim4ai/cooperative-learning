@@ -401,7 +401,7 @@ export class Board {
   /** Unpins the selected object and leaves it selected */
   unpinSelection() {
     const o = this.canvas.getActiveObject() as Obj | undefined
-    if (!o?.locked) return
+    if (!o?.locked || !this.isTeacher) return
     o.locked = false
     this.interactivity(o)
     this.commit(o)
@@ -636,7 +636,7 @@ export class Board {
         if (e.target) c.remove(e.target)
         return
       case 'lock':
-        if (e.target) this.toggleLock(e.target as Obj)
+        if (e.target && this.isTeacher) this.toggleLock(e.target as Obj)
         return
       case 'pipette':
         this.onPipette(this.colorAt(e.viewportPoint.x, e.viewportPoint.y))
@@ -1060,7 +1060,7 @@ export class Board {
   /** Pins the selection: pinned objects can't be picked, moved or swept until unpinned with the pin tool. */
   lockSelection() {
     const objs = this.canvas.getActiveObjects() as Obj[]
-    if (!objs.length) return
+    if (!objs.length || !this.isTeacher) return
     this.canvas.discardActiveObject()
     for (const o of objs) {
       o.locked = true
@@ -1073,6 +1073,7 @@ export class Board {
   }
 
   private toggleLock(o: Obj) {
+    if (!this.isTeacher) return
     o.locked = !o.locked
     this.commit(o)
     this.canvas.requestRenderAll()

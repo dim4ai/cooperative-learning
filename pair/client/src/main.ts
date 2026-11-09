@@ -254,6 +254,7 @@ async function lesson(entry: Entry, name: string) {
   }
   const pick = (id: ToolId) => {
     if (board.readOnly && id !== 'hand' && id !== 'pointer') return
+    if (id === 'lock' && !teacher) return // pinning is the teacher's
     if (id === 'image') $<HTMLInputElement>('#file').click()
     else if (id === 'pdf') importPdf()
     else if (id === 'snapshot') snapshot(null)
@@ -262,7 +263,8 @@ async function lesson(entry: Entry, name: string) {
   type G = { members: ToolId[]; current: ToolId; button: HTMLButtonElement; flyout: HTMLElement | null; show: () => void }
   const groups: G[] = []
   const closeFlyouts = () => groups.forEach((g) => g.flyout?.setAttribute('hidden', ''))
-  for (const { members, title } of PANEL) {
+  for (const { members: all, title } of PANEL) {
+    const members = all.filter((id) => teacher || id !== 'lock')
     const wrap = el('div', { class: 'tool-group' })
     const button = el('button') as HTMLButtonElement
     const g: G = {
@@ -469,7 +471,7 @@ async function lesson(entry: Entry, name: string) {
     btn(icons.flip, 'Отразить', () => board.flip()),
     groupBtn,
     ungroupBtn,
-    btn(icons.lock, 'Закрепить: выделяется, но не двигается', () => board.lockSelection()),
+    ...(teacher ? [btn(icons.lock, 'Закрепить: выделяется, но не двигается', () => board.lockSelection())] : []),
     btn(icons.trash, 'Удалить · Delete', () => board.deleteSelection()),
     unpinBtn,
   ]
@@ -483,7 +485,7 @@ async function lesson(entry: Entry, name: string) {
     selActions.forEach((b) => (b.hidden = cropping))
     cropDone.hidden = cropCancel.hidden = !cropping
     if (!cropping && board.pinnedSelected) {
-      selActions.forEach((b) => (b.hidden = b !== dupBtn && b !== unpinBtn))
+      selActions.forEach((b) => (b.hidden = b !== dupBtn && (b !== unpinBtn || !teacher))) // only the teacher unpins
     } else if (!cropping) {
       unpinBtn.hidden = true
       cropBtn.hidden = !board.canCrop
