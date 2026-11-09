@@ -36,6 +36,29 @@ export function setRecordingNames(next: Record<string, string>) {
   if (meta) { meta.names = { ...meta.names, ...next }; }
 }
 
+// The lesson's pictures: students get them piece by piece and slides:view names them only by hash,
+// so the recording keeps its own copy — the archive then shows the slides without the lesson file
+let lesson: { byHash: Map<string, Blob> } | null = null;
+let pictureWriters: ChunkWriter[] = [];
+export function setRecordingLesson(next: { byHash: Map<string, Blob> } | null) {
+  lesson = next;
+  keepPictures();
+}
+function keepPictures() {
+  if (!meta || !lesson) return;
+  const pictures = (meta.pictures ??= {});
+  let added = false;
+  for (const [hash, blob] of lesson.byHash) {
+    if (pictures[hash]) continue;
+    pictures[hash] = blob.type || 'application/octet-stream';
+    const w = new ChunkWriter(meta.id, `media:${hash}`);
+    w.add(blob);
+    pictureWriters.push(w);
+    added = true;
+  }
+  if (added) saveMetaSoon();
+}
+
 const SLICE_MS = 2000;
 
 function pickMime(candidates: string[]): string {
@@ -236,9 +259,11 @@ export async function startRecording({ title, code, clockSkew, withScreen }: { t
   const id = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   meta = {
     id, title, code, createdAt: Date.now(), clockSkew, recordStart: serverNow(), recordEnd: null,
-    video: null, lessons: [], segments: [], names: { ...names }, eventsMime: 'application/x-ndjson', finished: false,
+    video: null, lessons: [], segments: [], names: { ...names }, pictures: {}, eventsMime: 'application/x-ndjson', finished: false,
   };
   segmentCount = 0;
+  pictureWriters = [];
+  keepPictures();
   // the screen is asked for first, while the click still counts as the teacher's (Safari is strict)
   const video = withScreen && await startScreen() ? 'on' : 'off';
   navigator.storage?.persist?.().catch(() => {});
@@ -266,7 +291,8 @@ export async function stopRecording(): Promise<string | null> {
   eventsTimer = null;
   await Promise.all([stopScreen(), ...[...rooms.keys()].map(unlisten)]);
   flushEvents();
-  await Promise.all([videoWriter?.flushed(), eventsWriter?.flushed()]);
+  await Promise.all([videoWriter?.flushed(), eventsWriter?.flushed(), ...pictureWriters.map(w => w.flushed())]);
+  pictureWriters = [];
   const last = m.lessons[m.lessons.length - 1];
   if (last && last.end === null) last.end = serverNow();
   m.recordEnd = serverNow();

@@ -92,7 +92,7 @@ function OpenScreen({ onFiles, error, busy }: { onFiles: (f: File[]) => void; er
         <ul>
           <li><b>урок-…zip</b> — архив: звук всех комнат и действия учеников. Обязательно.</li>
           <li><b>урок-…-экран.mp4</b> (или .webm) — видео экрана учителя. Можно добавить позже.</li>
-          <li><b>урок.colesson</b> — файл урока из редактора: из него картинки слайдов. Можно без него.</li>
+          <li><b>урок.colesson</b> — только для записей, сделанных до 10 ноября 2026: в них нет картинок слайдов, они берутся из файла урока.</li>
         </ul>
         <p className="hint">Файлы никуда не загружаются: запись открывается прямо в этом браузере.</p>
         {error && <div className="error">{error}</div>}
@@ -204,9 +204,11 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
         <FilePick onFiles={onFiles} accept=".mp4,.webm,video/*" multiple={false} style={videoMissing ? btnPrimary : btn} testid="pick-video">
           {video ? 'Другое видео' : 'Видео экрана…'}
         </FilePick>
-        <FilePick onFiles={onFiles} accept=".colesson" multiple={false} style={btn} testid="pick-lesson">
-          {pictures ? 'Другой файл урока' : 'Файл урока…'}
-        </FilePick>
+        {rec.pictures.size === 0 && ( // older archives: the pictures come from the lesson file
+          <FilePick onFiles={onFiles} accept=".colesson" multiple={false} style={btn} testid="pick-lesson">
+            {pictures ? 'Другой файл урока' : 'Файл урока…'}
+          </FilePick>
+        )}
         <FilePick onFiles={onFiles} accept={ACCEPT_ALL} style={btn}>Другая запись</FilePick>
       </header>
       {(error || busy) && <div className={error ? 'error bar' : 'bar'}>{busy ? 'Открываем…' : error}</div>}
@@ -257,7 +259,7 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
             <div className="pane">
               {outside
                 ? <div className="placeholder" data-testid="outside">{outside}</div>
-                : <StudentPane key={track.nick} track={track} n={n} t={t} label={label} speaking={speaking} pictures={pictures} />}
+                : <StudentPane key={track.nick} track={track} n={n} t={t} label={label} speaking={speaking} pictures={pictures} kept={rec.pictures} />}
             </div>
           )}
         </section>
@@ -280,8 +282,10 @@ function Player({ rec, video, pictures, onFiles, error, busy }: {
   )
 }
 
-function StudentPane({ track, n, t, label, speaking, pictures }: {
+function StudentPane({ track, n, t, label, speaking, pictures, kept }: {
   track: StudentTrack; n: number; t: number; label: (id: string) => string; speaking: ReadonlySet<string>; pictures: LessonPictures | null
+  /** pictures the archive itself holds */
+  kept: Map<string, string>
 }) {
   const feed = useMemo(() => new BoardFeed(), [track])
   const { view, board } = track.at(n)
@@ -297,13 +301,13 @@ function StudentPane({ track, n, t, label, speaking, pictures }: {
   const media = view.slides.active ? view.slides.media : null
   const resolveMedia = useCallback((name: string) => {
     const h = media?.[name]?.hash
-    return h ? pictures?.byHash.get(h) : undefined
-  }, [media, pictures])
+    return h ? kept.get(h) ?? pictures?.byHash.get(h) : undefined
+  }, [media, pictures, kept])
 
   return (
     <ScaledScreen>
       <StudentScreen nick={track.nick} view={view} t={t} feed={feed} label={label} speaking={speaking}
-        resolveMedia={resolveMedia} picturesKey={pictures ? String(pictures.byHash.size) : ''} />
+        resolveMedia={resolveMedia} picturesKey={kept.size ? 'archive' : pictures ? String(pictures.byHash.size) : ''} />
     </ScaledScreen>
   )
 }

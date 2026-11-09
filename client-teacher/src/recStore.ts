@@ -24,6 +24,8 @@ export interface RecordingMeta {
   lessons: { start: number; end: number | null }[]; // «Начать урок» … end; the archive's part
   segments: AudioSegment[];
   names: Record<string, string>; // nick → the name the teacher knows them by
+  /** the lesson's pictures and videos, SHA-256 → type: slides:view names them only by hash */
+  pictures?: Record<string, string>;
   eventsMime: string;
   finished: boolean;
 }
@@ -249,6 +251,11 @@ export interface SavedFiles { archive: { name: string; blob: Blob }; video: { na
 /** Names from the teacher's journal are in the recording: nick → a different name */
 export const hasJournalNames = (meta: RecordingMeta) => Object.entries(meta.names).some(([nick, name]) => name && name !== nick);
 
+const PICTURE_EXT: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+};
+
 const safeName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '_');
 
 /** withoutJournal: only the students' nicks stay (in names and the sound files' names) — an archive to give to others */
@@ -268,6 +275,11 @@ export async function buildDownloads(meta: RecordingMeta, { withoutJournal = fal
     ? stored.map(s => ({ ...s, file: `звук/${s.file.slice('звук/'.length).split('-')[0]}-${safeName(s.who)}-${safeName(s.room)}.${s.file.split('.').pop()}` }))
     : stored;
   const names = withoutJournal ? Object.fromEntries(Object.keys(meta.names).map(n => [n, n])) : meta.names;
+  // the lesson's pictures: картинки/<sha256>.<ext>, found by the hashes in slides:view
+  const pictures: Record<string, string> = {};
+  for (const [hash, type] of Object.entries(meta.pictures ?? {})) {
+    if (files.includes(`media:${hash}`)) pictures[hash] = `картинки/${hash}.${PICTURE_EXT[type] ?? 'bin'}`;
+  }
   const manifest = {
     format: 'co-learn-recording/1',
     title: meta.title,
@@ -280,11 +292,13 @@ export async function buildDownloads(meta: RecordingMeta, { withoutJournal = fal
     names,
     audio: segments,
     events: files.includes('events') ? 'действия.jsonl' : null,
+    pictures,
   };
   entries.push({ name: 'ПРОЧТИ.txt', parts: [new Blob([enc.encode(readme(meta, video?.name ?? null))])] });
   entries.push({ name: 'урок.json', parts: [new Blob([enc.encode(JSON.stringify(manifest, null, 2))])] });
   if (files.includes('events')) entries.push({ name: 'действия.jsonl', parts: await fileChunks(meta.id, 'events') });
   for (const [i, s] of segments.entries()) entries.push({ name: s.file, parts: await fileChunks(meta.id, stored[i].file) });
+  for (const [hash, file] of Object.entries(pictures)) entries.push({ name: file, parts: await fileChunks(meta.id, `media:${hash}`) });
   return { archive: { name: `${base}.zip`, blob: await buildZip(entries, new Date(meta.createdAt)) }, video };
 }
 

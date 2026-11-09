@@ -38,6 +38,8 @@ export interface Recording {
   students: string[]
   audio: AudioTrack[]
   events: RecEvent[]
+  /** the lesson's pictures by SHA-256 (картинки/ in the archive; older archives have none) */
+  pictures: Map<string, string>
 }
 
 export class NotARecordingError extends Error {}
@@ -69,6 +71,12 @@ export async function readRecording(file: File): Promise<Recording> {
     audio.push({ ...a, url: URL.createObjectURL(await e.blob(a.mime.split(';')[0])) })
   }
 
+  const pictures = new Map<string, string>()
+  for (const [hash, file] of Object.entries((meta.pictures as Record<string, string> | undefined) ?? {})) {
+    const e = zip.get(file)
+    if (e) pictures.set(hash, URL.createObjectURL(await e.blob(MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream')))
+  }
+
   const names = (meta.names as Record<string, string> | undefined) ?? {}
   const seen = new Set<string>()
   const add = (n: string | undefined) => { if (n && n !== 'Teacher') seen.add(n) }
@@ -87,11 +95,13 @@ export async function readRecording(file: File): Promise<Recording> {
     students: [...seen],
     audio,
     events,
+    pictures,
   }
 }
 
 export function releaseRecording(r: Recording | null) {
   for (const a of r?.audio ?? []) URL.revokeObjectURL(a.url)
+  for (const u of r?.pictures.values() ?? []) URL.revokeObjectURL(u)
 }
 
 // ---------- the lesson file (.colesson): pictures of the slides ----------

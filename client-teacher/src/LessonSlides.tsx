@@ -1,6 +1,7 @@
 // Lesson material (the .colesson file made in the editor) and presenting its slides to the class.
 // The file is opened here, in the teacher's browser; the server gets only its structure and
 // relays pictures to students when they need them (see lessonLocal.ts, mediaShare.ts).
+import { setRecordingLesson } from './recording';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { socket } from './socket';
@@ -68,6 +69,7 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
   const [error, setError] = useState('');
   const fileRef = useRef<LocalLesson | null>(null);
   fileRef.current = file;
+  useEffect(() => setRecordingLesson(file), [file]);
   const auth = useRef({ token, onUnauthorized });
   auth.current = { token, onUnauthorized };
 
