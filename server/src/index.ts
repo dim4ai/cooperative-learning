@@ -24,6 +24,7 @@ import { BOTS, SOLO_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
+import { RecordingTap } from './recorder';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -445,6 +446,8 @@ interface LessonRuntime {
   afterTimer: NodeJS.Timeout | null;
   bots: BotRun | null;             // the solo demo's simulated class
   teacherLook: TeacherLook | null; // the teacher's name and photo for students, in memory only
+  startedAt: number | null;        // «Начать урок» was pressed (the stage left 'waiting'); null again once it's over
+  rec: RecordingTap;               // the teacher records: students' traffic is copied to them (recorder.ts)
 }
 
 interface TeacherLook { title: string; photo: string | null }
@@ -705,6 +708,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     noTeacherSince: Date.now(),
     ended: false,
     teacherLook: null,
+    startedAt: null,
+    rec: new RecordingTap(),
     afterUntil: null,
     afterTimer: null,
     bots: null,
@@ -891,8 +896,8 @@ function demoState(code: string) {
   return { endsAt: demo.endsAt, solo: demo.videoMode === 'solo', noStudentsAt: demo.firstStudentAt === null ? demoStart(demo) + DEMO_NO_STUDENTS_MS : null };
 }
 
-function broadcastState(code: string, lesson: LessonRuntime) {
-  const state = {
+function lessonStateBase(code: string, lesson: LessonRuntime) {
+  return {
     stage: lesson.stage,
     atDesks: lesson.atDesks,
     videoMode: lesson.videoMode,
@@ -901,16 +906,25 @@ function broadcastState(code: string, lesson: LessonRuntime) {
     demo: demoState(code),
     now: Date.now(), // the clients' clocks may be off; the demo's times are the server's
   };
+}
+
+/** Who this participant sees: a newcomer is seen by the teacher only (and by themselves) */
+function participantsSeenBy(lesson: LessonRuntime, viewer: Participant | null) {
   const everyone = Array.from(lesson.participants.values()).map(p => ({
     id: p.id, name: p.name, role: p.role, livekitRoom: p.livekitRoom, avatar: p.avatar,
   }));
+  if (viewer?.role === 'teacher') return everyone;
   const newcomers = new Set(Array.from(lesson.participants.values()).filter(p => isNewcomer(lesson, p)).map(p => p.id));
+  return everyone.filter(o => !newcomers.has(o.id) || o.id === viewer?.id);
+}
+
+function broadcastState(code: string, lesson: LessonRuntime) {
+  const state = lessonStateBase(code, lesson);
   for (const p of lesson.participants.values()) {
-    const seen = p.role === 'teacher' ? everyone : everyone.filter(o => !newcomers.has(o.id) || o.id === p.id);
-    io.sockets.sockets.get(p.id)?.emit('state', { ...state, participants: seen });
+    io.sockets.sockets.get(p.id)?.emit('state', { ...state, participants: participantsSeenBy(lesson, p) });
   }
   for (const id of lesson.boardConnections.keys()) {
-    io.sockets.sockets.get(id)?.emit('state', { ...state, participants: everyone.filter(o => !newcomers.has(o.id)) });
+    io.sockets.sockets.get(id)?.emit('state', { ...state, participants: participantsSeenBy(lesson, null) });
   }
   // Only for the teacher: a student's uuid is what seats them, classmates must not learn it
   const uuids = Object.fromEntries(Array.from(lesson.participants.values()).filter(p => p.uuid).map(p => [p.id, p.uuid]));
@@ -921,6 +935,83 @@ function broadcastState(code: string, lesson: LessonRuntime) {
     sock?.emit('studentNames', names);
   }
 }
+
+// ---------- recording (recorder.ts) ----------
+
+const recordingLive = (lesson: LessonRuntime) => lesson.startedAt !== null && !lesson.ended && !lesson.afterUntil;
+
+/** What a student has on screen now, as the events that brought it there */
+function studentSnapshot(code: string, lesson: LessonRuntime, p: Participant): [string, unknown][] {
+  const out: [string, unknown][] = [
+    ['state', { ...lessonStateBase(code, lesson), participants: participantsSeenBy(lesson, p) }],
+    ['seats', seatsFor(lesson, p)],
+    ['slides:view', studentSlidesView(lesson)],
+  ];
+  if (lesson.teacherLook) out.push(['teacherLook', lesson.teacherLook]);
+  if (p.livekitRoom) {
+    out.push(['livekit', { url: LIVEKIT_WS_URL, room: p.livekitRoom }]);
+    out.push(['sharedText', { room: p.livekitRoom, text: lesson.sharedTexts.get(p.livekitRoom) ?? '' }]);
+    out.push(['boardState', boardState(lesson, p.livekitRoom)]);
+  }
+  if (lesson.currentPoll) {
+    const vote = lesson.currentPoll.votes.get(p.id);
+    out.push(['poll', { question: lesson.currentPoll.question, options: lesson.currentPoll.options, myVote: vote ?? null }]);
+  }
+  return out;
+}
+
+/** Recording runs while a teacher records and the lesson is on; `fresh` — a teacher (re)joined it */
+function updateRecording(code: string, lesson: LessonRuntime, fresh = false) {
+  const tap = lesson.rec;
+  const live = tap.listeners.size > 0 && recordingLive(lesson);
+  if (live && (!tap.active || fresh)) {
+    tap.active = true;
+    for (const p of lesson.participants.values()) {
+      if (p.role === 'student' && !p.bot) tap.snapshot(p.name, studentSnapshot(code, lesson, p));
+    }
+  } else if (!live && tap.active) {
+    flushRecording(lesson);
+    tap.active = false;
+  }
+  const status = { live: recordingLive(lesson), startedAt: lesson.startedAt, now: Date.now() };
+  for (const id of tap.listeners) io.sockets.sockets.get(id)?.emit('rec:status', status);
+  syncRecordingRooms(lesson).catch(e => console.error('recording rooms:', e));
+}
+
+function flushRecording(lesson: LessonRuntime) {
+  const entries = lesson.rec.take();
+  if (!entries.length) return;
+  for (const id of lesson.rec.listeners) io.sockets.sockets.get(id)?.emit('rec:events', entries);
+}
+
+/** Listens in a room for the recording: hears everyone, publishes nothing, nobody sees it there */
+async function makeRecorderToken(room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity: `~rec-${crypto.randomBytes(4).toString('hex')}` });
+  token.addGrant({ roomJoin: true, room, canPublish: false, canPublishData: false, canSubscribe: true, hidden: true });
+  return await token.toJwt();
+}
+
+/** The teacher's browser listens to every room where someone of the lesson is */
+async function syncRecordingRooms(lesson: LessonRuntime) {
+  const tap = lesson.rec;
+  const rooms = tap.active
+    ? [...new Set([...lesson.participants.values()].filter(p => !p.bot && p.livekitRoom).map(p => p.livekitRoom!))].sort()
+    : [];
+  const key = rooms.join('\n');
+  if (key === tap.rooms) return;
+  tap.rooms = key;
+  const list = await Promise.all(rooms.map(async room => ({ room, token: await makeRecorderToken(room) })));
+  if (tap.rooms !== key) return; // changed again meanwhile: the newer list goes out instead
+  for (const id of tap.listeners) io.sockets.sockets.get(id)?.emit('rec:rooms', { url: LIVEKIT_WS_URL, rooms: list });
+}
+
+setInterval(() => {
+  for (const lesson of lessons.values()) {
+    if (!lesson.rec.listeners.size) continue;
+    flushRecording(lesson);
+    syncRecordingRooms(lesson).catch(e => console.error('recording rooms:', e));
+  }
+}, 500);
 
 // ---------- slides ----------
 
@@ -934,6 +1025,8 @@ function endLesson(code: string, lesson: LessonRuntime, why: string) {
   closeDemo(code, why);
   stopBots(lesson);
   lesson.ended = true;
+  lesson.startedAt = null;
+  updateRecording(code, lesson);
   lesson.stage = 'waiting';
   lesson.timerEndsAt = null;
   lesson.currentPoll = null;
@@ -974,6 +1067,8 @@ const MAX_AFTER_LESSON_MINUTES = 15;
  *  and can't rejoin until it's over — «Учитель покинул занятие» must be true. */
 async function startAfterLesson(code: string, lesson: LessonRuntime, minutes: number) {
   lesson.afterUntil = Date.now() + minutes * 60 * 1000;
+  lesson.startedAt = null;
+  updateRecording(code, lesson); // the talk after the lesson is not recorded
   lesson.stage = 'fours';
   lesson.atDesks = false;
   lesson.timerEndsAt = null;
@@ -1060,6 +1155,7 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   lesson.stage = stage;
   lesson.atDesks = false;
   console.log(`[${code}] stage -> ${stage}`);
+  if (stage !== 'waiting' && lesson.startedAt === null) { lesson.startedAt = Date.now(); updateRecording(code, lesson); }
   if (stage === 'pairs') await assignPairs(code, lesson);
   else if (stage === 'fours') await assignFours(code, lesson);
   else if (stage === 'individual') await assignIndividual(code, lesson);
@@ -1561,12 +1657,21 @@ io.on('connection', async (socket) => {
     if (uuid && role === 'student') lesson.seen.add(uuid);
     if (seatByPlan(lesson, participant)) broadcastSeats(code, lesson);
     console.log(`+ [${code}] ${role}: ${effectiveName}`);
+    if (role === 'student') {
+      // While the teacher records, what goes to this student and comes from them is copied (recorder.ts).
+      // socket.io writes every packet for this connection here, broadcasts included
+      const client = socket.client as unknown as { writeToEngine: (packets: unknown[], opts: unknown) => void };
+      const write = client.writeToEngine.bind(client);
+      client.writeToEngine = (packets, opts) => { lesson.rec.out(effectiveName, packets); write(packets, opts); };
+      socket.onAny((ev: string, ...args: unknown[]) => lesson.rec.in(effectiveName, ev, args));
+    }
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
     socket.on('disconnect', () => {
       lesson.relay.removePeer(socket.id);
       lesson.participants.delete(socket.id);
       if (lesson.participants.size === 0) lesson.emptySince = Date.now();
       if (role === 'teacher' && socketsOf(lesson, 'teacher').length === 0) lesson.noTeacherSince = Date.now();
+      if (lesson.rec.listeners.delete(socket.id)) updateRecording(code, lesson);
       dropIfEnded(code);
       if (role === 'student') {
         for (const seat of lesson.seats) {
@@ -1704,6 +1809,19 @@ io.on('connection', async (socket) => {
     socket.on('setStage', async (stage: Stage) => {
       if (role !== 'teacher' || !STAGES.includes(stage)) return;
       await changeStage(code, lesson, stage);
+    });
+
+    // The teacher's browser records the lesson: from now on it hears every room and gets students' traffic
+    socket.on('rec:on', () => {
+      if (role !== 'teacher') return;
+      lesson.rec.listeners.add(socket.id);
+      lesson.rec.rooms = ''; // the full list of rooms again, for this socket too
+      updateRecording(code, lesson, true);
+    });
+    socket.on('rec:off', () => {
+      if (role !== 'teacher' || !lesson.rec.listeners.delete(socket.id)) return;
+      socket.emit('rec:rooms', { url: LIVEKIT_WS_URL, rooms: [] });
+      updateRecording(code, lesson);
     });
 
     // With a lesson file the teacher goes through its blocks; the stage follows the block

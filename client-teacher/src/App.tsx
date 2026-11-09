@@ -20,6 +20,8 @@ import { StudentName, StudentNames, useStudentName } from './studentNames';
 import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, useJournal } from './journal';
 import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
+import { RecordButton, RecordingFinished } from './RecordingUI';
+import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
@@ -553,7 +555,10 @@ export default function App() {
         return next;
       });
     });
-    return () => { socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); setCamsInfo(null); };
+    return () => {
+      stopRecording().catch(e => console.warn('recording stop:', e)); // leaving the lesson ends its recording
+      socket.disconnect(); socket.off(); setConfirmed(false); setJoins(0); setCamsInfo(null);
+    };
   }, [lessonCode]);
 
   if (!lessonCode && demoEnd) {
@@ -597,6 +602,7 @@ export default function App() {
         journalLabel={journalLabel(journal.status, currentClass?.name)} onJournal={() => setJournalOpen(true)} onLogout={logout}
         classCode={currentClass?.lastCode} profileLocked={journal.status === 'locked'} />
       {journalOpen && <JournalDialog email={teacher!.email} classId={classId} onClassId={setClassId} onClose={() => setJournalOpen(false)} />}
+      <RecordingFinished />
     </>);
   }
 
@@ -643,6 +649,7 @@ export default function App() {
     const inJournal = journalStudentOf(studentUuids[p.id] ?? null)?.name;
     if (inJournal) shownNames[p.name] = inJournal;
   }
+  setRecordingNames(shownNames); // the recording names its sound files by them
   const waitingSeat = seats.length ? students.filter(p => !seats.some(s => s.occupant === p.name)).map(p => p.name) : [];
   const notInJournal = currentClass ? lessonStudents.filter(p => p.uuid && !journalStudentOf(p.uuid)).length : 0;
 
@@ -764,7 +771,14 @@ export default function App() {
           </button>
         )}
 
-        <div style={{ marginTop: 'auto', fontSize: 12, color: '#222' }}>
+        <div style={{ marginTop: 'auto' }} />
+        {!demo && lessonCode && (
+          <div style={{ marginBottom: GROUP_GAP, display: 'flex', flexDirection: 'column' }}>
+            <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} />
+            <RecordingFinished />
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: '#222' }}>
           {students.length} учеников
         </div>
         <button

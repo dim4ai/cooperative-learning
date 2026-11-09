@@ -1,3 +1,4 @@
+import { RecordingsLink } from './RecordingUI';
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { MediaCheck, saveMediaPrefs } from './mediaCheck';
@@ -169,6 +170,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
           marginTop: 14, padding: '8px 10px', fontSize: 14, borderRadius: 6, cursor: 'pointer',
           border: '1px solid #e74c3c', background: '#fff', color: '#e74c3c',
         }}>Выйти из аккаунта</button>
+        <RecordingsLink style={{ marginTop: 10, alignSelf: 'center' }} />
       </div>
     </div>
   );
