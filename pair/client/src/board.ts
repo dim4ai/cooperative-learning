@@ -233,7 +233,10 @@ export class Board {
     canvas.on('mouse:down', (e) => this.down(e))
     canvas.on('mouse:move', (e) => this.move(e))
     canvas.on('mouse:up', () => this.up())
-    canvas.on('mouse:dblclick', () => this.tool === 'polygon' && this.finishPolygon())
+    canvas.on('mouse:dblclick', (e) => {
+      if (this.tool === 'polygon') this.finishPolygon()
+      else if (this.tool === 'select' && !e.target) this.unpinAt(canvas.getScenePoint(e.e))
+    })
     canvas.on('mouse:wheel', (e) => this.wheel(e))
     canvas.on('after:render', ({ ctx }) => this.drawLockMarks(ctx))
 
@@ -816,7 +819,7 @@ export class Board {
       fn()
     } finally {
       if (outer) {
-        const b = this.batch!
+        const b = squash(this.batch!)
         this.batch = null
         if (b.length) {
           this.undoStack.push(b)
@@ -838,7 +841,8 @@ export class Board {
     const step = this.undoStack.pop()
     if (!step) return
     this.canvas.discardActiveObject()
-    for (const ch of [...step].reverse()) await this.put(ch.id, ch.before)
+    // one change per object in a step (squash), so the order is free: forward keeps what was above what
+    for (const ch of step) await this.put(ch.id, ch.before)
     this.reviveLayers()
     this.redoStack.push(step)
     this.onHistory()
@@ -1023,6 +1027,24 @@ export class Board {
     }
     this.commit(...objs)
     this.canvas.requestRenderAll()
+    this.onNotice('Закреплено: больше не выделяется и не двигается. Открепить — двойной щелчок по нему')
+  }
+
+  /** Double click on a pinned object (with the arrow): unpins the topmost one there */
+  private unpinAt(p: Point) {
+    if (this.readOnly) return
+    const o = [...(this.canvas.getObjects() as Obj[])].reverse().find((x) => {
+      if (!x.locked || !x.visible || isCut(x) || x._pending) return false
+      const L = this.layerOf(x)
+      return !L?.locked && this.editable(L ?? { id: '', name: '' }) && x.containsPoint(p)
+    })
+    if (!o) return
+    o.locked = false
+    this.interactivity(o)
+    this.commit(o)
+    this.canvas.setActiveObject(o)
+    this.canvas.requestRenderAll()
+    this.onNotice('Откреплено: снова выделяется и двигается')
   }
 
   private toggleLock(o: Obj) {
@@ -1510,6 +1532,17 @@ function validLayers(list: unknown): Layer[] {
   return list
     .filter((l) => l && typeof l.id === 'string' && typeof l.name === 'string')
     .map((l) => ({ id: l.id, name: String(l.name).slice(0, 40), locked: !!l.locked, studentHidden: !!l.studentHidden }))
+}
+
+/** One change per object: its state before the step and after it, in the order first touched */
+function squash(changes: Change[]): Change[] {
+  const by = new Map<string, Change>()
+  for (const c of changes) {
+    const had = by.get(c.id)
+    if (had) had.after = c.after
+    else by.set(c.id, { ...c })
+  }
+  return [...by.values()].filter((c) => c.before !== null || c.after !== null)
 }
 
 function validBookmark(b: Bookmark) {
