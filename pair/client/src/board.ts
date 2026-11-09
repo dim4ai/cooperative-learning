@@ -736,7 +736,13 @@ export class Board {
     if (ev.ctrlKey || ev.metaKey) {
       const zoom = Math.min(5, Math.max(0.2, c.getZoom() * 0.999 ** ev.deltaY))
       c.zoomToPoint(new Point(ev.offsetX, ev.offsetY), zoom)
-    } else c.relativePan(new Point(-ev.deltaX, -ev.deltaY))
+    } else {
+      // wheel: up and down; Shift + wheel: left and right (some browsers turn it into deltaX themselves)
+      const u = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? c.getHeight() : 1
+      const dx = ev.shiftKey ? ev.deltaX || ev.deltaY : ev.deltaX
+      const dy = ev.shiftKey ? 0 : ev.deltaY
+      c.relativePan(new Point(-dx * u, -dy * u))
+    }
     this.updateView()
   }
 
