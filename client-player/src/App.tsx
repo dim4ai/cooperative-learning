@@ -1,9 +1,9 @@
 // Lesson recording player. Everything happens in this browser: the files are read from the disk,
-// nothing is uploaded. A recording = the archive .zip (sound of every room, students' actions,
-// урок.json, the slides' pictures) + the teacher's screen video beside it.
+// nothing is uploaded. A recording is one .corecord file (client-teacher/src/recStore.ts): the
+// teacher's screen video, the sound of every room, the students' actions, the slides' pictures.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Clock, fmt, useClockState, useClockTime } from './clock'
-import { readRecording, releaseRecording, type Recording } from './recording'
+import { RECORDING_EXT, readRecording, releaseRecording, type Recording } from './recording'
 import { STAGE_LABELS, StudentTrack, stageMarks, type Stage } from './replay'
 import { RoomSound, useSpeaking } from './sound'
 import { BoardFeed, ScaledScreen, StudentScreen } from './student/StudentScreen'
@@ -15,28 +15,19 @@ function loadLabels(): Labels {
   try { const v = localStorage.getItem(LABELS_KEY); return v === 'nick' || v === 'anon' ? v : 'journal' } catch { return 'journal' }
 }
 
-const isVideo = (f: File) => /^video\//.test(f.type) || /\.(mp4|webm|mkv|mov)$/i.test(f.name)
-const isArchive = (f: File) => /\.zip$/i.test(f.name) || f.type === 'application/zip'
 
 export default function App() {
   const [rec, setRec] = useState<Recording | null>(null)
-  const [video, setVideo] = useState<{ name: string; url: string } | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   const open = useCallback(async (files: File[]) => {
     setError('')
-    const archive = files.find(isArchive)
-    const vid = files.find(isVideo)
-    const other = files.filter(f => f !== archive && f !== vid)
-    if (other.length) setError(`Не подходит: ${other.map(f => f.name).join(', ')}. Нужны архив записи (.zip) и видео экрана`)
+    if (files.length > 1) { setError('Выберите один файл записи (.corecord)'); return }
     setBusy(true)
     try {
-      if (archive) {
-        const r = await readRecording(archive)
-        setRec(old => { releaseRecording(old); return r })
-      }
-      if (vid) setVideo(old => { if (old) URL.revokeObjectURL(old.url); return { name: vid.name, url: URL.createObjectURL(vid) } })
+      const r = await readRecording(files[0])
+      setRec(old => { releaseRecording(old); return r })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -54,7 +45,7 @@ export default function App() {
   }, [open])
 
   if (!rec) return <OpenScreen onFiles={open} error={error} busy={busy} />
-  return <Player key={rec.code + rec.recordStart} rec={rec} video={video} onFiles={open} error={error} busy={busy} />
+  return <Player key={rec.code + rec.recordStart} rec={rec} onFiles={open} error={error} busy={busy} />
 }
 
 function FilePick({ onFiles, accept, multiple = true, children, style, testid }: {
@@ -68,7 +59,7 @@ function FilePick({ onFiles, accept, multiple = true, children, style, testid }:
   </>
 }
 
-const ACCEPT_ALL = '.zip,.mp4,.webm,video/*,application/zip'
+const ACCEPT = RECORDING_EXT
 
 function OpenScreen({ onFiles, error, busy }: { onFiles: (f: File[]) => void; error: string; busy: boolean }) {
   return (
@@ -77,16 +68,12 @@ function OpenScreen({ onFiles, error, busy }: { onFiles: (f: File[]) => void; er
         <h1>Записи уроков</h1>
         <p>Посмотреть урок глазами любого ученика: его экран и звук его комнаты, рядом с видео экрана учителя.</p>
         <div className="drop">
-          <FilePick testid="open-files" onFiles={onFiles} accept={ACCEPT_ALL} style={{ ...btnPrimary, fontSize: 17, padding: '12px 28px' }}>
-            {busy ? 'Открываем…' : 'Выбрать файлы записи'}
+          <FilePick testid="open-files" onFiles={onFiles} accept={ACCEPT} multiple={false} style={{ ...btnPrimary, fontSize: 17, padding: '12px 28px' }}>
+            {busy ? 'Открываем…' : 'Открыть запись урока'}
           </FilePick>
-          <div className="hint">или перетащите их сюда</div>
+          <div className="hint">или перетащите сюда файл <b>урок-….corecord</b></div>
         </div>
-        <ul>
-          <li><b>урок-…zip</b> — архив: звук всех комнат, действия учеников, картинки слайдов. Обязательно.</li>
-          <li><b>урок-…-экран.mp4</b> (или .webm) — видео экрана учителя. Можно добавить позже.</li>
-        </ul>
-        <p className="hint">Файлы никуда не загружаются: запись открывается прямо в этом браузере.</p>
+        <p className="hint">Файл записи сохраняется в окне «Записи уроков» у учителя: в нём видео экрана, звук всех комнат и действия учеников. Он никуда не загружается — запись открывается прямо в этом браузере.</p>
         {error && <div className="error">{error}</div>}
       </div>
     </div>
@@ -109,8 +96,8 @@ const STAGE_COLORS: Record<Stage, string> = {
   waiting: '#c9ccd3', group: '#7fb3e8', individual: '#b8a3e0', pairs: '#8fd19e', fours: '#f2c27b',
 }
 
-function Player({ rec, video, onFiles, error, busy }: {
-  rec: Recording; video: { name: string; url: string } | null
+function Player({ rec, onFiles, error, busy }: {
+  rec: Recording
   onFiles: (f: File[]) => void; error: string; busy: boolean
 }) {
   const clock = useMemo(() => new Clock(rec.recordStart, rec.recordEnd), [rec])
@@ -179,7 +166,6 @@ function Player({ rec, video, onFiles, error, busy }: {
     : t > rec.lessons.at(-1)!.end ? 'Урок завершён'
     : 'Перерыв между уроками: записано только видео экрана учителя'
   const when = new Date(rec.recordStart)
-  const videoMissing = !!rec.video && !video
 
   return (
     <div className="player">
@@ -193,10 +179,8 @@ function Player({ rec, video, onFiles, error, busy }: {
             <button key={k} role="radio" aria-checked={labels === k} className={labels === k ? 'on' : ''} onClick={() => setLabels(k)}>{title}</button>
           ))}
         </div>
-        <FilePick onFiles={onFiles} accept=".mp4,.webm,video/*" multiple={false} style={videoMissing ? btnPrimary : btn} testid="pick-video">
-          {video ? 'Другое видео' : 'Видео экрана…'}
-        </FilePick>
-        <FilePick onFiles={onFiles} accept={ACCEPT_ALL} style={btn}>Другая запись</FilePick>
+        {rec.video && <a href={rec.video.url} download={rec.fileName.replace(/\.corecord$/i, '') + '-экран.' + rec.video.file.split('.').pop()} style={{ ...btn, textDecoration: 'none' }} title="Видео экрана учителя отдельным файлом">Скачать видео экрана</a>}
+        <FilePick onFiles={onFiles} accept={ACCEPT} multiple={false} style={btn}>Другая запись</FilePick>
       </header>
       {(error || busy) && <div className={error ? 'error bar' : 'bar'}>{busy ? 'Открываем…' : error}</div>}
 
@@ -205,7 +189,7 @@ function Player({ rec, video, onFiles, error, busy }: {
           <div className="list-title">Учитель</div>
           <button data-testid="who-Teacher" className={'who' + (sel === 'Teacher' ? ' on' : '')} onClick={() => setSel('Teacher')}>
             <span>🖥 Видео экрана</span>
-            {!video && <span className="badge">нет файла</span>}
+            {!rec.video && <span className="badge">не писалось</span>}
           </button>
           <div className="list-title">Ученики</div>
           {rec.students.length === 0 && <div className="muted" style={{ padding: '4px 10px', fontSize: 13 }}>в записи нет учеников</div>}
@@ -233,13 +217,9 @@ function Player({ rec, video, onFiles, error, busy }: {
         <section className={'stage' + (showTeacher && showStudent ? ' two' : '')}>
           {showTeacher && (
             <div className="pane">
-              {video
-                ? <VideoPane url={video.url} start={rec.video?.start ?? rec.recordStart} clock={clock} audible={audibleFrom === 'teacher'} volume={volume} />
-                : <div className="placeholder">
-                    <div>Видео экрана учителя не открыто</div>
-                    {rec.video && <div className="muted" style={{ fontSize: 13 }}>{rec.video.file}</div>}
-                    <FilePick onFiles={onFiles} accept=".mp4,.webm,video/*" multiple={false} style={btnPrimary}>Выбрать видео</FilePick>
-                  </div>}
+              {rec.video
+                ? <VideoPane url={rec.video.url} start={rec.video.start} clock={clock} audible={audibleFrom === 'teacher'} volume={volume} />
+                : <div className="placeholder">Видео экрана на этом уроке не записывалось</div>}
             </div>
           )}
           {showStudent && track && state && (

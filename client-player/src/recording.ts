@@ -25,11 +25,14 @@ export interface RecEvent {
 }
 
 export interface Recording {
+  /** the file it was opened from */
+  fileName: string
   title: string
   code: string
   recordStart: number
   recordEnd: number
-  video: { file: string; start: number; mime: string } | null
+  /** the teacher's screen, inside the file */
+  video: { file: string; start: number; mime: string; url: string } | null
   lessons: { start: number; end: number }[]
   /** nick → name from the teacher's journal */
   names: Record<string, string>
@@ -43,15 +46,20 @@ export interface Recording {
 
 export class NotARecordingError extends Error {}
 
+/** A recording file: a zip with its own extension, the first entry 'mimetype' (as .colesson) */
+export const RECORDING_EXT = '.corecord'
+export const RECORDING_MIME = 'application/vnd.colearn.recording+zip'
+const NOT_IT = 'Это не запись урока: нужен файл .corecord'
+
 export async function readRecording(file: File): Promise<Recording> {
   let zip
-  try { zip = await readZip(file) } catch { throw new NotARecordingError('Это не архив записи урока (не zip)') }
+  try { zip = await readZip(file) } catch { throw new NotARecordingError(NOT_IT) }
+  const mimetype = zip.get('mimetype')
+  if (!mimetype || await entryText(mimetype) !== RECORDING_MIME) throw new NotARecordingError(NOT_IT)
   const metaEntry = zip.get('урок.json')
-  if (!metaEntry) throw new NotARecordingError('В архиве нет урок.json — это не запись урока')
+  if (!metaEntry) throw new NotARecordingError('Запись повреждена: нет урок.json')
   let meta: Record<string, unknown>
-  try { meta = JSON.parse(await entryText(metaEntry)) } catch { throw new NotARecordingError('урок.json повреждён') }
-  if (typeof meta.format !== 'string' || !meta.format.startsWith('co-learn-recording/')) throw new NotARecordingError('Неизвестный формат записи')
-  if (meta.format !== 'co-learn-recording/1') throw new NotARecordingError('Запись сделана более новой версией: обновите страницу')
+  try { meta = JSON.parse(await entryText(metaEntry)) } catch { throw new NotARecordingError('Запись повреждена: урок.json не читается') }
 
   const events: RecEvent[] = []
   const evEntry = zip.get(typeof meta.events === 'string' ? meta.events : 'действия.jsonl')
@@ -76,6 +84,11 @@ export async function readRecording(file: File): Promise<Recording> {
     if (e) pictures.set(hash, URL.createObjectURL(await e.blob(MIME[file.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream')))
   }
 
+  let video: Recording['video'] = null
+  const v = meta.video as Omit<NonNullable<Recording['video']>, 'url'> | null
+  const ve = v && zip.get(v.file)
+  if (v && ve) video = { ...v, url: URL.createObjectURL(await ve.blob(v.mime.split(';')[0])) }
+
   const names = (meta.names as Record<string, string> | undefined) ?? {}
   const seen = new Set<string>()
   const add = (n: string | undefined) => { if (n && n !== 'Teacher') seen.add(n) }
@@ -84,11 +97,12 @@ export async function readRecording(file: File): Promise<Recording> {
   for (const n of Object.keys(names)) add(n)
 
   return {
+    fileName: file.name,
     title: String(meta.title ?? ''),
     code: String(meta.code ?? ''),
     recordStart: Number(meta.recordStart),
     recordEnd: Number(meta.recordEnd),
-    video: (meta.video as Recording['video']) ?? null,
+    video,
     lessons: (meta.lessons as Recording['lessons']) ?? [],
     names,
     students: [...seen],
@@ -101,6 +115,7 @@ export async function readRecording(file: File): Promise<Recording> {
 export function releaseRecording(r: Recording | null) {
   for (const a of r?.audio ?? []) URL.revokeObjectURL(a.url)
   for (const u of r?.pictures.values() ?? []) URL.revokeObjectURL(u)
+  if (r?.video) URL.revokeObjectURL(r.video.url)
 }
 
 /** type of a picture by its file's extension */

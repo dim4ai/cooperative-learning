@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { clearJustFinished, currentRecordingId, startRecording, stopRecording, useRecording } from './recording';
-import { buildDownloads, deleteRecording, download, hasJournalNames, listRecordings, type RecordingMeta } from './recStore';
+import { buildRecordingFile, deleteRecording, download, hasJournalNames, listRecordings, type RecordingMeta } from './recStore';
 
 const NOTICE_KEY = 'recordingNoticeSeen';
 
@@ -56,10 +56,10 @@ export function RecordingsDialog({ highlight, onClose }: { highlight?: string | 
           <button onClick={onClose} aria-label="Закрыть" style={{ ...plainBtn, fontSize: 18 }}>✕</button>
         </div>
         <p style={{ ...text, fontSize: 13, color: '#666' }}>
-          Записи хранятся только в этом браузере. «Сохранить» скачивает два файла: видео экрана и архив со звуком и действиями учеников. Сохранив, удалите запись отсюда — она занимает место на диске.
+          Записи хранятся только в этом браузере. «Сохранить» скачивает один файл .corecord: видео экрана, звук и действия учеников. Сохранив, удалите запись отсюда — она занимает место на диске.
         </p>
         <p style={{ ...text, fontSize: 13, color: '#666' }}>
-          Посмотреть урок глазами любого ученика — в проигрывателе <a href="https://player.co-learn.ru" target="_blank" rel="noreferrer">player.co-learn.ru</a>: откройте в нём сохранённые файлы.
+          Посмотреть урок глазами любого ученика — в проигрывателе <a href="https://player.co-learn.ru" target="_blank" rel="noreferrer">player.co-learn.ru</a>: откройте в нём сохранённый файл.
         </p>
         {list.length === 0 && <div style={{ fontSize: 14, color: '#888' }}>Записей нет</div>}
         {list.map(m => <RecordingRow key={m.id} meta={m} fresh={m.id === highlight} current={recording && m.id === currentRecordingId()} />)}
@@ -81,14 +81,14 @@ function RecordingRow({ meta, fresh, current }: { meta: RecordingMeta; fresh: bo
     setBusy(true);
     setError('');
     try {
-      const files = await buildDownloads(meta, { withoutJournal });
-      if (files.video) download(files.video.name, files.video.blob);
-      // two downloads at once are sometimes held back by the browser: the second one a moment later
-      setTimeout(() => download(files.archive.name, files.archive.blob), files.video ? 800 : 0);
+      const file = await buildRecordingFile(meta, { withoutJournal });
+      download(file.name, file.blob);
       setSaved(true);
     } catch (e) {
       console.warn('recording save:', e);
-      setError('Не получилось собрать файлы. Попробуйте ещё раз');
+      setError(e instanceof Error && e.message === 'archive over 4 GB'
+        ? 'Запись больше 4 ГБ — такой файл пока не собрать'
+        : 'Не получилось собрать файл. Попробуйте ещё раз');
     } finally {
       setBusy(false);
     }
@@ -117,7 +117,7 @@ function RecordingRow({ meta, fresh, current }: { meta: RecordingMeta; fresh: bo
         {hasJournalNames(meta) && (
           <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 13, color: '#444', cursor: 'pointer' }}>
             <input type="checkbox" data-testid="recording-no-journal" checked={withoutJournal} onChange={e => setWithoutJournal(e.target.checked)} style={{ marginTop: 2 }} />
-            <span>Без имён из журнала: в архиве останутся только ники учеников. <span style={{ color: '#888' }}>Видео экрана так не обезличить — в нём то, что было у вас на экране</span></span>
+            <span>Без имён из журнала: в файле останутся только ники учеников. <span style={{ color: '#888' }}>Видео экрана так не обезличить — в нём то, что было у вас на экране</span></span>
           </label>
         )}
         <div style={{ display: 'flex', gap: 8 }}>

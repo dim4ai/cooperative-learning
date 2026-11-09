@@ -121,7 +121,7 @@ async function fileNames(rec: string): Promise<string[]> {
   return [...new Set(keys.map(k => (k as [string, string, number])[1]))];
 }
 
-// ---------- zip (stored, not compressed: sound is compressed already) ----------
+// ---------- zip (stored, not compressed: sound and video are compressed already) ----------
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -201,7 +201,7 @@ async function buildZip(entries: ZipEntry[], when: Date): Promise<Blob> {
   end.setUint16(10, entries.length, true);
   end.setUint32(12, cdSize, true);
   end.setUint32(16, offset, true);
-  return new Blob([...out, ...central, end.buffer], { type: 'application/zip' });
+  return new Blob([...out, ...central, end.buffer], { type: RECORDING_MIME });
 }
 
 // ---------- what gets saved ----------
@@ -228,7 +228,7 @@ function readme(meta: RecordingMeta, videoName: string | null): string {
     '',
   ];
   if (meta.video && videoName) {
-    lines.push(`Видео экрана — отдельный файл: ${videoName}`);
+    lines.push(`Видео экрана — ${videoName}.`);
     for (const [i, l] of meta.lessons.entries()) {
       const n = meta.lessons.length > 1 ? ` ${i + 1}` : '';
       lines.push(`Урок${n} начался на ${clock(l.start - meta.video.start)} видео${l.end ? `, закончился на ${clock(l.end - meta.video.start)}` : ''}.`);
@@ -238,6 +238,9 @@ function readme(meta: RecordingMeta, videoName: string | null): string {
   }
   lines.push(
     '',
+    'Открыть запись: https://player.co-learn.ru — урок глазами любого ученика.',
+    'Файл .corecord — это zip: его можно распаковать и обычным архиватором.',
+    '',
     'Звук и действия записаны только во время урока (от «Начать урок» до его завершения).',
     'звук/ — каждый участник отдельно, в каждой комнате своим файлом.',
     'действия.jsonl — по строке на событие: что сервер отправил ученикам (to) и что они прислали (from).',
@@ -246,7 +249,12 @@ function readme(meta: RecordingMeta, videoName: string | null): string {
   return lines.join('\n') + '\n';
 }
 
-export interface SavedFiles { archive: { name: string; blob: Blob }; video: { name: string; blob: Blob } | null }
+/** A lesson recording file: a zip with its own extension, like .colesson. The first entry is
+ *  'mimetype' = RECORDING_MIME, stored — the type reads from the file's first bytes. */
+export const RECORDING_EXT = '.corecord';
+export const RECORDING_MIME = 'application/vnd.colearn.recording+zip';
+
+export interface SavedFile { name: string; blob: Blob }
 
 /** Names from the teacher's journal are in the recording: nick → a different name */
 export const hasJournalNames = (meta: RecordingMeta) => Object.entries(meta.names).some(([nick, name]) => name && name !== nick);
@@ -259,14 +267,10 @@ const PICTURE_EXT: Record<string, string> = {
 const safeName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '_');
 
 /** withoutJournal: only the students' nicks stay (in names and the sound files' names) — an archive to give to others */
-export async function buildDownloads(meta: RecordingMeta, { withoutJournal = false } = {}): Promise<SavedFiles> {
+export async function buildRecordingFile(meta: RecordingMeta, { withoutJournal = false } = {}): Promise<SavedFile> {
   const base = baseName(meta);
   const files = await fileNames(meta.id);
-  let video: SavedFiles['video'] = null;
-  if (meta.video && files.includes('video')) {
-    const parts = await fileChunks(meta.id, 'video');
-    video = { name: `${base}-экран.${extOf(meta.video.mime)}`, blob: new Blob(parts, { type: meta.video.mime }) };
-  }
+  const video = meta.video && files.includes('video') ? `экран.${extOf(meta.video.mime)}` : null;
   const entries: ZipEntry[] = [];
   const enc = new TextEncoder();
   const stored = meta.segments.filter(s => files.includes(s.file));
@@ -287,19 +291,21 @@ export async function buildDownloads(meta: RecordingMeta, { withoutJournal = fal
     clock: 'server ms',
     recordStart: meta.recordStart,
     recordEnd: meta.recordEnd,
-    video: meta.video && video ? { file: video.name, start: meta.video.start, mime: meta.video.mime } : null,
+    video: meta.video && video ? { file: video, start: meta.video.start, mime: meta.video.mime } : null,
     lessons: meta.lessons,
     names,
     audio: segments,
     events: files.includes('events') ? 'действия.jsonl' : null,
     pictures,
   };
-  entries.push({ name: 'ПРОЧТИ.txt', parts: [new Blob([enc.encode(readme(meta, video?.name ?? null))])] });
+  entries.push({ name: 'mimetype', parts: [new Blob([enc.encode(RECORDING_MIME)])] }); // first, as in .colesson
+  entries.push({ name: 'ПРОЧТИ.txt', parts: [new Blob([enc.encode(readme(meta, video))])] });
   entries.push({ name: 'урок.json', parts: [new Blob([enc.encode(JSON.stringify(manifest, null, 2))])] });
   if (files.includes('events')) entries.push({ name: 'действия.jsonl', parts: await fileChunks(meta.id, 'events') });
   for (const [i, s] of segments.entries()) entries.push({ name: s.file, parts: await fileChunks(meta.id, stored[i].file) });
   for (const [hash, file] of Object.entries(pictures)) entries.push({ name: file, parts: await fileChunks(meta.id, `media:${hash}`) });
-  return { archive: { name: `${base}.zip`, blob: await buildZip(entries, new Date(meta.createdAt)) }, video };
+  if (video) entries.push({ name: video, parts: await fileChunks(meta.id, 'video') });
+  return { name: `${base}${RECORDING_EXT}`, blob: await buildZip(entries, new Date(meta.createdAt)) };
 }
 
 export function download(name: string, blob: Blob) {
