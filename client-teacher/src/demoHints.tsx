@@ -13,6 +13,8 @@ import type { TeacherSlides } from './LessonSlides';
 interface Hint { id: string; anchor: string; text: string; prefer?: { side: 'below' | 'above'; align: 'start' | 'end' } }
 
 export interface HintsInput {
+  /** the lesson code: what was done is remembered per lesson */
+  lesson: string;
   stage: string;
   seats: Seat[];
   students: string[];
@@ -22,19 +24,34 @@ export interface HintsInput {
   slides: TeacherSlides;
   /** the class map shown in place of the slide (after «Всем понятно?») */
   mapOpen: boolean;
+  /** rooms whose bell rings now */
+  calling: ReadonlySet<string>;
+  /** this stage's calls by room, answered or not */
+  calls: Record<string, { note: string }>;
+  /** the room the teacher is in, if not the classroom */
+  room: string | null;
 }
+
+const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null }>();
+
+/** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
+const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
+const NEXT_BLOCK = '[data-testid="plan-block"][data-current] + [data-testid="plan-block"]';
 
 /** How many students the solo demo's class has (server/src/demoBots.ts) */
 const CLASS_SIZE = 8;
 
-function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | null {
+/** Mostly one hint; a few moments need two at once */
+function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | null {
   const { stage, seats, students, waiting, slides } = x;
 
   if (stage === 'waiting') {
     const seated = seats.filter(s => s.occupant);
     const allIn = students.length >= CLASS_SIZE && waiting.length === 0 && seated.length >= CLASS_SIZE;
     if (x.previewOpen) {
-      return allIn ? { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики расселись. Вернитесь к рассадке' } : null;
+      if (allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
+      return done.has('preview-nav') ? null
+        : { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Листайте слайды стрелками ← → на клавиатуре или этими кнопками, блоки урока — стрелками ↑ ↓' };
     }
     if (!allIn) {
       return done.has('preview') ? null
@@ -48,12 +65,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | null {
     if (stray) {
       return {
         id: 'gather', anchor: `[data-seat-occupant="${CSS.escape(stray.occupant!)}"]`,
-        text: 'Соберите класс за любые две парты: кликните по ученику, потом по свободному месту за другой партой',
+        text: 'Вы можете перемещать учеников: кликните по ученику, потом по свободному месту за любой партой. Соберите учеников за двумя партами.',
         // over the other row of this desk, inside its width
         prefer: { side: stray.row === 0 ? 'below' : 'above', align: stray.col === 0 ? 'start' : 'end' },
       };
     }
-    return { id: 'start', anchor: '[data-hint="start-lesson"]', text: 'Все за двумя партами. Начинайте урок' };
+    return { id: 'start', anchor: '[data-hint="start-lesson"]', text: 'Все за двумя партами. Можете начинать урок' };
   }
 
   if (stage === 'group') {
@@ -69,12 +86,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | null {
 
     if (asking) return null;
     if (answered) {
-      return {
-        id: 'next-block', anchor: '[data-testid="plan-block"][data-current] + [data-testid="plan-block"]',
-        text: x.mapOpen
-          ? 'Красная рамка на карте — не понял. Отметки останутся: подойдёте к этим ученикам, когда класс будет работать сам. Выберите следующий блок урока'
-          : 'Дальше класс работает сам. Выберите следующий блок урока',
-      };
+      return [
+        { id: 'next-block', anchor: NEXT_BLOCK, text: 'Выберите следующий блок урока.' },
+        { id: 'vote-legend', anchor: '[data-testid="understood-result"]', text:
+          'Зелёная рамка вокруг ученика — он выбрал «Понятно», красная — «Не понятно», нет рамки — не проголосовал. '
+          + 'Вы можете ещё раз объяснить непонятные моменты или перейти к следующему этапу. На следующем этапе есть возможность подойти к ученику индивидуально.' },
+      ];
     }
     if (hidden > 0 && !done.has('reveal')) {
       return { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом возьмите ☝ и кликните по ответу' };
@@ -83,6 +100,32 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | null {
       return done.has('next-slide') ? null : { id: 'next-slide', anchor: '[data-hint="slide-next"]', text: 'Следующий слайд — эта стрелка или клавиша →' };
     }
     return { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд. Спросите класс: всем понятно?' };
+  }
+
+  if (stage === 'individual' || stage === 'pairs' || stage === 'fours') {
+    // at a student's board
+    if (x.room) {
+      const call = x.calls[x.room];
+      if (call) {
+        const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
+        // the first time at a student's board: the teacher may write on it
+        return done.has('room-back') ? back : [
+          { id: 'draw', anchor: '[data-testid="tool-pen"]', text: 'Вы можете писать и рисовать прямо на доске ученика — он сразу это увидит.' },
+          back,
+        ];
+      }
+      return done.has('room-back') ? null : { id: 'room-back', anchor: '[data-hint="room-back"]', text: 'Вы у доски учеников. Вернуться в класс — эта кнопка' };
+    }
+    // in the classroom: a bell first
+    const ringing = Object.keys(x.calls).find(r => x.calling.has(r)) ?? [...x.calling][0];
+    if (ringing) {
+      // what they ask is in the right panel
+      return { id: `bell:${ringing}`, anchor: `[data-calling-room="${CSS.escape(ringing)}"]`, text: 'Вас зовут. Нажмите на колокольчик, чтобы подойти' };
+    }
+    const answered = Object.keys(x.calls).filter(r => done.has(`visit:${r}`)).length;
+    if (answered < (CALLS[stage] ?? 2)) return null; // the class works; someone will call
+    if (stage === 'fours') return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Это весь цикл урока. Завершите урок и расскажите, что думаете' };
+    return { id: `next-block:${stage}`, anchor: NEXT_BLOCK, text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах' : 'Дальше пары объединяются в четвёрки' };
   }
 
   return null;
@@ -128,22 +171,53 @@ const BG = '#2b3a55';
 export function DemoHints(props: HintsInput) {
   const hintsOff = useHintsOff();
   // what the teacher has already done once needs no more showing (noted while rendering)
-  const [done, setDone] = useState<ReadonlySet<string>>(new Set());
-  const [firstSlide, setFirstSlide] = useState<string | null>(null);
+  // kept outside: the lesson screen is built anew whenever the teacher walks into a room
+  const mem = memory.get(props.lesson) ?? { done: new Set<string>(), firstSlide: null };
+  memory.set(props.lesson, mem);
+  const [done, setDoneState] = useState<ReadonlySet<string>>(mem.done);
+  const [firstSlide, setFirstSlideState] = useState<string | null>(mem.firstSlide);
+  const setDone = (d: ReadonlySet<string>) => { mem.done = d; setDoneState(d); };
+  const setFirstSlide = (f: string) => { mem.firstSlide = f; setFirstSlideState(f); };
   const { previewOpen, slides } = props;
   const slideAt = slides.state.active ? `${slides.state.blockId}:${slides.state.index}` : null;
   const now = new Set<string>();
   if (previewOpen) now.add('preview');
   if (slides.state.revealed.length) now.add('reveal');
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
+  if (props.room) { now.add(`visit:${props.room}`); now.add('in-room'); } else if (done.has('in-room')) now.add('room-back');
   if ([...now].some(id => !done.has(id))) setDone(new Set([...done, ...now]));
   if (slideAt && !firstSlide) setFirstSlide(slideAt);
 
-  const hint = hintsOff ? null : pickHint(props, done);
+  // leafing through the preview: by the keys or its buttons
+  const lesson = props.lesson;
+  useEffect(() => {
+    if (!previewOpen) return;
+    const leafed = () => {
+      const m = memory.get(lesson);
+      if (!m || m.done.has('preview-nav')) return;
+      m.done = new Set([...m.done, 'preview-nav']);
+      setDoneState(m.done);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key.startsWith('Arrow')) leafed(); };
+    const onClick = (e: MouseEvent) => { if ((e.target as Element).closest?.('[data-testid="lesson-preview"] button')) leafed(); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('click', onClick);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
+  }, [previewOpen, lesson]);
 
+  const picked = hintsOff ? null : pickHint(props, done);
+  const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
+  return (<>
+    {hints.map(h => <Bubble key={h.id} hint={h} />)}
+    {hints.length > 0 && <style>{'@keyframes demoHintRing { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }'}</style>}
+  </>);
+}
+
+/** One hint: a ring around its button and the bubble beside it */
+function Bubble({ hint }: { hint: Hint }) {
   // follow the button: it moves when the page lays out again
   const [measured, setMeasured] = useState<(Box & { anchor: string }) | null>(null);
-  const anchor = hint?.anchor;
+  const anchor = hint.anchor;
   useEffect(() => {
     if (!anchor) return;
     const measure = () => {
@@ -176,9 +250,9 @@ export function DemoHints(props: HintsInput) {
     return () => ro.disconnect();
   }, [bubble]);
 
-  const prefer = hint?.prefer;
+  const prefer = hint.prefer;
   const pos = useMemo(() => (box ? place(box, bubbleH, prefer) : null), [box, bubbleH, prefer?.side, prefer?.align]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!hint || !box || !pos) return null;
+  if (!box || !pos) return null;
 
   return (
     <>
@@ -199,7 +273,6 @@ export function DemoHints(props: HintsInput) {
           }}>Скрыть подсказки</button>
         </div>
       </div>
-      <style>{'@keyframes demoHintRing { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }'}</style>
     </>
   );
 }

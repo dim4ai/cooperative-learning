@@ -15,15 +15,15 @@ import {
 } from './db';
 import {
   parseMaterial, MaterialError, MAX_MATERIAL_JSON_BYTES, mediaCatalog, emptySlidesState, blockSlides, currentScene,
-  studentScenes, scenesMedia, allowedHashes, type SlidesState, type Material,
+  studentScenes, studentScene, scenesMedia, allowedHashes, type SlidesState, type Material,
 } from './slides';
-import type { Block } from './slides';
+import type { Block, Scene } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
 import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, scatteredSeat, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
-import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
+import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
 import { RecordingTap } from './recorder';
 
 function requireEnv(name: string): string {
@@ -427,6 +427,7 @@ interface LessonRuntime {
   seatPlan: Map<string, string>; // from the teacher's journal, in memory only: student uuid → seat id
   sharedTexts: Map<string, string>; // per livekit room name
   boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
+  roomsByBlock: Map<string, Map<string, string>>; // work block id → student name → the room they wrote in there
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
   currentPoll: Poll | null;
   material: Material | null;
@@ -610,8 +611,9 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
     write: (room, obj) => applyBoardOp(lesson, room, { t: 'add', obj }, 'Ученик', false, ''),
-    call(room, note) {
-      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note });
+    members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
+    call(room, note, who) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note, who });
     },
   });
   lesson.bots = bots;
@@ -692,6 +694,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     seatPlan: new Map(),
     sharedTexts: new Map(),
     boards: new Map(),
+    roomsByBlock: new Map(),
     boardConnections: new Map(),
     currentPoll: null,
     material: null,
@@ -946,6 +949,7 @@ function studentSnapshot(code: string, lesson: LessonRuntime, p: Participant): [
     ['state', { ...lessonStateBase(code, lesson), participants: participantsSeenBy(lesson, p) }],
     ['seats', seatsFor(lesson, p)],
     ['slides:view', studentSlidesView(lesson)],
+    ['earlierBoards', earlierBoardsFor(lesson, p)],
   ];
   if (lesson.teacherLook) out.push(['teacherLook', lesson.teacherLook]);
   if (p.livekitRoom) {
@@ -1124,7 +1128,61 @@ function broadcastSlides(lesson: LessonRuntime, opts: { material?: boolean } = {
   }
   const view = studentSlidesView(lesson);
   for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('slides:view', view);
-  lesson.relay.setAllowed(allowedHashes(lesson.material, lesson.slides));
+  sendEarlierBoards(lesson);
+  lesson.relay.setAllowed([...new Set([...allowedHashes(lesson.material, lesson.slides), ...earlierHashes(lesson)])]);
+}
+
+// ---------- boards of earlier stages ----------
+// The lesson file says which earlier work blocks' boards a block shows: each student sees the one
+// they wrote on there themselves — alone, with their pair or their four — only to look at.
+
+const WORK_STAGES: readonly string[] = ['individual', 'pairs', 'fours'];
+
+/** Remember where a student writes in the running work block */
+function noteRoom(lesson: LessonRuntime, p: Participant) {
+  const block = lesson.material?.blocks.find(b => b.id === lesson.block);
+  if (p.role !== 'student' || !p.livekitRoom || !block || !WORK_STAGES.includes(block.type) || block.type !== lesson.stage) return;
+  let rooms = lesson.roomsByBlock.get(block.id);
+  if (!rooms) { rooms = new Map(); lesson.roomsByBlock.set(block.id, rooms); }
+  rooms.set(p.name, p.livekitRoom);
+}
+
+function earlierBlocks(lesson: LessonRuntime): Block[] {
+  const block = lesson.material?.blocks.find(b => b.id === lesson.block);
+  if (!block || !WORK_STAGES.includes(block.type)) return [];
+  return block.boardsFrom.map(id => lesson.material!.blocks.find(b => b.id === id)).filter((b): b is Block => !!b);
+}
+
+/** Media of the earlier sheets: students may need them again (after a reload, say) */
+function earlierHashes(lesson: LessonRuntime): string[] {
+  const scenes = earlierBlocks(lesson).flatMap(b => b.slides.map(s => studentScene(s, lesson.slides)));
+  return lesson.material ? Object.values(scenesMedia(lesson.material, scenes)).map(m => m.hash) : [];
+}
+
+function earlierBoardsFor(lesson: LessonRuntime, p: Participant) {
+  const blocks = [];
+  const scenes: Scene[] = [];
+  for (const b of earlierBlocks(lesson)) {
+    const room = lesson.roomsByBlock.get(b.id)?.get(p.name);
+    if (!room) continue; // wasn't there then
+    const sheets = b.slides.length
+      ? b.slides.map(sc => {
+          const scene = studentScene(sc, lesson.slides);
+          scenes.push(scene);
+          return { scene, objects: [...(lesson.boards.get(`${room}#${sc.id}`)?.values() ?? [])] };
+        })
+      : [{ scene: null, objects: [...(lesson.boards.get(`${room}#${b.id}`)?.values() ?? [])] }];
+    blocks.push({ id: b.id, title: b.title, type: b.type, sheets });
+  }
+  return { blocks, media: lesson.material ? scenesMedia(lesson.material, scenes) : {} };
+}
+
+function sendEarlierBoards(lesson: LessonRuntime, only?: string) {
+  for (const id of socketsOf(lesson, 'student')) {
+    if (only && id !== only) continue;
+    const p = lesson.participants.get(id);
+    if (p) io.sockets.sockets.get(id)?.emit('earlierBoards', earlierBoardsFor(lesson, p));
+  }
 }
 
 function setMaterial(code: string, lesson: LessonRuntime, material: Material | null, { keepState = false } = {}) {
@@ -1175,6 +1233,8 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   broadcastSlides(lesson);
   pushBoards(lesson);
   if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
+  // the same stage again: everyone stays where they are, and writes there for this block
+  for (const p of lesson.participants.values()) noteRoom(lesson, p);
 }
 
 // ---------- who may come in ----------
@@ -1214,20 +1274,14 @@ function clearMarks(lesson: LessonRuntime) {
 }
 
 /** The simulated class answers so that every picture of the map shows up: a whole desk, a pair, one student */
+/** The solo demo's class answers «Всем понятно?»: one says no — Глеб, who will get stuck and call on the next stage too;
+ *  two keep silent */
 function botAnswers(lesson: LessonRuntime) {
-  const desks = new Map<number, Seat[]>();
-  for (const seat of lesson.seats) {
-    if (!seat.occupant) continue;
-    desks.set(seat.groupIndex, [...(desks.get(seat.groupIndex) ?? []), seat]);
-  }
-  [...desks.keys()].sort((a, b) => a - b).forEach((g, d) => {
-    const seats = desks.get(g)!.sort((a, b) => a.row - b.row || a.col - b.col);
-    seats.forEach((seat, i) => {
-      const no = d === 0 || (d === 1 ? seat.row === seats[0].row : i === 0);
-      if (!no && seats.length > 2 && i === seats.length - 1) return; // at a full desk somebody stays silent
-      lesson.marks.set(seat.occupant!, no ? 'no' : 'yes');
-    });
-  });
+  const seated = lesson.seats.filter(s => s.occupant).map(s => s.occupant!);
+  const lost = seated.includes('Глеб') ? 'Глеб' : seated[0];
+  // two don't answer at all, as in a real class
+  const silent = new Set(['Соня', 'Артём'].filter(n => seated.includes(n) && n !== lost));
+  for (const name of seated) if (!silent.has(name)) lesson.marks.set(name, name === lost ? 'no' : 'yes');
 }
 
 function finishVote(lesson: LessonRuntime) {
@@ -1326,6 +1380,20 @@ async function makeCameraViewerToken(identity: string, room: string): Promise<st
   return await token.toJwt();
 }
 
+/** The teacher's voice to the whole class: in a room of its own only the teacher speaks, and only the microphone */
+async function makeVoiceSpeakerToken(identity: string, room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity });
+  token.addGrant({ roomJoin: true, room, canPublish: true, canPublishData: false, canSubscribe: false, canPublishSources: [TrackSource.MICROPHONE] });
+  return await token.toJwt();
+}
+
+/** ...and every student listens there all lesson long, unseen, saying nothing */
+async function makeVoiceListenerToken(identity: string, room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity });
+  token.addGrant({ roomJoin: true, room, canPublish: false, canPublishData: false, canSubscribe: true, hidden: true });
+  return await token.toJwt();
+}
+
 /** Without video the token itself forbids the camera, so no client can switch it on anyway */
 async function makeLivekitToken(identity: string, room: string, video = true): Promise<string> {
   const token = new AccessToken(API_KEY, API_SECRET, { identity });
@@ -1343,13 +1411,14 @@ async function prepareRoom(lesson: LessonRuntime, room: string) {
 
 async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string, room: string) {
   const participant = lesson.participants.get(socketId);
-  if (participant?.bot) { participant.livekitRoom = room; return; }
+  if (participant?.bot) { participant.livekitRoom = room; noteRoom(lesson, participant); return; }
   const socket = io.sockets.sockets.get(socketId);
   if (!socket) return;
   if (!participant) return;
   const token = await makeLivekitToken(participant.name, room, canVideo(lesson, participant.role));
   socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room });
   participant.livekitRoom = room;
+  noteRoom(lesson, participant);
   socket.emit('sharedText', { room, text: lesson.sharedTexts.get(room) ?? '' });
   socket.emit('boardState', boardState(lesson, room));
   console.log(`  [${code}] ${participant.name} -> ${room}`);
@@ -1709,6 +1778,7 @@ io.on('connection', async (socket) => {
       sendEntry(code, lesson, socket);
     } else {
       socket.emit('slides:view', studentSlidesView(lesson));
+      sendEarlierBoards(lesson, socket.id);
     }
     // Media relay (see mediaRelay.ts). Registered right away: a student's first wants come with its first view.
     if (role === 'teacher') {
@@ -1746,6 +1816,15 @@ io.on('connection', async (socket) => {
       broadcastState(code, lesson);
     } else {
       await sendToRoom(code, lesson, socket.id, mainRoom);
+    }
+
+    // «Говорить всем»: while students work in their rooms the teacher can still speak to all of them.
+    // The solo demo has no sound at all.
+    if (!lesson.bots && (role === 'teacher' || role === 'student')) {
+      const voiceRoom = roomName(code, 'voice');
+      await livekit.createRoom({ name: voiceRoom }).catch(() => {});
+      const token = role === 'teacher' ? await makeVoiceSpeakerToken(effectiveName, voiceRoom) : await makeVoiceListenerToken(effectiveName, voiceRoom);
+      socket.emit('teacherVoice', { url: LIVEKIT_WS_URL, token, room: voiceRoom });
     }
 
     socket.on('setCapacity', (n: number) => {
@@ -2203,12 +2282,21 @@ app.delete('/demo/bookings/mine', (req, res) => {
 app.post('/demo/feedback', async (req, res) => {
   const code = verifyDemoToken(bearerToken(req));
   if (!code) { res.status(401).json({ error: 'unauthorized' }); return; }
-  const { rating, comment, email } = req.body ?? {};
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) { res.status(400).json({ error: 'rating is required' }); return; }
+  const { rating: rawRating, comment, email } = req.body ?? {};
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const rating = Number.isInteger(rawRating) && rawRating >= 1 && rawRating <= 5 ? rawRating as number : null;
+  // a mark, or some words, or both
+  if (rawRating != null && rating === null) { res.status(400).json({ error: 'bad rating' }); return; }
+  if (rating === null && !text(comment, 4000)) { res.status(400).json({ error: 'empty feedback' }); return; }
   const saved = await saveDemoFeedback(code, rating, text(comment, 4000), text(email, 200)).then(() => true, () => false);
   if (!saved) { res.status(500).json({ error: 'failed to save feedback' }); return; }
   res.json({ ok: true });
+  // a copy to our box, after the answer: the review is kept whatever the mail does
+  if (canSendFeedback()) {
+    const demo = demos.get(code);
+    sendDemoFeedback({ code, rating, comment: text(comment, 4000), email: text(email, 200), solo: demo?.videoMode === 'solo', reached: demo?.reached ?? null })
+      .catch(e => console.error('demo feedback letter not sent:', (e as Error).message));
+  }
 });
 
 // ---------- «Написать нам»: an error, an idea or a review from our apps, mailed to our box ----------

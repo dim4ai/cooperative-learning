@@ -10,7 +10,7 @@ import { SLIDE_HEIGHT, SLIDE_WIDTH, type Scene } from './slides/model';
 import { SharedBoard } from './SharedBoard';
 import {
   readLesson, releaseLesson, lessonForServer, storedLessonFile, storeLessonFile, forgetLessonFile,
-  NotALessonError, type LocalLesson,
+  NotALessonError, type LocalLesson, type LocalBlock,
 } from './lessonLocal';
 import { serveMedia } from './mediaShare';
 
@@ -168,7 +168,8 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
 
 // ---------- sidebar: open / remove ----------
 
-export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
+/** fixed: the lesson can't be changed here (the solo demo runs its own) */
+export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { material, local, busy, error } = slides;
   const slideCount = material?.blocks.reduce((n, b) => n + (b.slides?.length ?? 0), 0) ?? 0;
@@ -191,6 +192,7 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
+      {!fixed && <>
       <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
       <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
@@ -199,6 +201,7 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
       }}>
         {busy ? 'Открываем…' : material && local ? 'Заменить урок…' : 'Открыть урок…'}
       </button>
+      </>}
       {error && <div style={{ fontSize: 11, color: '#e74c3c', marginTop: 2 }}>{error}</div>}
     </div>
   );
@@ -252,6 +255,7 @@ export function BlockNotes({ slides }: { slides: TeacherSlides }) {
         <div style={noteLabel}>Задание</div>
         <div data-testid="block-task" style={noteText}>{block.task}</div>
       </div>}
+      <EarlierBoardsNote block={block} blocks={local.blocks} />
       <div>
         <div style={noteLabel}>Заметка учителю</div>
         <div data-testid="block-note" style={noteText}>{stepNote || block.teacherNote || 'Здесь заметки нет.'}</div>
@@ -278,7 +282,7 @@ export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { 
       {hasResult && (
         <div data-testid="understood-result" style={{ fontSize: 13, color: '#333' }}>
           {no === 0 && <div>Вопросов нет</div>}
-          {answers.length > 0 && <><span style={{ color: '#1e8e4e' }}>Понятно: {yes}</span> · <span style={{ color: '#d00000' }}>Не понятно: {no}</span></>}
+          {answers.length > 0 && <><span style={{ color: '#1e8e4e' }}>Поняли: {yes}</span> · <span style={{ color: '#d00000' }}>Не поняли: {no}</span></>}
         </div>
       )}
       {canAsk && !understood.asking && (
@@ -448,7 +452,7 @@ export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides
           {scenes.length > 0 ? (<>
             <button onClick={() => go(at - 1)} disabled={at === 0} style={navBtn} title="Предыдущий (←)">←</button>
             <span data-testid="preview-counter">{at + 1} / {scenes.length}</span>
-            <button onClick={() => go(at + 1)} disabled={at >= scenes.length - 1} style={navBtn} title="Следующий (→)">→</button>
+            <button data-hint="preview-next" onClick={() => go(at + 1)} disabled={at >= scenes.length - 1} style={navBtn} title="Следующий (→)">→</button>
           </>) : <span>В этом блоке нет слайдов</span>}
           <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>← → слайды, ↑ ↓ блоки · ученики этого не видят</span>
         </div>
@@ -465,11 +469,24 @@ export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides
           <div style={noteLabel}>Задание</div>
           <div data-testid="preview-task" style={noteText}>{block.task}</div>
         </div>}
+        {block && <EarlierBoardsNote block={block} blocks={blocks} />}
         <div>
           <div style={noteLabel}>Заметка учителю</div>
           <div data-testid="preview-note" style={noteText}>{note || 'Здесь заметки нет.'}</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Which earlier stages' boards the students see in this block (the lesson file says so) */
+function EarlierBoardsNote({ block, blocks }: { block: LocalBlock; blocks: LocalBlock[] }) {
+  const titles = block.boardsFrom.map(id => blocks.find(b => b.id === id)).filter(b => !!b).map(b => `«${b!.title || TYPE_LABELS[b!.type] || 'Без названия'}»`);
+  if (!titles.length) return null;
+  return (
+    <div>
+      <div style={noteLabel}>Ученики видят свои предыдущие доски</div>
+      <div data-testid="earlier-boards-note" style={noteText}>{titles.join(', ')}. Вкладками над доской, только смотреть.</div>
     </div>
   );
 }

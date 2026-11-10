@@ -14,43 +14,70 @@ export const BOTS = [
 export const SOLO_SEATS = 16;
 /** The teacher may change the number of seats, but every bot needs one */
 export const SOLO_MIN_SEATS = 8;
-const SEAT_PAUSE_MS = 2000;
+const SEAT_PAUSE_MS = 4000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
 const COLORS = ['#1971c2', '#2f9e44', '#9c36b5', '#f08c00'];
 
 interface Line { at: number; text: string } // seconds after the stage began
-interface RoomScript { lines: Line[]; call?: { at: number; note: string }; onVisit?: string }
+/** note: what the student asks; reply: what they write after the teacher's visit, if anything */
+interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: who of the dialogue asks ({1} or {2})
+/** lead: the room where this bot sits gets this script. In its texts {1} is the lead and {2} the partner if they sit
+ *  together, else the other one of the room; a line starting with «{1}: » or «{2}: » is said by them, as in a dialogue */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string }
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
 
-/** By room, in room order; a room past the end of the list uses the script from the start of it */
+/** By room, in room order; a room past the end of the list uses the script from the start of it.
+ *  Rooms call some time apart, so the teacher can get to each: three on the individual stage, two in pairs, one in fours
+ *  (client-teacher/src/demoHints.tsx, CALLS counts on that). */
 const SCRIPT: Record<BotStage, RoomScript[]> = {
   individual: [
-    { lines: lines(OBSERVATIONS.slice(0, 4), 5, 8) },
+    { lines: lines(['AD = BC', 'AB = CD'], 5, 8), call: {
+      at: 27, note: 'А стороны и отрезки — это разве не одно и то же?',
+      reply: 'Ещё отрезки: AO, OC, BO, OD' } },
     { lines: lines(OBSERVATIONS.slice(0, 3), 8, 9) },
-    { lines: lines([OBSERVATIONS[1], OBSERVATIONS[0], OBSERVATIONS[4]], 6, 10) },
-    { lines: lines(OBSERVATIONS.slice(0, 5), 4, 7) },
+    { lines: lines(['AD = BC', 'AB = CD', 'угол A и угол C ?'], 3, 4), call: {
+      // no reply: the teacher writes it on her board
+      at: 12, note: 'Я забыла, как записывается равенство углов. Напишите, пожалуйста' } },
+    { lines: lines([OBSERVATIONS[0], '∠A = ∠C'], 6, 10), call: {
+      at: 40, note: 'Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?',
+      reply: '∠BAC = ∠ACD' } },
     { lines: lines(OBSERVATIONS.slice(2, 5), 9, 8) },
-    { lines: lines(['AD = BC ?'], 10, 0), call: { at: 18, note: 'Не понимаю, что считать' },
-      onVisit: 'Считаю клетки: AB — 2 вправо и 4 вверх' },
+    { lines: lines(OBSERVATIONS.slice(0, 5), 4, 7) },
     { lines: lines(OBSERVATIONS.slice(0, 2), 7, 12) },
     { lines: lines(OBSERVATIONS.slice(1, 4), 5, 9) },
   ],
   pairs: [
     { lines: lines(OBSERVATIONS, 4, 6) },
-    { lines: lines([OBSERVATIONS[0], OBSERVATIONS[2], 'AC = BD'], 5, 6),
-      call: { at: 20, note: 'Мы посчитали, что диагонали равны. Так?' },
-      onVisit: 'Проверили по клеткам: AC ≠ BD. Равны AO и OC' },
+    // what the pair said before calling, written down at once: only so the teacher feels how it comes to a call
+    { lead: 'Миша', partner: 'Артём', lines: lines([
+      '{1}: AD = BC',
+      '{2}: AB = CD',
+      '{1}: ∠A = ∠C',
+      '{2}: AB = AO',
+      '{1}: нет, они не равны',
+      '{2}: мне кажется, что равны,\nдавай у учителя спросим',
+      '{1}: давай',
+    ], 2, 0), call: {
+      at: 10, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
     { lines: lines(OBSERVATIONS.slice(1), 6, 7) },
-    { lines: lines(OBSERVATIONS.slice(0, 4), 3, 8) },
+    { lead: 'Тимур', lines: lines([
+      '{1}: AO = OC',
+      '{2}: BO = OD',
+      '{1}: ∠AOB = ∠COD',
+      '{2}: это же вертикальные углы,\nони всегда равны',
+      '{1}: ну и что, они же есть\nв параллелограмме',
+      '{2}: не знаю, давай спросим',
+      '{1}: давай',
+    ], 24, 0), call: {
+      at: 30, by: 1, note: 'Мы спорим, можно ли брать вертикальные углы при пересечении диагоналей. Я думаю, что ∠AOB = ∠COD можно записать, а {2} говорит, что это не свойство параллелограмма. Кто прав?' } },
   ],
   fours: [
-    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 7),
-      call: { at: 20, note: 'Углы на клетках не посчитать, как быть?' },
-      onVisit: 'Углы докажем, а не посчитаем' },
-    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: диагонали делятся пополам', 'Сомневаемся: ∠A = ∠C'], 6, 8) },
+    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), call: {
+      at: 15, note: 'В сторонах уверены, а углы на клетках не посчитать. Как быть?' } },
+    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC', 'Сомневаемся: ∠A = ∠C'], 6, 8) },
   ],
 };
 
@@ -73,13 +100,16 @@ export interface BotHost {
   /** The rooms of this stage, in a stable order */
   rooms(): string[];
   write(room: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
-  call(room: string, note: string): void;
+  /** Names of the bots in a room */
+  members(room: string): string[];
+  call(room: string, note: string, who?: string): void;
 }
 
 export class BotRun {
   private timers = new Set<NodeJS.Timeout>();
   private stageTimers = new Set<NodeJS.Timeout>();
-  private written = new Map<string, number>();
+  private written = new Map<string, { n: number; top: number }>();
+  private names = new Map<string, [string, string]>(); // room → who {1} and {2} are there
   private replies = new Map<string, string>();
   private uid = 0;
 
@@ -91,7 +121,7 @@ export class BotRun {
   }
 
   seatEveryone() {
-    BOTS.forEach((_, i) => this.after(800 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
+    BOTS.forEach((_, i) => this.after(1600 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
   }
 
   /** The teacher sent someone from their seat: as in a real class, they find another one */
@@ -100,14 +130,25 @@ export class BotRun {
     if (i >= 0) this.after(RESEAT_MS, () => this.host.seat(i), this.timers);
   }
 
-  /** One line down the board, each room filling up on its own */
+  private fill(room: string, text: string): string {
+    const [a, b] = this.names.get(room) ?? ['', ''];
+    return text.replaceAll('{1}', a).replaceAll('{2}', b);
+  }
+
+  /** One line down the board, each room filling up on its own; a dialogue line smaller, in the speaker's colour */
   private write(room: string, text: string) {
-    const n = this.written.get(room) ?? 0;
-    this.written.set(room, n + 1);
+    const w = this.written.get(room) ?? { n: 0, top: 60 };
+    const speaker = /^\{([12])\}: /.exec(text)?.[1];
+    const fontSize = speaker ? 30 : 40;
+    const rows = text.split('\n').length;
+    const height = speaker ? rows * 36 + 14 : 72;
+    if (w.top + height > 880) w.top = 60;
     this.host.write(room, {
-      uid: `bot-${room}-${this.uid++}`, type: 'IText', text, left: 860, top: 60 + (n % 11) * 72,
-      originX: 'left', originY: 'top', fontSize: 40, fill: COLORS[n % COLORS.length], fontFamily: 'sans-serif',
+      uid: `bot-${room}-${this.uid++}`, type: 'IText', text: this.fill(room, text), left: speaker ? 760 : 860, top: w.top,
+      originX: 'left', originY: 'top', fontSize, fontFamily: 'sans-serif',
+      fill: speaker ? COLORS[Number(speaker) - 1] : COLORS[w.n % COLORS.length],
     });
+    this.written.set(room, { n: w.n + 1, top: w.top + height });
   }
 
   /** The stage changed: what was going on stops, and the bots start on the new stage's work */
@@ -117,14 +158,28 @@ export class BotRun {
     this.replies.clear();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
     const script = SCRIPT[stage];
-    this.host.rooms().forEach((room, i) => {
-      const part = script[i % script.length];
+    const rooms = this.host.rooms();
+    // a script with a lead goes to that bot's room; the rest, in turn, to the other rooms
+    const parts = new Map<string, RoomScript>();
+    for (const part of script) {
+      const room = part.lead && rooms.find(r => !parts.has(r) && this.host.members(r).includes(part.lead!));
+      if (room) parts.set(room, part);
+    }
+    const rest = script.filter(p => ![...parts.values()].includes(p));
+    rooms.filter(r => !parts.has(r)).forEach((r, i) => parts.set(r, rest.length ? rest[i % rest.length] : script[i % script.length]));
+    rooms.forEach(room => {
+      const part = parts.get(room)!;
+      const members = this.host.members(room);
+      const lead = part.lead && members.includes(part.lead) ? part.lead : members[0] ?? '';
+      // the partner if they sit together; otherwise whoever sits with the lead, so the board matches the pair
+      const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
+      this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
       if (part.call) {
-        const { at, note } = part.call;
+        const { at, note, reply, by } = part.call;
         this.after(at * 1000, () => {
-          if (part.onVisit) this.replies.set(room, part.onVisit);
-          this.host.call(room, note);
+          if (reply) this.replies.set(room, reply);
+          this.host.call(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
         });
       }
     });

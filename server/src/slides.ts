@@ -39,6 +39,8 @@ export interface Block {
   task: string;
   /** the sheet is only to look at: students can't write on it */
   sheetReadOnly: boolean;
+  /** earlier work blocks whose boards students may look at here (each sees their own room's) */
+  boardsFrom: string[];
   slides: Scene[];
 }
 
@@ -104,8 +106,15 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
       .filter((s): s is Scene => !!s && typeof s === 'object' && Array.isArray((s as Scene).objects))
       // `note` is the teacher's own: students get scenes as they are here, so it must not stay
       .map(({ note: _note, ...s }: Scene & { note?: unknown }) => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
-    blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), task: str(raw.task, 4000), sheetReadOnly: raw.sheetReadOnly === true, slides });
+    blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), task: str(raw.task, 4000), sheetReadOnly: raw.sheetReadOnly === true,
+      boardsFrom: Array.isArray(raw.boardsFrom) ? raw.boardsFrom.filter((id): id is string => typeof id === 'string').slice(0, 50) : [], slides });
   }
+  // only work blocks that come before: those are the ones that have been written on by then
+  const WORK = ['individual', 'pairs', 'fours'];
+  blocks.forEach((bl, i) => {
+    const before = new Set(blocks.slice(0, i).filter(b => WORK.includes(b.type)).map(b => b.id));
+    bl.boardsFrom = WORK.includes(bl.type) ? [...new Set(bl.boardsFrom)].filter(id => before.has(id)) : [];
+  });
 
   const used = new Set<string>();
   for (const bl of blocks) for (const s of bl.slides) for (const o of allObjects(s.objects)) if (typeof o.mediaName === 'string') used.add(o.mediaName);

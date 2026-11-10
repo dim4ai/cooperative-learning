@@ -13,6 +13,8 @@ export interface LocalBlock {
   teacherNote: string;
   task: string;
   sheetReadOnly: boolean;
+  /** earlier work blocks whose boards students may look at in this one */
+  boardsFrom: string[];
   duration: number | null;
 }
 
@@ -60,6 +62,7 @@ export async function readLesson(file: Blob): Promise<LocalLesson> {
     teacherNote: typeof b.teacherNote === 'string' ? b.teacherNote : '',
     task: typeof b.task === 'string' ? b.task : '',
     sheetReadOnly: b.sheetReadOnly === true,
+    boardsFrom: Array.isArray(b.boardsFrom) ? b.boardsFrom.filter((x: unknown): x is string => typeof x === 'string') : [],
     duration: typeof b.duration === 'number' ? b.duration : null,
     // layer flags baked into objects: the presenter and the server work per object
     slides: [...(b.slides ?? []), ...(b.scene ? [b.scene] : [])].filter(s => s && Array.isArray(s.objects)).map(bakeLayers),
@@ -90,8 +93,8 @@ export function releaseLesson(l: LocalLesson | null) {
 
 /** What the server gets: structure and catalog, no media */
 export function lessonForServer(l: LocalLesson) {
-  const blocks = l.blocks.map(({ id, type, title, task, sheetReadOnly, slides }) => ({
-    id, type, title, task, sheetReadOnly,
+  const blocks = l.blocks.map(({ id, type, title, task, sheetReadOnly, boardsFrom, slides }) => ({
+    id, type, title, task, sheetReadOnly, boardsFrom,
     slides: slides.map(({ note: _note, ...scene }) => scene), // notes are the teacher's own
   }));
   return { id: l.id, title: l.title, blocks, media: l.catalog };

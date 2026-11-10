@@ -53,12 +53,15 @@ export interface IndividualBlock extends BlockBase {
   type: 'individual'
   task: string
   sheetReadOnly?: boolean
+  /** earlier work blocks whose boards each student may look at here (their own, their pair's, their four's) */
+  boardsFrom?: string[]
 }
 
 export interface PairsBlock extends BlockBase {
   type: 'pairs'
   task: string
   sheetReadOnly?: boolean
+  boardsFrom?: string[]
   technique: string
 }
 
@@ -66,6 +69,7 @@ export interface FoursBlock extends BlockBase {
   type: 'fours'
   task: string
   sheetReadOnly?: boolean
+  boardsFrom?: string[]
   technique: string
 }
 
@@ -91,6 +95,8 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   pairs: 'Парная работа',
   fours: 'Работа в четвёрках',
 }
+
+export const isWorkBlock = (b: LessonBlock) => b.type === 'individual' || b.type === 'pairs' || b.type === 'fours'
 
 export const TECHNIQUES = [
   { value: '', label: '— не указано —' },

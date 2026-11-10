@@ -7,6 +7,8 @@ import type { Scene } from './types'
 
 interface Props {
   block: LessonBlock
+  /** work blocks before this one: their boards can be shown here */
+  earlier: LessonBlock[]
   media: Media
   onAddMedia: (name: string, blob: Blob) => void
   onChange: (block: LessonBlock) => void
@@ -16,7 +18,7 @@ interface Props {
   onError: (text: string) => void
 }
 
-export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDelete, onError }: Props) {
+export function BlockCard({ block, earlier, media, onAddMedia, onChange, onUpdate, onDelete, onError }: Props) {
   function attach(files: File[]) {
     if (!files.length) return
     const taken: Media = { ...media }
@@ -115,6 +117,31 @@ export function BlockCard({ block, media, onAddMedia, onChange, onUpdate, onDele
             rows={5}
             style={{ ...inputStyle, resize: 'vertical' }}
           />
+        </Field>
+      )}
+
+      {hasTask && earlier.length > 0 && (
+        <Field label="Доски с прошлых этапов (видят ученики)">
+          <div data-testid="boards-from" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {earlier.map(b => {
+              const from: string[] = (block as any).boardsFrom ?? []
+              const on = from.includes(b.id)
+              return (
+                <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => onChange({ ...block, boardsFrom: on ? from.filter(id => id !== b.id) : [...from, b.id] } as LessonBlock)}
+                  />
+                  {b.title || BLOCK_LABELS[b.type]}
+                  <span style={{ color: '#9ca3af' }}>· {BLOCK_LABELS[b.type].toLowerCase()}</span>
+                </label>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+            Ученик видит над доской вкладки с тем, что написал на отмеченных этапах сам, его пара или четвёрка. Только смотреть.
+          </div>
         </Field>
       )}
 

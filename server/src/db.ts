@@ -119,6 +119,8 @@ export async function migrate(): Promise<void> {
       email text NOT NULL DEFAULT '',
       created_at timestamptz NOT NULL DEFAULT now()
     )`);
+    // a review may be words only, without a mark
+    await pool.query(`ALTER TABLE demo_feedback ALTER COLUMN rating DROP NOT NULL`);
     await pool.query(`CREATE TABLE IF NOT EXISTS demo_ip_stats (
       day date NOT NULL,
       ip_hash text NOT NULL,
@@ -330,7 +332,7 @@ export async function loadCurrentBookings(): Promise<BookingRecord[]> {
   }));
 }
 
-export async function saveDemoFeedback(code: string, rating: number, comment: string, email: string): Promise<void> {
+export async function saveDemoFeedback(code: string, rating: number | null, comment: string, email: string): Promise<void> {
   await pool.query(
     `INSERT INTO demo_feedback (code, rating, comment, email) VALUES ($1, $2, $3, $4)
      ON CONFLICT (code) DO UPDATE SET rating = $2, comment = $3, email = $4, created_at = now()`,

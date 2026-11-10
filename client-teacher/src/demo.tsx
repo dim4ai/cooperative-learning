@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { setHintsOff, useHintsOff } from './demoHintsOff';
 
 export interface DemoTimes { endsAt: number; noStudentsAt: number | null; solo?: boolean }
-export interface DemoEnd { token: string; reason: string | null }
+export interface DemoEnd { token: string; reason: string | null; solo?: boolean }
 
 const WARN_LAST_MS = 5 * 60 * 1000;
 
@@ -43,6 +43,23 @@ function endText({ reason }: DemoEnd): string {
     : 'Демо-урок завершён.';
 }
 
+const EDITOR_URL = 'https://editor.co-learn.ru';
+
+/** After the lesson with the simulated class: what it was about, and where to go from here */
+function SoloConclusion({ onBook }: { onBook: () => void }) {
+  const p: CSSProperties = { margin: 0 };
+  return (
+    <div data-testid="demo-conclusion" style={{ fontSize: 14, lineHeight: 1.5, color: '#333', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={p}>Вы попробовали демо-урок в интернет-классе Co-Learn с приёмами кооперативного обучения.</p>
+      <p style={p}>Теперь вы знаете, как реализованы основные этапы занятия: объяснение, индивидуальная работа и работа в группах. Сочетайте их так, как нужно именно вашему уроку.</p>
+      <p style={p}>Смысл кооперативного обучения в том, чтобы каждый ученик был занят весь урок и мог обсудить новое с товарищами: сначала думает сам, потом объясняет соседу, потом договаривается в группе. Учитель задаёт ход урока и подходит туда, где нужна помощь.</p>
+      <p style={p}>У онлайн-формата есть и свои преимущества. Пары и четвёрки собираются автоматически, и никто не путает, с кем он работает. На самостоятельной работе ученики не видят чужих тетрадей и не слышат подсказок, поэтому каждый думает сам. А если вам нужно сделать объявление, тишину в классе можно вернуть одной кнопкой.</p>
+      <p style={p}>Урок для Co-Learn готовится в свободно доступном редакторе <a href={EDITOR_URL} target="_blank" rel="noreferrer">editor.co-learn.ru</a>: слайды, задания, листы учеников и этапы урока.</p>
+      <p style={p}>Расскажите, что вам понравилось, а что было неудобно или непонятно. Если хотите провести такое занятие со своим классом, <a href="#" onClick={e => { e.preventDefault(); onBook(); }}>забронируйте время</a>: ученики войдут по коду, без регистрации.</p>
+    </div>
+  );
+}
+
 // The point of the demo: what the teacher thought of it
 export function DemoFinished({ end, onAgain }: { end: DemoEnd; onAgain: () => void }) {
   const [rating, setRating] = useState(0);
@@ -52,6 +69,8 @@ export function DemoFinished({ end, onAgain }: { end: DemoEnd; onAgain: () => vo
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
 
+  const ready = rating > 0 || comment.trim() !== ''; // a mark, or some words
+
   async function send() {
     setSending(true);
     setError('');
@@ -59,7 +78,7 @@ export function DemoFinished({ end, onAgain }: { end: DemoEnd; onAgain: () => vo
       const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${end.token}` },
-        body: JSON.stringify({ rating, comment, email }),
+        body: JSON.stringify({ rating: rating || null, comment, email }),
       });
       if (res.ok) setSent(true);
       else setError('Не удалось отправить отзыв');
@@ -72,9 +91,12 @@ export function DemoFinished({ end, onAgain }: { end: DemoEnd; onAgain: () => vo
 
   return (
     <div style={screen}>
-      <div style={{ width: 400, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h2 style={{ margin: 0 }}>Спасибо, что попробовали</h2>
-        <div data-testid="demo-end-text" style={{ color: '#666', fontSize: 14, lineHeight: 1.4 }}>{endText(end)}</div>
+      <div style={{ width: end.solo ? 600 : 400, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={{ margin: 0, textAlign: 'center' }}>Спасибо, что попробовали</h2>
+        {/* after the simulated class, why it ended matters only if it wasn't the teacher's own «Завершить урок» */}
+        {(!end.solo || end.reason === 'time is up' || end.reason === 'no teacher') &&
+          <div data-testid="demo-end-text" style={{ color: '#666', fontSize: 14, lineHeight: 1.4 }}>{endText(end)}</div>}
+        {end.solo && <SoloConclusion onBook={onAgain} />}
         {sent ? <div data-testid="demo-feedback-sent" style={{ color: '#27ae60' }}>Отзыв получен. Спасибо!</div> : <>
           <div style={{ fontSize: 14 }}>Как вам урок?</div>
           <div role="radiogroup" aria-label="Оценка" style={{ display: 'flex', gap: 6 }}>
@@ -90,9 +112,9 @@ export function DemoFinished({ end, onAgain }: { end: DemoEnd; onAgain: () => vo
           <input value={email} onChange={e => setEmail(e.target.value)} maxLength={200} autoCapitalize="none"
             placeholder="Почта, если хотите получить ответ" style={input} />
           {error && <div style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
-          <button data-testid="demo-feedback-send" onClick={send} disabled={!rating || sending} style={{
+          <button data-testid="demo-feedback-send" onClick={send} disabled={!ready || sending} style={{
             padding: '10px 0', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', fontSize: 15,
-            cursor: 'pointer', opacity: !rating || sending ? 0.5 : 1,
+            cursor: ready && !sending ? 'pointer' : 'default', opacity: !ready || sending ? 0.5 : 1,
           }}>{sending ? 'Отправляем…' : 'Отправить отзыв'}</button>
         </>}
         <button onClick={onAgain} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>
@@ -124,7 +146,7 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
   return (
     <div style={screen}>
       <div style={{ width: 460, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h2 style={{ margin: 0 }}>Попробовать Co-Learn</h2>
+        <h2 style={{ margin: 0, textAlign: 'center' }}>Попробовать Co-Learn</h2>
         <div style={card}>
           <b>Одному, прямо сейчас</b>
           <div style={cardText}>
@@ -179,28 +201,41 @@ const GUIDE: Record<string, { title: string; steps: string[]; short?: string[] }
     'Ваша задача — собрать класс за две парты и начать урок.',
   ] },
   group: { title: 'Объяснение', steps: [
-    'Слайд уже на доске, его видят все ученики. Рисуйте прямо поверх него и листайте стрелками.',
-    'Скрытый ответ откройте инструментом ☝, когда ученики подумают.',
-    'В конце нажмите «Всем понятно?». Красные рамки покажут, кто не понял, и останутся на карте.',
-    'Затем выберите следующий блок в плане слева.',
+    'Это этап, на котором вы объясняете материал сразу всему классу. Ученики слышат вас, видят слайды, которые вы показываете.',
+    'Вы можете рисовать поверх них, и ученики увидят эти изменения в реальном времени.',
+    'Сейчас ученики не изолированы по группам, а находятся в едином пространстве. Они могут задавать вопросы или отвечать, включив микрофон.',
+    'Листайте слайды стрелками. Скрытый ответ откройте инструментом ☝, когда ученики подумают.',
+    'После объяснения нажмите «Всем понятно?»: красные рамки покажут, кто не понял. Затем выберите следующий блок в плане слева.',
   ], short: [
-    'Слайд на доске видят все ученики. Рисуйте прямо поверх него.',
-    'Объясните, проверьте, всё ли понятно, и отпустите класс работать.',
+    'Это этап, на котором вы объясняете материал сразу всему классу. Ученики слышат вас, видят слайды, которые вы показываете.',
+    'Вы можете рисовать поверх них, и ученики увидят эти изменения в реальном времени.',
+    'Сейчас ученики не изолированы по группам, а находятся в едином пространстве. Они могут задавать вопросы или отвечать, включив микрофон.',
+    'После объяснения можете провести опрос, поняли ли ученики материал, и перейти к следующему этапу.',
   ] },
   individual: { title: 'Индивидуальная работа', steps: [
-    'Каждый думает сам, у каждого своя доска. Вы не прерываете класс.',
-    'Кто-то позовёт вас: на его месте появится 🔔. Нажмите на колокольчик, и вы окажетесь у доски ученика.',
-    'Напишите подсказку и вернитесь кнопкой «← Назад». Затем слева выберите «Пары».',
+    'На этом этапе ученики работают самостоятельно, у каждого своя доска. Ученики не могут общаться друг с другом.',
+    'Если кто-то застрянет, то он позовёт вас: на его месте появится 🔔. Нажмите на колокольчик — вы подойдёте к нему индивидуально, не прерывая работу остальных.',
+    'Не называйте ответ — задайте вопрос, который поможет дойти самому. Вернитесь кнопкой «← Назад».',
+    'Когда ответите всем, кто звал, выберите слева следующий блок.',
+  ], short: [
+    'На этом этапе ученики работают самостоятельно, у каждого своя доска. Ученики не могут общаться друг с другом.',
+    'Если кто-то застрянет, то он позовёт вас. Вы сможете подойти к нему индивидуально, не прерывая работу остальных.',
   ] },
   pairs: { title: 'Пары', steps: [
-    'Ученики сами разошлись по парам, у пары общая доска.',
-    'В живом уроке здесь говорит весь класс сразу, но каждая пара слышит только себя.',
-    'Одна пара ошибётся и позовёт вас. Нажмите 🔔, подскажите на доске и дождитесь исправления. Затем выберите «Четвёрки».',
+    'Ученики автоматически разбиваются по парам. Они могут общаться друг с другом в паре, и у них есть общая доска, на которой они совместно могут делать записи.',
+    'Каждая пара слышит только себя. Если возникнут трудности, она сможет позвать вас на помощь, не отвлекая остальных: на её месте появится 🔔.',
+    'Нажмите на колокольчик, чтобы подойти к паре. После ответа вернитесь кнопкой «← Назад», а когда ответите всем, выберите слева следующий блок.',
+  ], short: [
+    'Ученики автоматически разбиваются по парам. Они могут общаться друг с другом в паре, и у них есть общая доска, на которой они совместно могут делать записи.',
+    'Каждая пара слышит только себя. Если возникнут трудности, она сможет позвать вас на помощь, не отвлекая остальных.',
   ] },
   fours: { title: 'Четвёрки', steps: [
-    'Пары объединились: каждая сравнивает свой список с соседней.',
-    'Нажмите 🔔 у группы, которая зовёт. Остальные продолжают работать.',
+    'Пары автоматически объединяются в четвёрки. Общение идёт уже внутри четвёрки с использованием общей доски.',
+    'Группа также может позвать учителя для помощи: на её месте появится 🔔. Нажмите на колокольчик, чтобы подойти.',
     'Это весь цикл урока. Нажмите слева «Завершить урок» и расскажите, что думаете.',
+  ], short: [
+    'Пары автоматически объединяются в четвёрки. Общение идёт уже внутри четвёрки с использованием общей доски.',
+    'Группа также может позвать учителя для помощи.',
   ] },
 };
 
@@ -217,7 +252,8 @@ export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) 
       {hintsOff && <button data-testid="demo-hints-on" onClick={() => setHintsOff(false)} style={{
         alignSelf: 'flex-start', border: 'none', background: 'transparent', color: '#4a90e2', cursor: 'pointer', fontSize: 12, padding: 0,
       }}>Показывать подсказки у кнопок</button>}
-      {calls.map(note => (
+      {/* with the hints on, the bell has its own bubble and the question is shown at the board */}
+      {hintsOff && calls.map(note => (
         <div key={note} data-testid="solo-call" style={{ padding: 10, borderRadius: 8, background: '#fdf1d6', color: '#8a5a00' }}>
           <div style={{ fontSize: 11, marginBottom: 2 }}>Вас зовут</div>«{note}»
         </div>

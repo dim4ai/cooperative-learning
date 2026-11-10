@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { socket } from './socket';
 import { SharedBoard } from './SharedBoard';
+import { Board, type BoardLink, type BoardObject } from './slides/Board';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
 import { sceneMediaNames } from './slides/model';
@@ -22,8 +23,18 @@ export type SlidesView = (
   readOnly?: boolean;
 };
 
+/** Boards of earlier stages the lesson shows in this one: what this student's room wrote there */
+export interface EarlierBoards {
+  blocks: { id: string; title: string; type: string; sheets: { scene: Scene | null; objects: BoardObject[] }[] }[];
+  media: Record<string, MediaInfo>;
+}
+const NO_EARLIER: EarlierBoards = { blocks: [], media: {} };
+
 export interface StudentSlides {
   view: SlidesView;
+  earlier: EarlierBoards;
+  /** a picture of an earlier sheet by name; asks for it if it isn't here */
+  resolveEarlier: (name: string) => string | undefined;
   positions: Positions;
   resolve: (name: string) => string | undefined;
   /** media of the current slide not here yet: 0..1 of its bytes received; null if nothing is missing */
@@ -51,6 +62,8 @@ function sceneHashes(view: SlidesView, which: 'scene' | 'next'): string[] {
 export function useStudentSlides(joined: boolean): StudentSlides {
   const [view, setView] = useState<SlidesView>(NONE);
   const [positions, setPositions] = useState<Positions>({});
+  const [earlier, setEarlier] = useState<EarlierBoards>(NO_EARLIER);
+  const earlierRef = useRef<EarlierBoards>(NO_EARLIER);
   const [, setTick] = useState(0); // re-render when files arrive / progress moves
   const sceneId = useRef<string | null>(null);
   const viewRef = useRef<SlidesView>(NONE);
@@ -87,6 +100,7 @@ export function useStudentSlides(joined: boolean): StudentSlides {
       fresh = false;
       wantMissing();
     };
+    const onEarlier = (e: EarlierBoards) => { earlierRef.current = e; setEarlier(e); };
     const onMove = ({ sceneId: sid, uid, left, top }: { sceneId: string; uid: string; left: number; top: number }) => {
       if (sid === sceneId.current) setPositions(p => ({ ...p, [uid]: { left, top } }));
     };
@@ -113,6 +127,7 @@ export function useStudentSlides(joined: boolean): StudentSlides {
     socket.on('connect', onConnect);
     socket.on('slides:view', onView);
     socket.on('slides:move', onMove);
+    socket.on('earlierBoards', onEarlier);
     socket.on('media:begin', onBegin);
     socket.on('media:chunk', onChunk);
     socket.on('media:abort', onAbort);
@@ -121,6 +136,7 @@ export function useStudentSlides(joined: boolean): StudentSlides {
       socket.off('connect', onConnect);
       socket.off('slides:view', onView);
       socket.off('slides:move', onMove);
+      socket.off('earlierBoards', onEarlier);
       socket.off('media:begin', onBegin);
       socket.off('media:chunk', onChunk);
       socket.off('media:abort', onAbort);
@@ -130,6 +146,7 @@ export function useStudentSlides(joined: boolean): StudentSlides {
       incoming.current.clear();
       viewRef.current = NONE;
       setView(NONE); setPositions({});
+      earlierRef.current = NO_EARLIER; setEarlier(NO_EARLIER);
       sceneId.current = null;
     };
   }, [joined, wantMissing, bump]);
@@ -138,6 +155,14 @@ export function useStudentSlides(joined: boolean): StudentSlides {
     const v = viewRef.current;
     const h = v.active ? v.media[name]?.hash : undefined;
     return h ? files.current.get(h)?.url : undefined;
+  }, []);
+
+  const resolveEarlier = useCallback((name: string) => {
+    const h = earlierRef.current.media[name]?.hash;
+    if (!h) return undefined;
+    const f = files.current.get(h);
+    if (!f && !incoming.current.has(h)) socket.emit('media:want', { hashes: [h] });
+    return f?.url;
   }, []);
 
   const current = sceneHashes(view, 'scene');
@@ -151,12 +176,16 @@ export function useStudentSlides(joined: boolean): StudentSlides {
   }
   const readyKey = `${current.length - missing.length}`;
 
-  return { view, positions, resolve, loading, readyKey };
+  const earlierReady = Object.values(earlier.media).filter(m => files.current.has(m.hash)).length;
+  return { view, earlier, resolveEarlier, positions, resolve, loading, readyKey: `${readyKey}:${earlierReady}` };
 }
 
-/** A work block's board: the task above it, the sheet under what the group writes */
+/** A work block's board: the task above it, the sheet under what the group writes;
+ *  tabs with the boards of earlier stages when the lesson shows them here */
 export function WorkBoard({ slides }: { slides: StudentSlides }) {
-  const { view } = slides;
+  const { view, earlier } = slides;
+  const [tab, setTab] = useState<string | null>(null); // null: the board of now
+  const shown = earlier.blocks.find(b => b.id === tab);
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
       {view.task && (
@@ -165,8 +194,20 @@ export function WorkBoard({ slides }: { slides: StudentSlides }) {
           fontSize: 15, lineHeight: 1.4, color: '#222', background: '#f1f5fb', borderRadius: 6,
         }}>{view.task}</div>
       )}
+      {earlier.blocks.length > 0 && (
+        <div data-testid="board-tabs" style={{ flexShrink: 0, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <BoardTab on={!shown} onClick={() => setTab(null)} testId="board-tab-now">Сейчас</BoardTab>
+          {earlier.blocks.map(b => (
+            <BoardTab key={b.id} on={shown?.id === b.id} onClick={() => setTab(b.id)} testId="board-tab-earlier">
+              {b.title || STAGE_TITLES[b.type] || 'Прошлый этап'}
+            </BoardTab>
+          ))}
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0 }}>
-        <SharedBoard readOnly={view.readOnly} underlay={view.active ? width => <SlideUnderlay slides={slides} width={width} /> : undefined} />
+        {shown
+          ? <EarlierBoard key={shown.id} block={shown} slides={slides} />
+          : <SharedBoard readOnly={view.readOnly} underlay={view.active ? width => <SlideUnderlay slides={slides} width={width} /> : undefined} />}
       </div>
     </div>
   );
@@ -194,6 +235,43 @@ export function SlideUnderlay({ slides, width }: { slides: StudentSlides; width:
       {slides.loading !== null && (
         <div data-testid="slide-loading" style={{ position: 'absolute', bottom: 6, left: 8, fontSize: 12, lineHeight: 1, color: '#999' }}>
           загружаются картинки… {Math.round(slides.loading * 100)}%
+        </div>
+      )}
+    </div>
+  );
+}
+
+const STAGE_TITLES: Record<string, string> = { individual: 'Индивидуальная работа', pairs: 'Пары', fours: 'Четвёрки' };
+
+function BoardTab({ on, onClick, testId, children }: { on: boolean; onClick: () => void; testId: string; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} data-testid={testId} style={{
+      padding: '4px 12px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+      border: on ? '1px solid #4a90e2' : '1px solid #d5dbe3',
+      background: on ? '#e7f1fc' : '#fff', color: '#222', fontWeight: on ? 600 : 400,
+    }}>{children}</button>
+  );
+}
+
+/** An earlier stage's board as it was left: only to look at, sheet by sheet */
+function EarlierBoard({ block, slides }: { block: EarlierBoards['blocks'][number]; slides: StudentSlides }) {
+  const [page, setPage] = useState(0);
+  const sheet = block.sheets[Math.min(page, block.sheets.length - 1)];
+  const link: BoardLink = { send: () => {}, subscribe: (_op, onState) => { onState(sheet.objects); return () => {}; } };
+  const scene = sheet.scene;
+  return (
+    <div data-testid="earlier-board" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Board key={page} role="student" readOnly link={link} underlay={scene ? width => (
+          <SlidePlayer key={`${scene.id}:${slides.readyKey}`} scene={scene} resolveMedia={slides.resolveEarlier} role="student"
+            revealed={NO_REVEALED} canDrag={false} width={width} />
+        ) : undefined} />
+      </div>
+      {block.sheets.length > 1 && (
+        <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, padding: 4, fontSize: 13 }}>
+          <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>←</button>
+          <span>{page + 1} / {block.sheets.length}</span>
+          <button disabled={page >= block.sheets.length - 1} onClick={() => setPage(p => p + 1)}>→</button>
         </div>
       )}
     </div>

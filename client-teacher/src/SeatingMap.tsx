@@ -195,7 +195,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               }}>💬 Подойти</button>
             )}
             {isGroupCalling && (
-              <div
+              <div data-calling-room={foursRoom}
                 onClick={() => onJoinPair?.(foursRoom)}
                 style={{
                   position: 'absolute', left: '50%', top: '50%',
@@ -279,7 +279,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                           style={{ position: 'absolute', right: 4, top: 4, fontSize: 18, zIndex: 3, cursor: 'pointer' }}>💬</div>
                       )}
                       {isSeatCalling && (
-                        <div
+                        <div data-calling-room={individualRoom!}
                           onClick={e => { e.stopPropagation(); onJoinPair?.(individualRoom!); }}
                           style={{
                             position: 'absolute', right: 4, top: 4,
@@ -301,7 +301,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               );
             })}
               {isCalling && (
-                <div
+                <div data-calling-room={pairRoom}
                   onClick={() => onJoinPair?.(pairRoom)}
                   style={{
                     position: 'absolute', left: '50%', top: '50%',

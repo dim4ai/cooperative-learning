@@ -265,6 +265,18 @@ function PracticeArea({ error, earlyCode, media, onMedia, onJoin }: { error: str
   );
 }
 
+/** «Говорит учитель» while the teacher speaks to everyone */
+function TeacherVoiceBanner() {
+  const tracks = useTracks([Track.Source.Microphone]);
+  if (!tracks.some(t => t.publication && !t.publication.isMuted)) return null;
+  return (
+    <div data-testid="teacher-voice" style={{
+      position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, padding: '6px 16px', borderRadius: 16,
+      background: '#e67e22', color: '#fff', fontSize: 14, fontWeight: 'bold', boxShadow: '0 2px 8px rgba(0,0,0,0.25)', pointerEvents: 'none',
+    }}>🔊 Говорит учитель — для всего класса</div>
+  );
+}
+
 export default function App() {
   if (isBoardOnly) {
     const readOnly = new URLSearchParams(window.location.search).get('readonly') === '1';
@@ -284,6 +296,8 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
   const [monitor, setMonitor] = useState<LivekitInfo | null>(null);
+  // the teacher speaking to the whole class during work in rooms: listened to all lesson long
+  const [teacherVoice, setTeacherVoice] = useState<LivekitInfo | null>(null);
   const [, setSharedText] = useState('');
   const [seats, setSeats] = useState<Seat[]>([]);
   const [poll, setPoll] = useState<{ question: string; options: string[]; myVote: number | null } | null>(null);
@@ -360,6 +374,7 @@ export default function App() {
     });
     socket.on('seats', setSeats);
     socket.on('monitor', (info: LivekitInfo) => setMonitor(info));
+    socket.on('teacherVoice', (info: LivekitInfo) => setTeacherVoice(info));
     socket.on('livekit', (info: LivekitInfo) => {
       setLivekit(info);
       setSharedText('');
@@ -378,6 +393,7 @@ export default function App() {
       setWaitingForLesson(false);
       setLivekit(null);
       setMonitor(null);
+      setTeacherVoice(null);
       setLessonState({ stage: 'waiting', timerEndsAt: null, participants: [] });
       setJoinError('Урок завершён');
     });
@@ -456,6 +472,7 @@ export default function App() {
     setWaitingForLesson(false);
     setLivekit(null);
     setMonitor(null);
+    setTeacherVoice(null);
     setLessonState({ stage: 'waiting', timerEndsAt: null, participants: [] });
     setJoinError('');
   }
@@ -564,6 +581,14 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, overflow: 'hidden' }}>
+        {/* The teacher's voice to the whole class: heard over the room's own talk */}
+        {teacherVoice && (
+          <LiveKitRoom key={'voice-' + teacherVoice.token} serverUrl={teacherVoice.url} token={teacherVoice.token}
+            connect={true} audio={false} video={false} style={{ display: 'contents' }}>
+            <RoomAudioRenderer />
+            <TeacherVoiceBanner />
+          </LiveKitRoom>
+        )}
         {/* Silent monitor connection to main-room so teacher can see us during pair work */}
         {monitor && livekit && livekit.room !== monitor.room && (
           <LiveKitRoom

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonBlock, LessonFile, LessonMeta, BlockType } from './types'
-import { BLOCK_LABELS, normalizeBlocks, usedMediaNames } from './types'
+import { BLOCK_LABELS, normalizeBlocks, usedMediaNames, isWorkBlock } from './types'
 import { BlockCard } from './BlockCard'
 import { MetaPanel } from './MetaPanel'
 import { nanoid } from './nanoid'
@@ -274,7 +274,7 @@ export default function App() {
       {/* Right: editor area */}
       <div style={{ flex: 1, overflow: 'auto', background: '#f6efe4' }}>
         {selected
-          ? <BlockCard key={selected.id} block={selected} media={media} onAddMedia={addMedia} onChange={updateBlock} onUpdate={fn => updateBlockWith(selected.id, fn)} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
+          ? <BlockCard key={selected.id} block={selected} earlier={blocks.slice(0, blocks.indexOf(selected)).filter(isWorkBlock)} media={media} onAddMedia={addMedia} onChange={updateBlock} onUpdate={fn => updateBlockWith(selected.id, fn)} onDelete={() => deleteBlock(selected.id)} onError={t => flash(t, true)} />
           : <MetaPanel meta={meta} onChange={m => { setMeta(m); setDirty(true) }} />
         }
       </div>
