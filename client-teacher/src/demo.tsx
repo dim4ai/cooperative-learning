@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { setHintsOff, useHintsOff } from './demoHintsOff';
 
 export interface DemoTimes { endsAt: number; noStudentsAt: number | null; solo?: boolean }
 export interface DemoEnd { token: string; reason: string | null }
@@ -164,7 +165,8 @@ export async function startSolo(): Promise<{ code: string; token: string } | { e
   }
 }
 
-const GUIDE: Record<string, { title: string; steps: string[] }> = {
+/** short: the steps when the hints beside the buttons are on and say where to press */
+const GUIDE: Record<string, { title: string; steps: string[]; short?: string[] }> = {
   waiting: { title: 'Рассадка', steps: [
     'Ученики заходят и садятся как попало. Ряд за партой — это пара, вся парта — четвёрка.',
     'Соберите их за две парты: кликните по ученику, потом по свободному месту или по другому ученику, и они поменяются местами.',
@@ -172,12 +174,18 @@ const GUIDE: Record<string, { title: string; steps: string[] }> = {
     'Мест в классе можно поменять слева: от 8 до 32.',
     'Пока ученики рассаживаются, пролистайте урок во вкладке «Просмотр урока» наверху.',
     'Когда все будут на местах, нажмите слева «Начать урок».',
+  ], short: [
+    'Ученики заходят и садятся как попало. Ряд за партой — это пара, вся парта — четвёрка.',
+    'Ваша задача — собрать класс за две парты и начать урок.',
   ] },
   group: { title: 'Объяснение', steps: [
     'Слайд уже на доске, его видят все ученики. Рисуйте прямо поверх него и листайте стрелками.',
     'Скрытый ответ откройте инструментом ☝, когда ученики подумают.',
     'В конце нажмите «Всем понятно?». Красные рамки покажут, кто не понял, и останутся на карте.',
     'Затем выберите следующий блок в плане слева.',
+  ], short: [
+    'Слайд на доске видят все ученики. Рисуйте прямо поверх него.',
+    'Объясните, проверьте, всё ли понятно, и отпустите класс работать.',
   ] },
   individual: { title: 'Индивидуальная работа', steps: [
     'Каждый думает сам, у каждого своя доска. Вы не прерываете класс.',
@@ -199,11 +207,16 @@ const GUIDE: Record<string, { title: string; steps: string[] }> = {
 /** The solo demo has nobody to explain it: this says what to do on each stage */
 export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) {
   const part = GUIDE[stage] ?? GUIDE.waiting;
+  const hintsOff = useHintsOff();
+  const steps = !hintsOff && part.short ? part.short : part.steps;
   return (
     <div data-testid="solo-guide" style={{ fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
       <b style={{ fontSize: 15 }}>{part.title}</b>
-      {part.steps.map(step => <div key={step}>{step}</div>)}
+      {steps.map(step => <div key={step}>{step}</div>)}
+      {hintsOff && <button data-testid="demo-hints-on" onClick={() => setHintsOff(false)} style={{
+        alignSelf: 'flex-start', border: 'none', background: 'transparent', color: '#4a90e2', cursor: 'pointer', fontSize: 12, padding: 0,
+      }}>Показывать подсказки у кнопок</button>}
       {calls.map(note => (
         <div key={note} data-testid="solo-call" style={{ padding: 10, borderRadius: 8, background: '#fdf1d6', color: '#8a5a00' }}>
           <div style={{ fontSize: 11, marginBottom: 2 }}>Вас зовут</div>«{note}»

@@ -11,6 +11,7 @@ import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, 
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
 import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
 import { StartLessonDialog } from './StartLessonDialog';
@@ -760,6 +761,7 @@ export default function App() {
 
         {state.stage === 'waiting' && (
           <button
+            data-hint="start-lesson"
             onClick={() => { if (unseated.length || !slides.material) setStartWarning(true); else startLesson(); }}
             style={{
               marginTop: GROUP_GAP, padding: '10px 6px', borderRadius: 6, border: 'none',
@@ -839,6 +841,8 @@ export default function App() {
         </div>
       </div>
 
+      {demo?.solo && <DemoHints stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
+        previewOpen={preview} slides={slides} mapOpen={mapOpen} />}
       {((demo?.solo && !preview) || state.stage !== 'waiting') && (
         <div data-testid="right-panel" style={{
           width: 'min(270px, 26vw)', flexShrink: 0, padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',

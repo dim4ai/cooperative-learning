@@ -342,7 +342,7 @@ export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', color: '#444', fontSize: 13, background: '#ece2d2', borderBottom: '1px solid #e0d4c0', flexShrink: 0 }}>
         <button onClick={() => goto(index - 1)} disabled={index === 0} style={navBtn} title="Предыдущий (←)">←</button>
         <span data-testid="slide-counter">{index + 1} / {slides.length}</span>
-        <button onClick={() => goto(index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
+        <button data-hint="slide-next" onClick={() => goto(index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
         {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>

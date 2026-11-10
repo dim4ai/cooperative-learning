@@ -235,7 +235,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const joinRoom = seat.extra !== undefined || joinStage === 'individual' ? individualRoom : joinStage === 'pairs' ? pairRoom : joinStage === 'fours' ? foursRoom : null;
               const mark = seat.occupant ? marks?.[seat.occupant] : undefined;
               return (
-                <div key={seat.id}
+                <div key={seat.id} data-desk={seat.groupIndex} data-seat-occupant={seat.occupant ?? undefined}
                   onClick={() => {
                     if (!readOnly) { if (seat.occupant) handleOccupiedClick(seat.occupant, seat.id); else handleEmptyClick(seat.id); return; }
                     if (selected && !seat.occupant) { handleEmptyClick(seat.id); return; }
