@@ -77,9 +77,10 @@
   .menu{ margin-top: 1.9rem; display:grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; max-width: 30rem; }
   .menu .btn{ justify-content: center; padding: 0.8em 1em; font-size: 1rem; }
   .menu .wide{ grid-column: 1 / -1; }
+  .menu .group{ margin-top: 1.1rem; }
   .menu .pair{ justify-content: center; text-align: center; line-height: 1.3; min-height: 2.65rem; }
   .menu .pair:not(.wide){ padding: 0.68em 0.6em; }
-  @media (max-width: 440px){ .menu .pair:not(.wide){ font-size: 0.8rem; padding: 0.68em 0.3em; } .menu .pair:not(.wide) i{ display:none; } }
+  @media (max-width: 440px){ .menu .pair:not(.wide){ font-size: 0.82rem; padding: 0.68em 0.3em; } }
 
   .pair{
     display: flex; align-items: center; justify-content: space-between; gap: 0.6em;
@@ -88,7 +89,6 @@
     color: var(--ink); text-decoration: none; transition: transform 0.15s ease, border-color 0.15s ease;
   }
   .pair:hover{ transform: translateY(-1px); border-color: var(--amber); }
-  .pair i{ font-style: normal; color: var(--amber); }
 
   .stage-canvas-box{
     position: relative; background: var(--surface); border: 1px solid var(--line);
@@ -120,10 +120,10 @@
       <nav class="menu">
         <a href="https://teacher.co-learn.ru" class="btn btn-soft">Учителям</a>
         <a href="https://student.co-learn.ru" class="btn btn-soft">Ученикам</a>
-        <a class="pair wide" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
-        <a class="pair wide" href="https://teacher.co-learn.ru/?demo"><span>Попробовать без регистрации</span><i aria-hidden="true">→</i></a>
-        <a class="pair" href="https://editor.co-learn.ru/"><span>Редактор уроков</span><i aria-hidden="true">→</i></a>
-        <a class="pair" href="https://player.co-learn.ru/"><span>Проигрыватель записей</span><i aria-hidden="true">→</i></a>
+        <a class="pair wide group" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span></a>
+        <a class="pair wide" href="https://teacher.co-learn.ru/?demo"><span>Попробовать без регистрации</span></a>
+        <a class="pair group" href="https://editor.co-learn.ru/"><span>Редактор уроков</span></a>
+        <a class="pair group" href="https://player.co-learn.ru/"><span>Проигрыватель записей</span></a>
       </nav>
     </div>
     <div class="stage-canvas-box">
