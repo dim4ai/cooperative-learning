@@ -76,8 +76,9 @@
   .hero .sub{ font-size: 1.13rem; color: var(--ink-soft); max-width: 42ch; }
   .hero-cta{ margin-top: 1.9rem; display:flex; align-items:center; gap: 1rem; flex-wrap: wrap; }
 
+  .links{ margin-top: 1.4rem; display:flex; flex-wrap: wrap; gap: 0.7rem; }
   .pair{
-    margin-top: 1.4rem; display: inline-flex; align-items: center; gap: 0.6em;
+    display: inline-flex; align-items: center; gap: 0.6em;
     padding: 0.68em 1.3em; font-weight: 600; font-size: 0.95rem;
     background: var(--surface); border: 1px solid var(--line); border-radius: 3px;
     color: var(--ink); text-decoration: none; transition: transform 0.15s ease, border-color 0.15s ease;
@@ -117,7 +118,11 @@
         <a href="https://teacher.co-learn.ru" class="btn btn-soft">Учителям</a>
         <a href="https://student.co-learn.ru" class="btn btn-soft">Ученикам</a>
       </div>
-      <a class="pair" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
+      <div class="links">
+        <a class="pair" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
+        <a class="pair" href="https://editor.co-learn.ru/"><span>Редактор уроков</span><i aria-hidden="true">→</i></a>
+        <a class="pair" href="https://player.co-learn.ru/"><span>Проигрыватель записей</span><i aria-hidden="true">→</i></a>
+      </div>
     </div>
     <div class="stage-canvas-box">
       <canvas id="formationCanvas" aria-hidden="true"></canvas>
