@@ -131,24 +131,21 @@ function TeacherPairContent({ onLeave, others, sheet }: { onLeave: () => void; o
   );
 }
 
-function CapacityInput({ initial, min = 4, onSet }: { initial: number; min?: number; onSet: (n: number) => void }) {
-  const [value, setValue] = useState(String(initial));
+/** − 16 +: a desk (four seats) at a time, applied at once */
+function CapacityInput({ value, min = 4, onSet }: { value: number; min?: number; onSet: (n: number) => void }) {
+  const step = (d: number) => {
+    const n = Math.min(Math.max(Math.ceil(value / 4) * 4 + d, min), 32);
+    if (n !== value) onSet(n);
+  };
+  const btn = (disabled: boolean): CSSProperties => ({
+    width: 32, padding: '4px 0', borderRadius: 4, border: 'none', fontSize: 16, lineHeight: 1, fontWeight: 'bold',
+    background: disabled ? '#d9cfbf' : '#4a90e2', color: '#fff', cursor: disabled ? 'default' : 'pointer',
+  });
   return (
-    <div style={{ display: 'flex', gap: 4 }}>
-      <input
-        type="number"
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        min={min} max={32} step={4}
-        style={{ width: 56, padding: '4px 6px', borderRadius: 4, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 13 }}
-        onKeyDown={e => { if (e.key === 'Enter') onSet(Number(value)); }}
-      />
-      <button
-        onClick={() => onSet(Number(value))}
-        style={{ flex: 1, padding: '4px 6px', borderRadius: 4, border: 'none', background: '#4a90e2', color: '#fff', cursor: 'pointer', fontSize: 12 }}
-      >
-        ОК
-      </button>
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <button data-testid="seats-less" aria-label="Меньше мест" disabled={value <= min} onClick={() => step(-4)} style={btn(value <= min)}>−</button>
+      <div data-testid="seats-count" style={{ flex: 1, fontSize: 15, fontWeight: 'bold', color: '#222' }}>{value}</div>
+      <button data-testid="seats-more" aria-label="Больше мест" disabled={value >= 32} onClick={() => step(4)} style={btn(value >= 32)}>+</button>
     </div>
   );
 }
@@ -693,7 +690,7 @@ export default function App() {
         {state.stage === 'waiting' && (
           <>
             <div style={{ fontSize: 11, color: '#222', marginTop: 2 }}>Мест в классе</div>
-            <CapacityInput key={seats.filter(s => s.extra === undefined).length} min={demo?.solo ? 8 : 4} initial={seats.filter(s => s.extra === undefined).length || currentClass?.capacity || 16} onSet={n => {
+            <CapacityInput min={demo?.solo ? 8 : 4} value={seats.filter(s => s.extra === undefined).length || currentClass?.capacity || 16} onSet={n => {
               if (!Number.isInteger(n) || n < 0) return;
               socket.emit('setCapacity', n);
               // the class keeps its number of seats for next time
