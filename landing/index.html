@@ -74,11 +74,14 @@
   @media (max-width: 880px){ .hero-grid{ grid-template-columns: 1fr; } }
   .hero h1{ font-size: clamp(2.3rem, 4.4vw + 1rem, 3.7rem); line-height: 1.08; margin-bottom: 0.55em; }
   .hero .sub{ font-size: 1.13rem; color: var(--ink-soft); max-width: 42ch; }
-  .hero-cta{ margin-top: 1.9rem; display:flex; align-items:center; gap: 1rem; flex-wrap: wrap; }
+  .menu{ margin-top: 1.9rem; display:grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; max-width: 30rem; }
+  .menu .btn{ justify-content: center; padding: 0.8em 1em; font-size: 1rem; }
+  .menu .wide{ grid-column: 1 / -1; line-height: 1.3; }
+  .menu .gap{ margin-top: 0.6rem; }
+  @media (max-width: 380px){ .menu{ grid-template-columns: 1fr; } }
 
-  .links{ margin-top: 1.4rem; display:flex; flex-wrap: wrap; gap: 0.7rem; }
   .pair{
-    display: inline-flex; align-items: center; gap: 0.6em;
+    display: flex; align-items: center; justify-content: space-between; gap: 0.6em;
     padding: 0.68em 1.3em; font-weight: 600; font-size: 0.95rem;
     background: var(--surface); border: 1px solid var(--line); border-radius: 3px;
     color: var(--ink); text-decoration: none; transition: transform 0.15s ease, border-color 0.15s ease;
@@ -113,16 +116,14 @@
     <div>
       <h1>Класс, который работает вместе</h1>
       <p class="sub">co-learn — открытая платформа для уроков по методике кооперативного обучения: ученики работают в парах и четвёрках, учитель видит и слышит каждую группу.</p>
-      <div class="hero-cta">
-        <a href="https://teacher.co-learn.ru/?demo" class="btn btn-primary">Попробовать без регистрации</a>
+      <nav class="menu">
         <a href="https://teacher.co-learn.ru" class="btn btn-soft">Учителям</a>
         <a href="https://student.co-learn.ru" class="btn btn-soft">Ученикам</a>
-      </div>
-      <div class="links">
-        <a class="pair" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
-        <a class="pair" href="https://editor.co-learn.ru/"><span>Редактор уроков</span><i aria-hidden="true">→</i></a>
-        <a class="pair" href="https://player.co-learn.ru/"><span>Проигрыватель записей</span><i aria-hidden="true">→</i></a>
-      </div>
+        <a class="pair wide" href="https://pair.co-learn.ru/"><span>Индивидуальное занятие</span><i aria-hidden="true">→</i></a>
+        <a class="pair wide" href="https://teacher.co-learn.ru/?demo"><span>Попробовать без регистрации</span><i aria-hidden="true">→</i></a>
+        <a class="pair wide gap" href="https://editor.co-learn.ru/"><span>Редактор уроков</span><i aria-hidden="true">→</i></a>
+        <a class="pair wide" href="https://player.co-learn.ru/"><span>Проигрыватель записей</span><i aria-hidden="true">→</i></a>
+      </nav>
     </div>
     <div class="stage-canvas-box">
       <canvas id="formationCanvas" aria-hidden="true"></canvas>
