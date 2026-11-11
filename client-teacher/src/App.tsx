@@ -7,7 +7,7 @@ import { ConnectionState, Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
 import { SeatingMap } from './SeatingMap';
 import type { Marks, Seat, SeatNames } from './SeatingMap';
-import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel } from './LessonSlides';
+import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
 import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
@@ -26,6 +26,7 @@ import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
+import { playStageBeep } from './beep';
 
 interface LivekitInfo {
   url: string;
@@ -89,7 +90,14 @@ function PairTileName({ identity, name, self }: { identity: string; name?: strin
   );
 }
 
-/** A comic-style speech bubble to the left of a tile, its tail pointing at it */
+/** The explanation is on its last slide (or has none) */
+function onLastSlide(slides: TeacherSlides): boolean {
+  const st = slides.state;
+  const blocks: { id: string; slides?: unknown[] }[] = (slides.local ?? slides.material)?.blocks ?? [];
+  const count = (st.active && blocks.find(b => b.id === st.blockId)?.slides?.length) || 0;
+  return count === 0 || st.index >= count - 1;
+}
+
 /** The microphone in the «Говорить всем» room follows the button (LiveKitRoom's own `audio` is read only on connecting) */
 function VoiceMic({ on }: { on: boolean }) {
   const { localParticipant } = useLocalParticipant();
@@ -100,13 +108,24 @@ function VoiceMic({ on }: { on: boolean }) {
   return null;
 }
 
+/** A comic-style speech bubble to the left of a tile, its tail pointing at it. It covers the board on a
+ *  small screen: a tap folds it into a small round 💬, a tap on that opens it again */
 function SpeechBubble({ text }: { text: string }) {
+  const [folded, setFolded] = useState(false);
+  if (folded) return (
+    <button data-testid="speech-bubble-folded" onClick={() => setFolded(false)} title="Что спросил ученик" style={{
+      position: 'absolute', right: 'calc(100% + 8px)', top: '50%', transform: 'translateY(-50%)', zIndex: 20,
+      width: 40, height: 40, borderRadius: '50%', border: '2px solid #222', background: '#fff', fontSize: 18, cursor: 'pointer',
+      boxShadow: '0 3px 10px rgba(0,0,0,0.25)', padding: 0,
+    }}>💬</button>
+  );
   return (
-    <div data-testid="speech-bubble" style={{
+    <div data-testid="speech-bubble" onClick={() => setFolded(true)} title="Свернуть" style={{ cursor: 'pointer',
       position: 'absolute', right: 'calc(100% + 18px)', top: '50%', transform: 'translateY(-50%)', width: 230, zIndex: 20,
       background: '#fff', color: '#222', border: '2px solid #222', borderRadius: 18, padding: '10px 14px',
       fontSize: 15, lineHeight: 1.35, textAlign: 'left', boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
     }}>
+      <span aria-hidden style={{ position: 'absolute', top: 4, right: 10, fontSize: 14, color: '#999' }}>×</span>
       {text}
       {/* the tail: a dark triangle with a white one over it */}
       <div style={{ position: 'absolute', right: -14, top: '50%', marginTop: -10, width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '14px solid #222' }} />
@@ -598,6 +617,7 @@ export default function App() {
       setConfirmed(true);
     });
     socket.on('demoEnded', finishDemo);
+    socket.on('stageBeep', (kind: 'soon' | 'end') => playStageBeep(kind));
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
     socket.on('studentNames', setTeacherNames);
@@ -789,7 +809,7 @@ export default function App() {
 
         {state.stage === 'waiting' ? null : slides.material?.blocks.length ? (
           <>
-            <LessonPlan slides={slides} stage={state.stage} />
+            <LessonPlan slides={slides} stage={state.stage} endsAt={state.timerEndsAt} clockSkew={clockSkew} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         ) : (
@@ -937,7 +957,7 @@ export default function App() {
             {state.stage !== 'waiting' && <BlockNotes slides={slides} />}
           </div>
           {state.stage !== 'waiting' && (
-            <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
+            <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} askReady={!demo?.solo || onLastSlide(slides)} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
           )}
         </div>
       )}

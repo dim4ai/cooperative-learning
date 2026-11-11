@@ -41,6 +41,8 @@ export interface Block {
   sheetReadOnly: boolean;
   /** earlier work blocks whose boards students may look at here (each sees their own room's) */
   boardsFrom: string[];
+  /** minutes planned for it: the teacher sees the time run, everyone hears 15 s before the end and at the end */
+  duration: number | null;
   slides: Scene[];
 }
 
@@ -107,7 +109,8 @@ export function parseMaterial(body: unknown, teacherId: number | null): Material
       // `note` is the teacher's own: students get scenes as they are here, so it must not stay
       .map(({ note: _note, ...s }: Scene & { note?: unknown }) => bakeLayers({ ...s, id: typeof s.id === 'string' && s.id ? s.id.slice(0, 64) : crypto.randomBytes(6).toString('hex') }));
     blocks.push({ id: raw.id.slice(0, 64), type: str(raw.type, 32), title: str(raw.title, 200), task: str(raw.task, 4000), sheetReadOnly: raw.sheetReadOnly === true,
-      boardsFrom: Array.isArray(raw.boardsFrom) ? raw.boardsFrom.filter((id): id is string => typeof id === 'string').slice(0, 50) : [], slides });
+      boardsFrom: Array.isArray(raw.boardsFrom) ? raw.boardsFrom.filter((id): id is string => typeof id === 'string').slice(0, 50) : [],
+      duration: typeof raw.duration === 'number' && raw.duration > 0 && raw.duration <= 240 ? raw.duration : null, slides });
   }
   // only work blocks that come before: those are the ones that have been written on by then
   const WORK = ['individual', 'pairs', 'fours'];

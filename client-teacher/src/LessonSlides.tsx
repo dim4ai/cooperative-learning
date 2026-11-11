@@ -212,7 +212,26 @@ export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?
 const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки' };
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
-export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: string }) {
+/** Time of the running block: what's left, then how much it has run over */
+function BlockTime({ endsAt, clockSkew }: { endsAt: number; clockSkew: number }) {
+  const [now, setNow] = useState(() => Date.now() + clockSkew);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now() + clockSkew), 500);
+    return () => clearInterval(id);
+  }, [clockSkew]);
+  const left = Math.round((endsAt - now) / 1000);
+  const abs = Math.abs(left);
+  const text = `${left < 0 ? '+' : ''}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, '0')}`;
+  const bg = left < 0 ? '#c0392b' : left <= 60 ? '#f0b429' : 'rgba(255,255,255,0.25)';
+  return (
+    <span data-testid="block-time" title={left < 0 ? 'Время этапа вышло' : 'Осталось на этап'} style={{
+      float: 'right', marginLeft: 6, padding: '0 5px', borderRadius: 4, fontSize: 11.5, fontWeight: 'bold',
+      fontVariantNumeric: 'tabular-nums', background: bg, color: left <= 60 && left >= 0 ? '#3a2a00' : '#fff',
+    }}>{text}</span>
+  );
+}
+
+export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: TeacherSlides; stage: string; endsAt: number | null; clockSkew: number }) {
   const blocks: MaterialBlock[] = slides.local?.blocks ?? slides.material?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
   return (
@@ -224,6 +243,7 @@ export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: st
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
             background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
+            {on && endsAt && <BlockTime endsAt={endsAt} clockSkew={clockSkew} />}
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
             <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
@@ -255,11 +275,11 @@ export function BlockNotes({ slides }: { slides: TeacherSlides }) {
         <div style={noteLabel}>Задание</div>
         <div data-testid="block-task" style={noteText}>{block.task}</div>
       </div>}
-      <EarlierBoardsNote block={block} blocks={local.blocks} />
       <div>
         <div style={noteLabel}>Заметка учителю</div>
         <div data-testid="block-note" style={noteText}>{stepNote || block.teacherNote || 'Здесь заметки нет.'}</div>
       </div>
+      <EarlierBoardsNote block={block} blocks={local.blocks} />
     </div>
   );
 }
@@ -268,7 +288,8 @@ const noteLabel: CSSProperties = { fontSize: 11, color: '#888', textTransform: '
 const noteText: CSSProperties = { whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.45, color: '#222' };
 
 /** End of an explanation: ask the class, see the answers, drop the marks when they're of no more use */
-export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; mapOpen: boolean; onToggleMap: () => void }) {
+/** askReady: false hides «Всем понятно?» (the solo demo keeps it for the last slide: it's the end of an explanation) */
+export function UnderstoodPanel({ understood, canAsk, askReady = true, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; askReady?: boolean; mapOpen: boolean; onToggleMap: () => void }) {
   const answers = Object.values(understood.marks);
   const yes = answers.filter(a => a === 'yes').length;
   const no = answers.length - yes;
@@ -285,7 +306,7 @@ export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { 
           {answers.length > 0 && <><span style={{ color: '#1e8e4e' }}>Поняли: {yes}</span> · <span style={{ color: '#d00000' }}>Не поняли: {no}</span></>}
         </div>
       )}
-      {canAsk && !understood.asking && (
+      {canAsk && askReady && !understood.asking && (
         <button data-testid="understood-ask" onClick={() => socket.emit('understood:ask')} style={panelBtn}>Всем понятно?</button>
       )}
       {canAsk && !understood.asking && (
@@ -456,6 +477,13 @@ export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides
           </>) : <span>В этом блоке нет слайдов</span>}
           <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>← → слайды, ↑ ↓ блоки · ученики этого не видят</span>
         </div>
+        {/* the task above the sheet, as the students will have it */}
+        {block?.task && (
+          <div data-testid="preview-task" style={{
+            flexShrink: 0, maxHeight: '30%', overflowY: 'auto', padding: '8px 12px', whiteSpace: 'pre-wrap', margin: '0 12px 8px',
+            fontSize: 15, lineHeight: 1.4, color: '#222', background: '#f1f5fb', borderRadius: 6,
+          }}>{block.task}</div>
+        )}
         <div ref={hostRef} style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '0 12px 12px' }}>
           {scene && width > 0 && (
             <div style={{ width, boxShadow: '0 1px 6px rgba(0,0,0,0.15)', background: '#fff' }}>
@@ -465,15 +493,11 @@ export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides
         </div>
       </div>
       <div style={{ width: 'min(260px, 24vw)', flexShrink: 0, overflowY: 'auto', padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e0d4c0', background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {block?.task && <div>
-          <div style={noteLabel}>Задание</div>
-          <div data-testid="preview-task" style={noteText}>{block.task}</div>
-        </div>}
-        {block && <EarlierBoardsNote block={block} blocks={blocks} />}
         <div>
           <div style={noteLabel}>Заметка учителю</div>
           <div data-testid="preview-note" style={noteText}>{note || 'Здесь заметки нет.'}</div>
         </div>
+        {block && <EarlierBoardsNote block={block} blocks={blocks} />}
       </div>
     </div>
   );
@@ -484,9 +508,10 @@ function EarlierBoardsNote({ block, blocks }: { block: LocalBlock; blocks: Local
   const titles = block.boardsFrom.map(id => blocks.find(b => b.id === id)).filter(b => !!b).map(b => `«${b!.title || TYPE_LABELS[b!.type] || 'Без названия'}»`);
   if (!titles.length) return null;
   return (
-    <div>
+    // after the teacher's note, set a little apart from it
+    <div style={{ marginTop: 10 }}>
       <div style={noteLabel}>Ученики видят свои предыдущие доски</div>
-      <div data-testid="earlier-boards-note" style={noteText}>{titles.join(', ')}. Вкладками над доской, только смотреть.</div>
+      <div data-testid="earlier-boards-note" style={noteText}>{titles.join(', ')}</div>
     </div>
   );
 }

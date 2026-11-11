@@ -245,8 +245,15 @@ export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) 
   const hintsOff = useHintsOff();
   const steps = !hintsOff && part.short ? part.short : part.steps;
   return (
-    <div data-testid="solo-guide" style={{ fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
+    // framed, and it blinks for 15 seconds when a new stage begins, then stays framed:
+    // without reading it the screen makes no sense
+    <div key={stage} data-testid="solo-guide" style={{
+      fontSize: 13, lineHeight: 1.45, color: '#333', display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
+      padding: 12, borderRadius: 8, border: '2px solid #f5a623', background: '#fff', animation: 'soloGuideIn 1s ease-in-out 15',
+    }}>
+      {/* the glow is drawn inside the frame: the right panel's scroll box clips anything outside it */}
+      <style>{'@keyframes soloGuideIn { 0%, 100% { box-shadow: inset 0 0 0 0 rgba(245,166,35,0) } 50% { box-shadow: inset 0 0 0 4px rgba(245,166,35,0.7) } }'}</style>
+      <div style={{ fontSize: 11, color: '#a06a00', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
       <b style={{ fontSize: 15 }}>{part.title}</b>
       {steps.map(step => <div key={step}>{step}</div>)}
       {hintsOff && <button data-testid="demo-hints-on" onClick={() => setHintsOff(false)} style={{

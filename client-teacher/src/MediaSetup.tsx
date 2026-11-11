@@ -13,14 +13,16 @@ export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
   none: 'Без видео',
 };
 export const DEMO_MODES: VideoMode[] = ['teacher', 'none'];
+/** What a teacher can choose. Video of everyone to everyone is gone: a child's picture shouldn't reach classmates */
+const LESSON_MODES: VideoMode[] = ['teacherSees', 'teacher', 'none'];
 const VIDEO_MODE_KEY = 'videoMode';
 
 function loadVideoMode(): VideoMode {
   try {
     const v = localStorage.getItem(VIDEO_MODE_KEY);
-    return v && v in VIDEO_MODE_LABELS ? v as VideoMode : 'all';
+    return v && LESSON_MODES.includes(v as VideoMode) ? v as VideoMode : 'teacherSees';
   } catch {
-    return 'all';
+    return 'teacherSees';
   }
 }
 
@@ -130,7 +132,7 @@ export function MediaSetup({ token, initial, error: lessonError, onJoin, onUnaut
         <TeacherLookEditor />
         <h3 style={{ margin: '14px 0 0', textAlign: 'center' }}>Занятие</h3>
         <div role="radiogroup" aria-label="Видео на занятии" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-          {(Object.keys(VIDEO_MODE_LABELS) as VideoMode[]).map(m => (
+          {LESSON_MODES.map(m => (
             <ModeButton key={m} mode={m} chosen={videoMode === m} onChoose={() => setVideoMode(m)} />
           ))}
         </div>

@@ -17,6 +17,7 @@ import { forgetProfile, profileNames, profiles, saveProfileAvatar, saveProfileNa
 import { socket, myName, ownName, lessonId, isBoardOnly, myBoardRoom, refreshNick, setName, setLessonId } from './socket';
 import { MediaCheck, LocalMediaSync, toggleStyle, loadMediaPrefs, saveMediaPrefs, captureOptions, monitorOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
+import { playStageBeep } from './beep';
 
 function MicControl({ enabled }: { enabled: boolean }) {
   const { localParticipant } = useLocalParticipant();
@@ -108,6 +109,7 @@ function useTimer(timerEndsAt: number | null) {
   return secondsLeft;
 }
 
+
 function BoardOnlyMode({ room, readOnly }: { room: string; readOnly: boolean }) {
   useEffect(() => {
     socket.connect();
@@ -140,7 +142,7 @@ function NameScreen({ onNext: next }: { onNext: (name: string) => void }) {
         onChange={e => setNameInput(e.target.value)}
         placeholder="Ваше имя"
         onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onNext(name.trim()); }}
-        style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', width: 240 }}
+        style={{ fontSize: 16, padding: 10, borderRadius: 6, border: '1px solid #ccc', width: 240, boxSizing: 'border-box' }}
       />
       {/* who has used this browser: one click and the name, avatar and seat are theirs */}
       {shown.length > 0 && (
@@ -310,7 +312,6 @@ export default function App() {
   const monitorRoomOptions = useMemo(() => monitorOptions(media), [media.camId, media.micId]);
   const [waitingForLesson, setWaitingForLesson] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
-  const secondsLeft = useTimer(lessonState.timerEndsAt);
   const afterLeft = useTimer(lessonState.afterUntil ?? null);
   const [clockSkew, setClockSkew] = useState(0); // server time − this computer's
   const demoLeft = useTimer(lessonState.demo ? lessonState.demo.endsAt - clockSkew : null);
@@ -373,6 +374,7 @@ export default function App() {
       setConfirmed(true);
     });
     socket.on('seats', setSeats);
+    socket.on('stageBeep', (kind: 'soon' | 'end') => playStageBeep(kind));
     socket.on('monitor', (info: LivekitInfo) => setMonitor(info));
     socket.on('teacherVoice', (info: LivekitInfo) => setTeacherVoice(info));
     socket.on('livekit', (info: LivekitInfo) => {
@@ -542,12 +544,7 @@ export default function App() {
             Демо-урок закончится через {Math.floor(demoLeft / 60)}:{String(demoLeft % 60).padStart(2, '0')}
           </span>
         )}
-        {secondsLeft !== null && (
-          <span style={{ fontSize: 20, fontWeight: 'bold', marginLeft: 'auto' }}>
-            {secondsLeft}s
-          </span>
-        )}
-        {!newcomer && <span style={{ color: '#888', marginLeft: secondsLeft !== null ? 0 : 'auto' }}>
+        {!newcomer && <span style={{ color: '#888', marginLeft: 'auto' }}>
           {students.length} уч.
         </span>}
         {livekit && videoMode === 'teacherSees' && media.camOn && (

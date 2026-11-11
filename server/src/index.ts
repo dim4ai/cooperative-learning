@@ -159,9 +159,15 @@ app.post('/login', async (req, res) => {
   res.json({ teacher: { id: teacher.id, email: teacher.email, name: teacher.name }, token });
 });
 
+/** Students' video never goes to other students: a child's picture could be recorded and passed on
+ *  by a classmate. 'all' stays readable (old lessons, old clients) but means «only the teacher sees» */
+function safeVideoMode(mode: VideoMode): VideoMode {
+  return mode === 'all' ? 'teacherSees' : mode;
+}
+
 app.post('/lessons', requireAuth, async (req: AuthedRequest, res) => {
   const requested = (req.body as { videoMode?: unknown } | undefined)?.videoMode;
-  const videoMode: VideoMode = VIDEO_MODES.includes(requested as VideoMode) ? requested as VideoMode : 'all';
+  const videoMode: VideoMode = safeVideoMode(VIDEO_MODES.includes(requested as VideoMode) ? requested as VideoMode : 'teacherSees');
   // The class's code from the last time: the same group comes in by the same code
   const { reuse, strict } = (req.body ?? {}) as { reuse?: unknown; strict?: unknown };
   if (typeof reuse === 'string' && reuse.length <= 40) {
@@ -421,7 +427,8 @@ interface LessonRuntime {
   teacherId: number | null; // owner, for the per-teacher limit
   stage: Stage;
   atDesks: boolean;                // before the lesson: the teacher let those seated go to their fours
-  timerEndsAt: number | null;
+  timerEndsAt: number | null;      // the running block's planned end (its duration), for the teacher's countdown
+  timerBeeps: NodeJS.Timeout[];    // the signals to everyone: 15 s before that end, and at it
   participants: Map<string, Participant>;
   seats: Seat[];
   seatPlan: Map<string, string>; // from the teacher's journal, in memory only: student uuid → seat id
@@ -684,11 +691,12 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     }
   }
   lesson = {
-    videoMode: 'all',
+    videoMode: 'teacherSees',
     teacherId,
     stage: 'waiting',
     atDesks: true, // those seated wait at their desks until the teacher calls everyone in
     timerEndsAt: null,
+    timerBeeps: [],
     participants: new Map(),
     seats: [],
     seatPlan: new Map(),
@@ -1032,7 +1040,7 @@ function endLesson(code: string, lesson: LessonRuntime, why: string) {
   lesson.startedAt = null;
   updateRecording(code, lesson);
   lesson.stage = 'waiting';
-  lesson.timerEndsAt = null;
+  setStageTimer(lesson, null);
   lesson.currentPoll = null;
   lesson.afterUntil = null;
   if (lesson.afterTimer) { clearTimeout(lesson.afterTimer); lesson.afterTimer = null; }
@@ -1075,7 +1083,7 @@ async function startAfterLesson(code: string, lesson: LessonRuntime, minutes: nu
   updateRecording(code, lesson); // the talk after the lesson is not recorded
   lesson.stage = 'fours';
   lesson.atDesks = false;
-  lesson.timerEndsAt = null;
+  setStageTimer(lesson, null);
   lesson.currentPoll = null;
   setMaterial(code, lesson, null);
   for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.disconnect(true);
@@ -1190,6 +1198,7 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
   if (!keepState) {
     lesson.slides = emptySlidesState();
     lesson.block = null;
+    setStageTimer(lesson, null);
     lesson.relay.setCatalog(mediaCatalog(material));
     // Opened in the middle of the lesson: pick up from the first block of the stage already running
     const running = material?.blocks.find(b => b.type === lesson.stage);
@@ -1212,6 +1221,7 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   const wereAtDesks = lesson.atDesks;
   lesson.stage = stage;
   lesson.atDesks = false;
+  if (stage === 'waiting') setStageTimer(lesson, null); // back to the seating: no block runs
   console.log(`[${code}] stage -> ${stage}`);
   if (stage !== 'waiting' && lesson.startedAt === null) { lesson.startedAt = Date.now(); updateRecording(code, lesson); }
   if (stage === 'pairs') await assignPairs(code, lesson);
@@ -1224,15 +1234,37 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   soloReached(code, stage);
 }
 
+// ---------- time of a block ----------
+const BEEP_BEFORE_MS = 15_000;
+
+/** Signal to everyone in the lesson; students hear it, they don't see the time */
+function beep(lesson: LessonRuntime, kind: 'soon' | 'end') {
+  for (const id of lesson.participants.keys()) io.sockets.sockets.get(id)?.emit('stageBeep', kind);
+}
+
+/** The block's time starts now (or there's none): the old one's signals are off */
+function setStageTimer(lesson: LessonRuntime, minutes: number | null) {
+  for (const t of lesson.timerBeeps) clearTimeout(t);
+  lesson.timerBeeps = [];
+  if (!minutes) { lesson.timerEndsAt = null; return; }
+  const ms = minutes * 60_000;
+  lesson.timerEndsAt = Date.now() + ms;
+  if (ms > BEEP_BEFORE_MS * 2) lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'soon'), ms - BEEP_BEFORE_MS));
+  lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'end'), ms));
+}
+
 async function startBlock(code: string, lesson: LessonRuntime, blockId: string) {
   const block = lesson.material?.blocks.find(b => b.id === blockId);
   if (!block || !STAGES.includes(block.type as Stage)) return;
+  // pressing the running block again doesn't start its time over
+  if (block.id !== lesson.block || lesson.timerEndsAt === null) setStageTimer(lesson, block.duration);
   // A new explanation is a new topic: last topic's marks would say nothing about it
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
   if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
+  else broadcastState(code, lesson); // the new block's time
   // the same stage again: everyone stays where they are, and writes there for this block
   for (const p of lesson.participants.values()) noteRoom(lesson, p);
 }
@@ -1681,7 +1713,7 @@ io.on('connection', async (socket) => {
     return;
   }
   const lesson: LessonRuntime = runtime;
-  lesson.videoMode = dbLesson.videoMode;
+  lesson.videoMode = safeVideoMode(dbLesson.videoMode);
   socket.join(code);
   if (role === 'teacher' && rawLook !== undefined) {
     const look = teacherLookOf(rawLook);
@@ -1946,18 +1978,6 @@ io.on('connection', async (socket) => {
 
     socket.on('understood:clear', () => {
       if (role === 'teacher') clearMarks(lesson);
-    });
-
-    socket.on('startTimer', (seconds: number) => {
-      if (role !== 'teacher') return;
-      lesson.timerEndsAt = Date.now() + seconds * 1000;
-      broadcastState(code, lesson);
-    });
-
-    socket.on('stopTimer', () => {
-      if (role !== 'teacher') return;
-      lesson.timerEndsAt = null;
-      broadcastState(code, lesson);
     });
 
     socket.on('sharedTextUpdate', ({ room, text }: { room: string; text: string }) => {

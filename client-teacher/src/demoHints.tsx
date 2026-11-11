@@ -94,12 +94,15 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       ];
     }
     if (hidden > 0 && !done.has('reveal')) {
-      return { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом возьмите ☝ и кликните по ответу' };
+      return { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝ и кликните по ответу' };
     }
+    // on every slide until the last: «Всем понятно?» appears only there, at the end of the explanation
     if (st.index < scenes.length - 1) {
-      return done.has('next-slide') ? null : { id: 'next-slide', anchor: '[data-hint="slide-next"]', text: 'Следующий слайд — эта стрелка или клавиша →' };
+      return { id: 'next-slide', anchor: '[data-hint="slide-next"]', text: done.has('next-slide')
+        ? `Слайд ${st.index + 1} из ${scenes.length}. Объясняйте и листайте дальше — на последнем слайде появится кнопка «Всем понятно?»`
+        : 'Следующий слайд — эта стрелка или клавиша →' };
     }
-    return { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд. Спросите класс: всем понятно?' };
+    return { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь спросите класс: всем понятно?' };
   }
 
   if (stage === 'individual' || stage === 'pairs' || stage === 'fours') {

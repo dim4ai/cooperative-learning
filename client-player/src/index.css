@@ -6,7 +6,7 @@
   --board-margin: #e8decd;
   --hint: #8a8494;
 
-  --chrome: #f3f4f6;
+  --chrome: #f6efe4; /* warm, as on the other co-learn sites */
   --line: #dcdfe5;
   font: 15px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
   color: #222;

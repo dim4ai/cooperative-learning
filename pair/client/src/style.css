@@ -1,5 +1,7 @@
 :root {
   --bg: #ffffff;
+  --page: #f6efe4; /* warm page under the start card, as on the other co-learn sites */
+  --page-grid: #ebdfcb;
   --grid: #e3eaf2;
   --grid-major: #cfdae6;
   --panel: #ffffff;
@@ -48,7 +50,7 @@ button {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 24px 24px, var(--bg);
+  background: linear-gradient(var(--page-grid) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg, var(--page-grid) 1px, transparent 1px) 0 0 / 24px 24px, var(--page);
 }
 
 .card {
