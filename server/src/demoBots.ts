@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
+import { CHATTER, LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -221,17 +221,33 @@ export class BotRun {
     this.nextCall();
   }
 
-  /** Talking in the room, as the microphones would count it: every couple of seconds each one may have said something */
+  /** Talking in the room: one at a time, short phrases out loud, each one as often as their weight says;
+   *  counted as a real student's microphone would count it */
   private chatter(room: string, part: RoomScript, order: string[]) {
     const started = Date.now();
+    const recent: string[] = [];
     const tick = () => {
       const quiet = part.quietAfter !== undefined && Date.now() - started > part.quietAfter * 1000;
-      if (!quiet && !this.quietRooms.has(room)) order.forEach((name, i) => {
-        if (name && Math.random() < (part.talk?.[i] ?? 0.4)) this.host.talk(name, TALK_TICK_MS);
-      });
-      this.after(TALK_TICK_MS, tick);
+      if (quiet || this.quietRooms.has(room)) { this.after(TALK_TICK_MS, tick); return; }
+      const weights = order.map((name, i) => (name ? part.talk?.[i] ?? 0.4 : 0));
+      let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+      const name = order[Math.max(0, weights.findIndex(w => (r -= w) < 0))];
+      const fresh = CHATTER.filter(c => !recent.includes(c.id));
+      const phrase = fresh[Math.floor(Math.random() * fresh.length)];
+      recent.push(phrase.id);
+      if (recent.length > 10) recent.shift();
+      const ms = this.voice(room, name, phrase.id, phrase.ms);
+      this.after(ms + 800 + Math.random() * 3000, tick);
     };
-    this.after(1500 + Math.random() * 1000, tick);
+    this.after(1500 + Math.random() * 2000, tick);
+  }
+
+  /** One says a clip: heard by the teacher in the room, counted as talk while it lasts; how long it is */
+  private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
+    const ms = lengths[who] ?? Math.max(...Object.values(lengths));
+    this.host.say(room, { src: `/demo/voice/${id}-${VOICE_OF[who] ?? 'kirill'}.mp3`, ms });
+    for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
+    return ms;
   }
 
   private speakNow() {
@@ -249,10 +265,7 @@ export class BotRun {
       const who = this.names.get(room)?.[line.who - 1] ?? '';
       const ms = line.ms[who] ?? Math.max(...Object.values(line.ms));
       t += line.pause;
-      this.after(t, () => {
-        this.host.say(room, { src: `/demo/voice/${line.id}-${VOICE_OF[who] ?? 'kirill'}.mp3`, ms });
-        for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
-      });
+      this.after(t, () => this.voice(room, who, line.id, line.ms));
       t += ms;
       if (line.write) { const text = line.write; this.after(t, () => this.write(room, text)); }
     }
