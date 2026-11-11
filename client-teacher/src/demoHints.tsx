@@ -221,7 +221,7 @@ export function DemoHints(props: HintsInput) {
   if (slides.state.revealed.length) now.add('reveal');
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
   // incognito doesn't answer a call: only an open visit does
-  if (props.room && props.quiet) now.add('spy');
+  if (props.room && props.quiet) { if (props.stage === 'pairs') now.add('spy'); } // the detective's scene is the pairs'
   else if (props.room) { now.add(`visit:${props.room}`); now.add('in-room'); } else if (done.has('in-room')) now.add('room-back');
   if ([...now].some(id => !done.has(id))) setDone(new Set([...done, ...now]));
   if (slideAt && !firstSlide) setFirstSlide(slideAt);
