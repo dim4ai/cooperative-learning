@@ -2,6 +2,8 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
+import { LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
+
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
   { name: 'Аня', avatar: 'fox' }, { name: 'Миша', avatar: 'bear' },
@@ -28,7 +30,8 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
  *  together, else the other one of the room; a line starting with «{1}: » or «{2}: » is said by them, as in a dialogue */
 /** talk: how much each one talks, 0…1, in the room's order (lead, partner, then the rest); quietAfter: from then
  *  on (seconds) the room keeps silent — the teacher's map shows it */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number }
+/** spoken: a voiced dialogue instead of random talk; the teacher hears it on coming in (server/src/demoDialogue.ts) */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[] }
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -66,8 +69,8 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
       '{1}: давай',
     ], 2, 0), talk: [0.6, 0.6], quietAfter: 14, call: {
       at: 10, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
-    // one does all the talking, the other hardly a word
-    { lines: lines(OBSERVATIONS.slice(1), 6, 7), talk: [0.85, 0.05] },
+    // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
+    { lines: [], spoken: LOPSIDED_PAIR },
     { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
       '{1}: AO = OC',
       '{2}: BO = OD',
@@ -111,6 +114,8 @@ export interface BotHost {
   /** Names of the bots in a room */
   members(room: string): string[];
   call(room: string, note: string, who?: string): void;
+  /** A voiced line begins in a room: the teacher there hears it */
+  say(room: string, clip: { src: string; ms: number }): void;
 }
 
 export class BotRun {
@@ -192,7 +197,8 @@ export class BotRun {
       const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
-      if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
+      if (part.spoken) this.speak(room, part.spoken);
+      else if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
       if (part.call) {
         const { at, note, reply, by } = part.call;
         this.callQueue.push({ room, at: at * 1000, fire: () => {
@@ -216,6 +222,22 @@ export class BotRun {
       this.after(TALK_TICK_MS, tick);
     };
     this.after(1500 + Math.random() * 1000, tick);
+  }
+
+  /** A dialogue line by line: each one heard, counted as talk while it lasts, and written down as it ends */
+  private speak(room: string, spoken: SpokenLine[]) {
+    let t = 0;
+    for (const line of spoken) {
+      const who = this.names.get(room)?.[line.who - 1] ?? '';
+      const ms = line.ms[who] ?? Math.max(...Object.values(line.ms));
+      t += line.pause;
+      this.after(t, () => {
+        this.host.say(room, { src: `/demo/voice/${line.id}-${VOICE_OF[who] ?? 'eduard'}.mp3`, ms });
+        for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
+      });
+      t += ms;
+      if (line.write) { const text = line.write; this.after(t, () => this.write(room, text)); }
+    }
   }
 
   /** The next room calls: the stage's first one at its time in the script, every next one `gap` after the teacher came back */

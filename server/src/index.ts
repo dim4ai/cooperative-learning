@@ -627,6 +627,10 @@ function startBots(code: string, lesson: LessonRuntime) {
     call(room, note, who) {
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note, who });
     },
+    say(room, clip) {
+      // to the teacher wherever they are: on coming into the room mid-line they hear the rest of it
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoVoice', { room, ...clip, now: Date.now() });
+    },
   });
   lesson.bots = bots;
   bots.seatEveryone();

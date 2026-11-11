@@ -27,6 +27,7 @@ import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 import { playStageBeep } from './beep';
+import { DemoVoice, demoVoiceHeard } from './DemoVoice';
 
 interface LivekitInfo {
   url: string;
@@ -668,6 +669,7 @@ export default function App() {
     socket.on('demoEnded', finishDemo);
     socket.on('activity', (a: ClassActivity) => setActivity({ ...a, skew: a.now - Date.now() }));
     socket.on('stageBeep', (kind: 'soon' | 'end') => playStageBeep(kind));
+    socket.on('demoVoice', demoVoiceHeard);
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
     socket.on('studentNames', setTeacherNames);
@@ -997,6 +999,7 @@ export default function App() {
         </div>
       </div>
 
+      {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : null} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
         quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} />}

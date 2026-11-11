@@ -138,7 +138,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (x.room && x.quiet) {
       return { id: 'spy-in', anchor: '[data-testid="quiet-reveal"]', text:
         'Вы здесь инкогнито — посмотрите на детектива справа: ученики вас не видят и не слышат. '
-        + 'Посмотрите, что они пишут. Заговорить с ними — «Войти открыто», уйти — «Назад».' };
+        + 'Послушайте их и посмотрите, что они пишут. Заговорить с ними — «Войти открыто», уйти — «Назад».' };
     }
     if (x.room) {
       const call = x.calls[x.room];
