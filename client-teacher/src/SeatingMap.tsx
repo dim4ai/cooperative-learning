@@ -150,6 +150,19 @@ function SeatActivity({ name, group, act, showTalk }: { name: string; group: str
   );
 }
 
+/** What the marks on the map mean, above it */
+function ActivityLegend({ alone }: { alone: boolean }) {
+  const dot = (lamp: Lamp) => <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: LAMP[lamp].color, marginRight: 4, verticalAlign: -1 }} />;
+  return (
+    <div data-testid="activity-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 10, fontSize: 12, color: '#555' }}>
+      {!alone && <span>🗣 сколько говорил на этом этапе</span>}
+      <span>✏️ сколько раз писал или рисовал на доске</span>
+      {!alone && <span>полоска — доля в разговоре группы</span>}
+      {!alone && <span>Огонёк группы: {dot('live')}говорят или пишут {dot('slow')}притихли больше 20 с {dot('silent')}молчат больше минуты</span>}
+    </div>
+  );
+}
+
 function useNow(skew: number, on: boolean): number {
   const [now, setNow] = useState(() => Date.now() + skew);
   useEffect(() => {
@@ -242,6 +255,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
           ))}
         </div>
       )}
+      {act && <ActivityLegend alone={joinStage === 'individual'} />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignContent: 'flex-start' }}>
       {Array.from({ length: numGroups }, (_, g) => {
         const groupSeats = seats.filter(s => s.groupIndex === g);
@@ -250,7 +264,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
         const isGroupCalling = callingRooms?.has(foursRoom) ?? false;
         const groupLost = allLost(groupSeats, marks, 3);
         return (
-          <div key={g} data-testid={groupLost ? 'four-lost' : groupSeats[0]?.extra !== undefined ? 'extra-desk' : undefined} style={{
+          <div key={g} data-group={g} data-testid={groupLost ? 'four-lost' : groupSeats[0]?.extra !== undefined ? 'extra-desk' : undefined} style={{
             border: `${groupLost ? 6 : 3}px solid ${isGroupCalling ? '#f39c12' : groupLost ? NOT_UNDERSTOOD : color}`,
             borderRadius: 10,
             padding: 8,
@@ -350,7 +364,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                         <SeatActivity name={seat.occupant} act={act} showTalk={joinStage !== 'individual'}
                           group={(joinStage === 'fours' ? groupSeats : joinStage === 'pairs' ? groupSeats.filter(s => s.row === row) : [seat]).flatMap(s => s.occupant ? [s.occupant] : [])} />
                       )}
-                      {act && joinStage === 'individual' && <LampDot lamp={lampOf([seat.occupant], act, now, true)} style={{ top: 5, left: 5 }} />}
+
                       {!readOnly && (
                         <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
                           {!noRemove && <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>}

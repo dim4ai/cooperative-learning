@@ -35,6 +35,11 @@ export interface HintsInput {
   activity: ClassActivity | null;
 }
 
+/** Desks with somebody at them, in order */
+function occupiedDesks(seats: Seat[]): number[] {
+  return [...new Set(seats.filter(s => s.occupant && s.extra === undefined).map(s => s.groupIndex))].sort((a, b) => a - b);
+}
+
 /** The pair where one does the talking: the detective has something to look at there */
 function lopsidedPair(x: HintsInput): string | null {
   const pairs = new Map<string, string[]>();
@@ -110,7 +115,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (answered) {
       return [
         { id: 'next-block', anchor: NEXT_BLOCK, text: 'Выберите следующий блок урока.' },
-        { id: 'vote-legend', anchor: '[data-testid="understood-result"]', text:
+        // under the second desk of the class, over nobody: the frames it explains are right above
+        { id: 'vote-legend', anchor: `[data-group="${occupiedDesks(x.seats)[1] ?? occupiedDesks(x.seats)[0] ?? 0}"]`, prefer: { side: 'below', align: 'start' }, text:
           'Зелёная рамка вокруг ученика — он выбрал «Понятно», красная — «Не понятно», нет рамки — не проголосовал. '
           + 'Вы можете ещё раз объяснить непонятные моменты или перейти к следующему этапу. На следующем этапе есть возможность подойти к ученику индивидуально.' },
       ];
@@ -158,7 +164,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (stage === 'pairs' && !done.has('spy')) {
       const room = lopsidedPair(x);
       if (room) return { id: 'spy', anchor: `[data-pair-room="${CSS.escape(room)}"]`, text:
-        'Все, кто звал, получили ответ. Посмотрите на полоски под учениками: в этой паре говорит в основном один. '
+        'Все, кто звал, получили ответ. Посмотрите на эту пару: говорит в основном один, у второго полоска почти пустая. '
         + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
     }
     if (stage === 'fours') return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Это весь цикл урока. Завершите урок и расскажите, что думаете' };
