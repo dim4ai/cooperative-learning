@@ -18,6 +18,7 @@ const SEAT_PAUSE_MS = 4000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
 const TALK_TICK_MS = 2000;
+const NEXT_CALL_GAP_MS = 6000; // back in the classroom, a moment to look around before the next bell
 const COLORS = ['#1971c2', '#2f9e44', '#9c36b5', '#f08c00'];
 
 interface Line { at: number; text: string } // seconds after the stage began
@@ -118,6 +119,10 @@ export class BotRun {
   private written = new Map<string, { n: number; top: number }>();
   private names = new Map<string, [string, string]>(); // room → who {1} and {2} are there
   private replies = new Map<string, string>();
+  // calls come one at a time: the next one only after the teacher has answered this one and come back
+  private callQueue: { room: string; at: number; fire: () => void }[] = [];
+  private calling: { room: string; visited: boolean } | null = null;
+  private stageStart = 0;
   private uid = 0;
 
   constructor(private host: BotHost) {}
@@ -165,6 +170,9 @@ export class BotRun {
     for (const t of this.stageTimers) clearTimeout(t);
     this.stageTimers.clear();
     this.replies.clear();
+    this.callQueue = [];
+    this.calling = null;
+    this.stageStart = Date.now();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
     const script = SCRIPT[stage];
     const rooms = this.host.rooms();
@@ -187,12 +195,14 @@ export class BotRun {
       if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
       if (part.call) {
         const { at, note, reply, by } = part.call;
-        this.after(at * 1000, () => {
+        this.callQueue.push({ room, at: at * 1000, fire: () => {
           if (reply) this.replies.set(room, reply);
           this.host.call(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
-        });
+        } });
       }
     });
+    this.callQueue.sort((a, b) => a.at - b.at);
+    this.nextCall(0);
   }
 
   /** Talking in the room, as the microphones would count it: every couple of seconds each one may have said something */
@@ -208,8 +218,24 @@ export class BotRun {
     this.after(1500 + Math.random() * 1000, tick);
   }
 
+  /** The next room calls: not before its time in the script, and not sooner than `gap` from now */
+  private nextCall(gap: number) {
+    const next = this.callQueue.shift();
+    if (!next) return;
+    const due = Math.max(next.at - (Date.now() - this.stageStart), gap);
+    this.after(due, () => { this.calling = { room: next.room, visited: false }; next.fire(); });
+  }
+
+  /** The teacher left a room: if it was the one that called, the next one may call after a breath */
+  onLeave(room: string) {
+    if (!this.calling || this.calling.room !== room || !this.calling.visited) return;
+    this.calling = null;
+    this.nextCall(NEXT_CALL_GAP_MS);
+  }
+
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
+    if (this.calling?.room === room) this.calling.visited = true;
     const reply = this.replies.get(room);
     if (!reply) return;
     this.replies.delete(room);

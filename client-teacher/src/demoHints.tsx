@@ -170,6 +170,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 
 // ---------- the bubble ----------
 
+const BACK_PAUSE_MS = 2500;
 const BUBBLE_W = 250;
 const GAP = 12;
 
@@ -243,7 +244,20 @@ export function DemoHints(props: HintsInput) {
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
   }, [previewOpen, lesson]);
 
-  const picked = pickHint(props, done);
+  // back from a group's board: a breath before the next hint, the teacher looks round the class first
+  const [settling, setSettling] = useState(false);
+  const [lastRoom, setLastRoom] = useState(props.room);
+  if (props.room !== lastRoom) {
+    setLastRoom(props.room);
+    if (lastRoom && !props.room) setSettling(true);
+  }
+  useEffect(() => {
+    if (!settling) return;
+    const t = setTimeout(() => setSettling(false), BACK_PAUSE_MS);
+    return () => clearTimeout(t);
+  }, [settling]);
+
+  const picked = settling ? null : pickHint(props, done);
   const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
   return (<>
     {hints.map(h => <Bubble key={h.id} hint={h} />)}

@@ -2110,6 +2110,9 @@ io.on('connection', async (socket) => {
 
     socket.on('joinPair', async ({ room, quiet }: { room: string; quiet?: boolean }) => {
       if (role !== 'teacher') return;
+      // straight from one group to another: the first one was left all the same
+      const was = lesson.participants.get(socket.id)?.livekitRoom;
+      if (was && was !== room) lesson.bots?.onLeave(was);
       // quietly: the group neither sees nor hears the teacher, a call for help stays on
       if (quiet) { await sendToRoom(code, lesson, socket.id, room, true); return; }
       await visitOpenly(room);
@@ -2137,7 +2140,9 @@ io.on('connection', async (socket) => {
 
     socket.on('leavePair', async () => {
       if (role !== 'teacher') return;
+      const was = lesson.participants.get(socket.id)?.livekitRoom;
       await sendToRoom(code, lesson, socket.id, roomName(code, 'main-room'));
+      if (was) lesson.bots?.onLeave(was);
     });
 
     socket.on('mute', ({ target }: { target: string | 'all' }) => {
