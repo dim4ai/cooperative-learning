@@ -202,7 +202,7 @@ export class BotRun {
       }
     });
     this.callQueue.sort((a, b) => a.at - b.at);
-    this.nextCall(0);
+    this.nextCall();
   }
 
   /** Talking in the room, as the microphones would count it: every couple of seconds each one may have said something */
@@ -218,11 +218,11 @@ export class BotRun {
     this.after(1500 + Math.random() * 1000, tick);
   }
 
-  /** The next room calls: not before its time in the script, and not sooner than `gap` from now */
-  private nextCall(gap: number) {
+  /** The next room calls: the stage's first one at its time in the script, every next one `gap` after the teacher came back */
+  private nextCall(gap?: number) {
     const next = this.callQueue.shift();
     if (!next) return;
-    const due = Math.max(next.at - (Date.now() - this.stageStart), gap);
+    const due = gap ?? Math.max(next.at - (Date.now() - this.stageStart), 0);
     this.after(due, () => { this.calling = { room: next.room, visited: false }; next.fire(); });
   }
 

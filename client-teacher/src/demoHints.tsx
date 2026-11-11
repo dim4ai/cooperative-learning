@@ -59,7 +59,7 @@ function lopsidedPair(x: HintsInput): string | null {
   return best;
 }
 
-const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null }>();
+const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number }>();
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
 const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
@@ -177,6 +177,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 // ---------- the bubble ----------
 
 const BACK_PAUSE_MS = 2500;
+const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
 const BUBBLE_W = 250;
 const GAP = 12;
 
@@ -250,20 +251,24 @@ export function DemoHints(props: HintsInput) {
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
   }, [previewOpen, lesson]);
 
-  // back from a group's board: a breath before the next hint, the teacher looks round the class first
-  const [settling, setSettling] = useState(false);
-  const [lastRoom, setLastRoom] = useState(props.room);
-  if (props.room !== lastRoom) {
-    setLastRoom(props.room);
-    if (lastRoom && !props.room) setSettling(true);
+  // back from a group's board: a breath before the next hint, the teacher looks round the class first;
+  // kept in the memory, as the screen is built anew on the way back
+  if (props.room !== mem.room) {
+    if (mem.room && !props.room) mem.backAt = Date.now();
+    mem.room = props.room;
   }
+  const sinceBack = Date.now() - (mem.backAt ?? 0);
+  let picked = sinceBack < BACK_PAUSE_MS ? null : pickHint(props, done);
+  // after the last call: longer, to glance at the strips and lights before the detective's hint
+  if (picked && !Array.isArray(picked) && picked.id === 'spy' && sinceBack < SPY_PAUSE_MS) picked = null;
+  const waitFor = sinceBack < BACK_PAUSE_MS ? BACK_PAUSE_MS - sinceBack : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack : 0;
+  const [, setTick] = useState(0);
   useEffect(() => {
-    if (!settling) return;
-    const t = setTimeout(() => setSettling(false), BACK_PAUSE_MS);
+    if (waitFor <= 0) return;
+    const t = setTimeout(() => setTick(n => n + 1), waitFor + 50);
     return () => clearTimeout(t);
-  }, [settling]);
+  }, [sinceBack < BACK_PAUSE_MS, waitFor > 0, mem.backAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const picked = settling ? null : pickHint(props, done);
   const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
   return (<>
     {hints.map(h => <Bubble key={h.id} hint={h} />)}
