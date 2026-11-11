@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHATTER, LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
+import { CHATTER, DISPUTE_PAIR, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -19,6 +19,7 @@ export const SOLO_MIN_SEATS = 8;
 const SEAT_PAUSE_MS = 4000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
+const AFTER_ANSWER_MS = 8000; // the teacher came on a call: their answer takes a while, then the group goes on
 const TALK_TICK_MS = 2000;
 const SPOKEN_AFTER_CALLS_MS = 1000; // the last call answered: the dialogue begins, so it's under way when the hint points there
 const SPOKEN_LATEST_MS = 90_000; // …or by then anyway
@@ -32,8 +33,9 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
  *  together, else the other one of the room; a line starting with «{1}: » or «{2}: » is said by them, as in a dialogue */
 /** talk: how much each one talks, 0…1, in the room's order (lead, partner, then the rest); quietAfter: from then
  *  on (seconds) the room keeps silent — the teacher's map shows it */
-/** spoken: a voiced dialogue instead of random talk; the teacher hears it on coming in (server/src/demoDialogue.ts) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[] }
+/** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
+ *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean }
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -61,18 +63,10 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   pairs: [
     { lines: lines(OBSERVATIONS, 4, 6), talk: [0.55, 0.5] },
     // what the pair said before calling, written down at once: only so the teacher feels how it comes to a call
-    { lead: 'Миша', partner: 'Артём', lines: lines([
-      '{1}: AD = BC',
-      '{2}: AB = CD',
-      '{1}: ∠A = ∠C',
-      '{2}: AB = AO',
-      '{1}: нет, они не равны',
-      '{2}: мне кажется, что равны,\nдавай у учителя спросим',
-      '{1}: давай',
-    ], 2, 0), talk: [0.6, 0.6], quietAfter: 14, call: {
-      at: 10, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
+    { lead: 'Миша', partner: 'Артём', lines: [], spoken: DISPUTE_PAIR, talk: [0.55, 0.5], call: {
+      at: 0, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
     // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
-    { lines: [], spoken: LOPSIDED_PAIR },
+    { lines: [], spoken: LOPSIDED_PAIR, later: true },
     { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
       '{1}: AO = OC',
       '{2}: BO = OD',
@@ -81,8 +75,8 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
       '{1}: ну и что, они же есть\nв параллелограмме',
       '{2}: не знаю, давай спросим',
       '{1}: давай',
-    ], 24, 0), call: {
-      at: 30, by: 1, note: 'Мы спорим, можно ли брать вертикальные углы при пересечении диагоналей. Я думаю, что ∠AOB = ∠COD можно записать, а {2} говорит, что это не свойство параллелограмма. Кто прав?' } },
+    ], 38, 0), call: {
+      at: 45, by: 1, note: 'Мы спорим, можно ли брать вертикальные углы при пересечении диагоналей. Я думаю, что ∠AOB = ∠COD можно записать, а {2} говорит, что это не свойство параллелограмма. Кто прав?' } },
   ],
   fours: [
     { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), talk: [0.5, 0.4, 0.35, 0.03], call: {
@@ -120,6 +114,14 @@ export interface BotHost {
   say(room: string, clip: { src: string; ms: number }): void;
 }
 
+/** The bot's own voice if the clip has it, else another of the same sex, else any */
+function voiceFor(who: string, lengths: Record<string, number>, stand?: Map<string, string>): string {
+  const own = stand?.get(who) ?? VOICE_OF[who] ?? 'kirill';
+  if (lengths[own] !== undefined) return own;
+  const voices = Object.keys(lengths);
+  return voices.find(v => FEMALE_VOICES.has(v) === FEMALE_VOICES.has(own)) ?? voices[0];
+}
+
 export class BotRun {
   private timers = new Set<NodeJS.Timeout>();
   private stageTimers = new Set<NodeJS.Timeout>();
@@ -132,6 +134,9 @@ export class BotRun {
   private stageStart = 0;
   private spoken: { room: string; lines: SpokenLine[] } | null = null;
   private quietRooms = new Set<string>(); // rooms whose random talk stops: their dialogue speaks now
+  private afterAnswer = new Map<string, SpokenLine[]>();
+  // a dialogue not voiced in someone's own voice: they keep the voice it gave them all the stage, chatter too
+  private stand = new Map<string, string>(); // what a room that called says once answered
   private uid = 0;
 
   constructor(private host: BotHost) {}
@@ -157,11 +162,11 @@ export class BotRun {
   }
 
   /** One line down the board, each room filling up on its own; a dialogue line smaller, in the speaker's colour */
-  private write(room: string, text: string) {
+  private write(room: string, text: string, by?: 1 | 2) {
     const w = this.written.get(room) ?? { n: 0, top: 60 };
     const speaker = /^\{([12])\}: /.exec(text)?.[1];
     const [lead, partner] = this.names.get(room) ?? ['', ''];
-    const author = (speaker === '2' ? partner : lead) || undefined;
+    const author = ((by ?? Number(speaker ?? 1)) === 2 ? partner : lead) || undefined;
     const fontSize = speaker ? 30 : 40;
     const rows = text.split('\n').length;
     const height = speaker ? rows * 36 + 14 : 72;
@@ -169,7 +174,7 @@ export class BotRun {
     this.host.write(room, {
       uid: `bot-${room}-${this.uid++}`, type: 'IText', text: this.fill(room, text), left: speaker ? 760 : 860, top: w.top,
       originX: 'left', originY: 'top', fontSize, fontFamily: 'sans-serif',
-      fill: speaker ? COLORS[Number(speaker) - 1] : COLORS[w.n % COLORS.length],
+      fill: speaker ? COLORS[Number(speaker) - 1] : by ? COLORS[by - 1] : COLORS[w.n % COLORS.length],
     }, author);
     this.written.set(room, { n: w.n + 1, top: w.top + height });
   }
@@ -183,6 +188,8 @@ export class BotRun {
     this.calling = null;
     this.spoken = null;
     this.quietRooms.clear();
+    this.afterAnswer.clear();
+    this.stand.clear();
     this.stageStart = Date.now();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
     const script = SCRIPT[stage];
@@ -203,14 +210,24 @@ export class BotRun {
       const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
-      if (part.spoken) {
+      let callAt = part.call?.at;
+      if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
         this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
         this.spoken = { room, lines: part.spoken };
         this.after(SPOKEN_LATEST_MS, () => this.speakNow());
+      } else if (part.spoken?.length) {
+        // talking from the start; the call comes as their talk runs out, and the rest once they have the answer
+        this.quietRooms.add(room);
+        this.chatter(room, part, [lead, partner]);
+        const took = this.speak(room, part.spoken.filter(l => !l.after));
+        const rest = part.spoken.filter(l => l.after);
+        if (part.call) { callAt = took / 1000 + 0.8; this.afterAnswer.set(room, rest); }
+        else this.after(took, () => this.quietRooms.delete(room));
       } else if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
       if (part.call) {
-        const { at, note, reply, by } = part.call;
+        const { note, reply, by } = part.call;
+        const at = callAt ?? part.call.at;
         this.callQueue.push({ room, at: at * 1000, fire: () => {
           if (reply) this.replies.set(room, reply);
           this.host.call(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
@@ -247,8 +264,9 @@ export class BotRun {
 
   /** One says a clip: heard by the teacher in the room, counted as talk while it lasts; how long it is */
   private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
-    const ms = lengths[who] ?? Math.max(...Object.values(lengths));
-    this.host.say(room, { src: `/demo/voice/${id}-${VOICE_OF[who] ?? 'kirill'}.mp3`, ms });
+    const v = voiceFor(who, lengths, this.stand);
+    const ms = lengths[v];
+    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms });
     for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
     return ms;
   }
@@ -261,17 +279,19 @@ export class BotRun {
     this.speak(room, lines);
   }
 
-  /** A dialogue line by line: each one heard, counted as talk while it lasts, and written down as it ends */
-  private speak(room: string, spoken: SpokenLine[]) {
+  /** A dialogue line by line: each one heard, counted as talk while it lasts, and written down as it ends; how long it takes */
+  private speak(room: string, spoken: SpokenLine[]): number {
     let t = 0;
     for (const line of spoken) {
       const who = this.names.get(room)?.[line.who - 1] ?? '';
-      const ms = line.ms[who] ?? Math.max(...Object.values(line.ms));
       t += line.pause;
+      const v = voiceFor(who, line.ms, this.stand);
+      if (v !== VOICE_OF[who]) this.stand.set(who, v);
       this.after(t, () => this.voice(room, who, line.id, line.ms));
-      t += ms;
-      if (line.write) { const text = line.write; this.after(t, () => this.write(room, text)); }
+      t += line.ms[v];
+      if (line.write) { const text = line.write, by = line.who; this.after(t, () => this.write(room, text, by)); }
     }
+    return t;
   }
 
   /** The next room calls: the stage's first one at its time in the script, every next one `gap` after the teacher came back */
@@ -292,6 +312,14 @@ export class BotRun {
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
     if (this.calling?.room === room) this.calling.visited = true;
+    const rest = this.afterAnswer.get(room);
+    if (rest) {
+      this.afterAnswer.delete(room);
+      this.after(AFTER_ANSWER_MS, () => {
+        const took = this.speak(room, rest);
+        this.after(took + 1500, () => this.quietRooms.delete(room)); // and back to their usual talk
+      });
+    }
     const reply = this.replies.get(room);
     if (!reply) return;
     this.replies.delete(room);
