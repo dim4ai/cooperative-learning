@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { socket } from './socket';
@@ -90,6 +90,76 @@ const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
 const NOT_UNDERSTOOD = '#d00000';
+
+// ---------- who talks and writes at work ----------
+export interface StudentActivity { talk: number; ops: number; lastTalk: number | null; lastOp: number | null }
+/** From the server: seconds talked and board actions by student since the stage began; skew: server − this clock */
+export interface ClassActivity { now: number; since: number; skew?: number; students: Record<string, StudentActivity> }
+
+type Lamp = 'live' | 'slow' | 'silent';
+const LAMP: Record<Lamp, { color: string; title: string }> = {
+  live: { color: '#2fb344', title: 'Работают: говорят или пишут' },
+  slow: { color: '#f2b705', title: 'Притихли: больше 20 секунд ни слова и ни строчки' },
+  silent: { color: '#e03131', title: 'Молчат больше минуты: может, стоит подойти' },
+};
+
+/** The group's light: how long since anyone in it said or wrote something (alone at work: wrote) */
+function lampOf(names: string[], act: ClassActivity, now: number, writingOnly: boolean): Lamp {
+  let last = act.since;
+  for (const n of names) {
+    const a = act.students[n];
+    if (!a) continue;
+    last = Math.max(last, a.lastOp ?? 0, writingOnly ? 0 : a.lastTalk ?? 0);
+  }
+  const age = now - last;
+  return age < 20_000 ? 'live' : age < 60_000 ? 'slow' : 'silent';
+}
+
+function LampDot({ lamp, style }: { lamp: Lamp; style?: React.CSSProperties }) {
+  return <div data-testid="lamp" data-lamp={lamp} title={LAMP[lamp].title} style={{
+    position: 'absolute', width: 12, height: 12, borderRadius: '50%', zIndex: 4, background: LAMP[lamp].color,
+    boxShadow: `0 0 0 2px #fff, 0 0 6px ${LAMP[lamp].color}`, pointerEvents: 'auto', ...style,
+  }} />;
+}
+
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+/** Under a student's tile: how long they talked, how much they did on the board; the bar is their part of the group's talk */
+function SeatActivity({ name, group, act, showTalk }: { name: string; group: string[]; act: ClassActivity; showTalk: boolean }) {
+  const a = act.students[name];
+  const talk = a?.talk ?? 0;
+  const total = group.reduce((sum, n) => sum + (act.students[n]?.talk ?? 0), 0);
+  const share = total > 0 ? talk / total : 0;
+  // the group talks, this one hardly at all
+  const quietOne = showTalk && group.length > 1 && total >= 20 && share < 0.15;
+  return (
+    <div data-testid="seat-activity" style={{
+      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3, padding: '2px 6px 3px', background: 'rgba(255,255,255,0.9)',
+      fontSize: 11, color: '#333', display: 'flex', flexDirection: 'column', gap: 2, pointerEvents: 'none',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+        {showTalk && <span title="Сколько говорил на этом этапе">🗣 {mmss(talk)}</span>}
+        <span title="Действий на доске на этом этапе">✏️ {a?.ops ?? 0}</span>
+      </div>
+      {showTalk && group.length > 1 && (
+        <div title={`Доля в разговоре группы: ${Math.round(share * 100)}%`} style={{ height: 4, borderRadius: 2, background: '#e6e6e6', overflow: 'hidden' }}>
+          <div style={{ width: `${Math.round(share * 100)}%`, height: '100%', background: quietOne ? '#f08c00' : '#4a90e2', transition: 'width 0.6s' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useNow(skew: number, on: boolean): number {
+  const [now, setNow] = useState(() => Date.now() + skew);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now() + skew);
+    const t = setInterval(() => setNow(Date.now() + skew), 2000);
+    return () => clearInterval(t);
+  }, [skew, on]);
+  return now;
+}
 const UNDERSTOOD = '#4cae6e';
 
 /** Everyone sitting here said they did not understand */
@@ -98,10 +168,13 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks }: { seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks, activity }: { activity?: ClassActivity | null; seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string, toTalk?: boolean) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
   const [swap, setSwap] = useState<{ a: string; b: string; seatId: string } | null>(null);
+  // at work the map shows who talks and writes, and a light on each group
+  const act = joinStage === 'individual' || joinStage === 'pairs' || joinStage === 'fours' ? activity ?? null : null;
+  const now = useNow(act?.skew ?? 0, !!act);
 
   if (seats.length === 0) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#ccc', fontSize: 15 }}>
@@ -165,7 +238,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
             <button key={name} data-testid="seat-waiting-name" title="Выберите, потом кликните свободное место" onClick={() => setSelected(s => s === name ? null : name)} style={{
               padding: '4px 10px', borderRadius: 14, cursor: 'pointer', fontSize: 13,
               border: selected === name ? '2px solid #4a90e2' : '1px solid #bbb', background: '#fff', color: '#222',
-            }}><StudentName identity={name} />{onJoinPair && <span data-testid="newcomer-talk" title="Поговорить" onClick={e => { e.stopPropagation(); onJoinPair(`${lessonCode}:individual-${name}`); }} style={{ marginLeft: 6 }}>💬</span>}</button>
+            }}><StudentName identity={name} />{onJoinPair && <span data-testid="newcomer-talk" title="Поговорить" onClick={e => { e.stopPropagation(); onJoinPair(`${lessonCode}:individual-${name}`, true); }} style={{ marginLeft: 6 }}>💬</span>}</button>
           ))}
         </div>
       )}
@@ -194,6 +267,9 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                 border: `1px solid ${color}`, background: '#fff', color: '#444', fontSize: 12,
               }}>💬 Подойти</button>
             )}
+            {act && joinStage === 'fours' && groupSeats.some(s => s.occupant) && (
+              <LampDot lamp={lampOf(groupSeats.flatMap(s => s.occupant ? [s.occupant] : []), act, now, false)} style={{ top: -7, right: -7 }} />
+            )}
             {isGroupCalling && (
               <div data-calling-room={foursRoom}
                 onClick={() => onJoinPair?.(foursRoom)}
@@ -212,7 +288,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
               const isCalling = callingRooms?.has(pairRoom) ?? false;
               const pairLost = allLost(groupSeats.filter(s => s.row === row), marks, 2);
               return (
-              <div key={row} data-testid={pairLost ? 'pair-lost' : undefined} style={{
+              <div key={row} data-testid={pairLost ? 'pair-lost' : undefined} data-pair-room={pairRoom} style={{
                 display: 'flex',
                 gap: 6,
                 background: pairLost ? '#fde3e3' : 'transparent',
@@ -244,6 +320,8 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                   }}
                   style={{
                     width: 160, height: 120,
+                    // the activity strip takes the bottom: the avatar and name sit above it
+                    ...(act && seat.occupant ? { paddingBottom: 28, boxSizing: 'border-box' as const } : {}),
                     background: '#fff',
                     border: pulsing ? '2px solid #f39c12' : isTarget ? `2px dashed #4a4` : `1px solid #ccc`,
                     boxShadow: isSelected ? `0 0 0 3px ${color}` : 'none',
@@ -268,6 +346,11 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                         <StudentName identity={seat.occupant} />
                       </div>
                       <SeatNick nick={seat.occupant} />
+                      {act && (
+                        <SeatActivity name={seat.occupant} act={act} showTalk={joinStage !== 'individual'}
+                          group={(joinStage === 'fours' ? groupSeats : joinStage === 'pairs' ? groupSeats.filter(s => s.row === row) : [seat]).flatMap(s => s.occupant ? [s.occupant] : [])} />
+                      )}
+                      {act && joinStage === 'individual' && <LampDot lamp={lampOf([seat.occupant], act, now, true)} style={{ top: 5, left: 5 }} />}
                       {!readOnly && (
                         <div style={{ display: 'flex', gap: 6, position: 'relative', zIndex: 1, marginTop: 2 }}>
                           {!noRemove && <div onClick={e => clearSeat(e, seat.id)} style={{ fontSize: 10, color: '#bbb', cursor: 'pointer' }}>✕</div>}
@@ -275,7 +358,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                         </div>
                       )}
                       {seat.extra !== undefined && !isSeatCalling && onJoinPair && (
-                        <div data-testid="newcomer-talk" onClick={e => { e.stopPropagation(); onJoinPair(individualRoom!); }} title="Поговорить"
+                        <div data-testid="newcomer-talk" onClick={e => { e.stopPropagation(); onJoinPair(individualRoom!, true); }} title="Поговорить"
                           style={{ position: 'absolute', right: 4, top: 4, fontSize: 18, zIndex: 3, cursor: 'pointer' }}>💬</div>
                       )}
                       {isSeatCalling && (
@@ -300,6 +383,9 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                 </div>
               );
             })}
+              {act && joinStage === 'pairs' && groupSeats.some(s => s.row === row && s.occupant) && (
+                <LampDot lamp={lampOf(groupSeats.filter(s => s.row === row && s.occupant).map(s => s.occupant!), act, now, false)} style={{ top: -6, right: -6 }} />
+              )}
               {isCalling && (
                 <div data-calling-room={pairRoom}
                   onClick={() => onJoinPair?.(pairRoom)}

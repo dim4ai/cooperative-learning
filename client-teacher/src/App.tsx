@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useConnectionState, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
-import { NameCard, SpeakingRing } from './speaking';
+import { NameCard, NAME_CARD_BG, SpeakingRing } from './speaking';
 import { AvatarProvider, useTeacherTitle } from './avatars';
 import { ConnectionState, Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
-import { SeatingMap } from './SeatingMap';
+import { SeatingMap, type ClassActivity } from './SeatingMap';
 import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
@@ -32,6 +32,7 @@ interface LivekitInfo {
   url: string;
   token: string;
   room: string;
+  quiet?: boolean; // in a group's room unseen and unheard
 }
 
 type Stage = 'waiting' | 'group' | 'individual' | 'pairs' | 'fours';
@@ -77,6 +78,38 @@ function PairCamOrName({ identity, name: shown, self }: { identity: string; name
   return cam
     ? <><ClassCamVideo track={cam} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><PairTileName identity={identity} name={name} /></>
     : <NameCard name={name} identity={identity} />;
+}
+
+/** The teacher in a group's room quietly: a detective in place of their own picture, until «Войти открыто» */
+function DetectiveCard() {
+  const title = useTeacherTitle();
+  return (
+    <div data-testid="quiet-detective" title="Вы здесь тихо: группа вас не видит и не слышит" style={{
+      width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+      background: NAME_CARD_BG, color: '#444', fontWeight: 'bold', textAlign: 'center', padding: 6, boxSizing: 'border-box',
+    }}>
+      <svg viewBox="0 0 100 100" style={{ height: '62%', maxWidth: '80%' }} role="img" aria-label="Детектив">
+        {/* trench coat with its collar up */}
+        <path d="M14 100 C14 80 26 70 50 70 C74 70 86 80 86 100 Z" fill="#8a6a45" />
+        <path d="M30 74 L50 96 L70 74 L60 70 L50 82 L40 70 Z" fill="#6e5234" />
+        <path d="M44 72 L50 82 L56 72 Z" fill="#f2e6d0" />
+        {/* face */}
+        <ellipse cx="50" cy="48" rx="17" ry="20" fill="#e9b98f" />
+        {/* hat: brim and crown with a band */}
+        <ellipse cx="50" cy="33" rx="31" ry="6" fill="#1c1c1c" />
+        <path d="M33 33 C33 16 38 10 50 10 C62 10 67 16 67 33 Z" fill="#262626" />
+        <path d="M33.5 27 H66.5 V32 H33.5 Z" fill="#6b1e1e" />
+        {/* dark glasses */}
+        <path d="M31 43 H69" stroke="#111" strokeWidth="2.2" />
+        <path d="M33 42 H48 C48 50 45 53 40.5 53 C36 53 33 50 33 42 Z" fill="#111" />
+        <path d="M52 42 H67 C67 50 64 53 59.5 53 C55 53 52 50 52 42 Z" fill="#111" />
+        <path d="M36 45 H40 M55 45 H59" stroke="#fff" strokeOpacity="0.45" strokeWidth="1.3" strokeLinecap="round" />
+        {/* moustache */}
+        <path d="M38 60 C42 55 47 56 50 58.5 C53 56 58 55 62 60 C57 59.5 53 61 50 61 C47 61 43 59.5 38 60 Z" fill="#3a2614" />
+      </svg>
+      <span style={{ fontSize: 12 }}>{title}</span>
+    </div>
+  );
 }
 
 /** Over video; a tile without video has the name on its card */
@@ -136,8 +169,9 @@ function SpeechBubble({ text }: { text: string }) {
 
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
-function TeacherPairContent({ onLeave, others, sheet, task, ask }: {
+function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal }: {
   onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
+  quiet?: boolean; onReveal?: () => void;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -146,6 +180,18 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask }: {
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden', position: 'relative' }}>
       {/* Board, with the task above it as the students have it */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {quiet && (
+          <div data-testid="quiet-bar" style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '6px 6px 0', padding: '6px 12px',
+            background: '#eef3ea', border: '1px solid #c7d8bd', borderRadius: 6, fontSize: 13, color: '#3d5a2e',
+          }}>
+            <span>Вы здесь тихо: группа вас не видит и не слышит, доска только для просмотра.</span>
+            <button data-testid="quiet-reveal" onClick={onReveal} style={{
+              marginLeft: 'auto', padding: '4px 12px', borderRadius: 5, border: '1px solid #8fb07a', background: '#fff',
+              color: '#3d5a2e', cursor: 'pointer', fontSize: 13,
+            }}>Войти открыто</button>
+          </div>
+        )}
         {task && (
           <div data-testid="room-task" style={{
             flexShrink: 0, maxHeight: '30%', overflowY: 'auto', padding: '8px 12px', whiteSpace: 'pre-wrap', margin: '6px 6px 0',
@@ -159,7 +205,9 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask }: {
       <div style={{ width: 180, display: 'flex', flexDirection: 'column', gap: 8, padding: 8, background: '#1a1a1a', justifyContent: 'center' }}>
         {cameraTracks.map(t => (
           <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
-            {isTrackReference(t) && !t.publication.isMuted
+            {quiet && t.participant.isLocal
+              ? <DetectiveCard />
+              : isTrackReference(t) && !t.publication.isMuted
               ? <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               : <PairCamOrName identity={t.participant.identity} name={t.participant.name || t.participant.identity} self={t.participant.isLocal} />}
             <SpeakingRing identity={t.participant.identity} />
@@ -247,7 +295,7 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting }: { students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
+function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity }: { activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
   }
@@ -268,11 +316,11 @@ function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, c
   }
 
   if (stage === 'individual') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} activity={activity} />;
   }
 
   if (stage === 'pairs' || stage === 'fours') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} joinStage={stage} waiting={waiting} activity={activity} />;
   }
 
   return (
@@ -468,6 +516,7 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [seats, setSeats] = useState<Seat[]>([]);
   const [livekit, setLivekit] = useState<LivekitInfo | null>(null);
+  // visit the groups unseen: remembered on this computer
   // «Говорить всем»: a room of its own where the students only listen (server: makeVoiceSpeakerToken)
   const [voice, setVoice] = useState<LivekitInfo | null>(null);
   const [voiceOn, setVoiceOn] = useState(false);
@@ -475,9 +524,9 @@ export default function App() {
   const classCams = useClassCamsRoom(camsInfo);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
-  const [callNotes, setCallNotes] = useState<Record<string, string>>({}); // what the solo demo's class is asking
   // the solo demo's calls of this stage, kept after the teacher answers: the hints show what to do in the room
   const [calls, setCalls] = useState<Record<string, { note: string; who?: string }>>({});
+  const [activity, setActivity] = useState<ClassActivity | null>(null); // who talks and writes at work, by student
   const slides = useTeacherSlides(lessonCode, lessonToken, logout);
 
   const journal = useJournal();
@@ -617,6 +666,7 @@ export default function App() {
       setConfirmed(true);
     });
     socket.on('demoEnded', finishDemo);
+    socket.on('activity', (a: ClassActivity) => setActivity({ ...a, skew: a.now - Date.now() }));
     socket.on('stageBeep', (kind: 'soon' | 'end') => playStageBeep(kind));
     socket.on('seats', setSeats);
     socket.on('studentUuids', setStudentUuids);
@@ -628,11 +678,6 @@ export default function App() {
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
     socket.on('callTeacher', ({ room, calling, note, who }: { room: string; calling: boolean; note?: string; who?: string }) => {
       if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));
-      setCallNotes(prev => {
-        const next = { ...prev };
-        if (calling && note) next[room] = note; else delete next[room];
-        return next;
-      });
       setCallingRooms(prev => {
         const next = new Set(prev);
         calling ? next.add(room) : next.delete(room);
@@ -712,6 +757,7 @@ export default function App() {
   // room names are "<lessonCode>:<base>" — check the base, not the full string
   const roomBase = livekit?.room.split(':')[1] ?? '';
   const inSmallRoom = roomBase.startsWith('pair-') || roomBase.startsWith('fours-') || roomBase.startsWith('individual-');
+  const workStage = state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours';
   // the solo demo: who called this room and what about — said by their tile at the board
   const roomOthers = demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : [];
   const roomCall = demo?.solo && inSmallRoom && livekit ? calls[livekit.room] : undefined;
@@ -834,7 +880,7 @@ export default function App() {
           </>
         )}
 
-        {livekit && !demo?.solo && <div style={{ marginTop: state.stage === 'waiting' ? GROUP_GAP - 8 : 0 }}><SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} /></div>}
+        {livekit && !demo?.solo && !livekit.quiet && <div style={{ marginTop: state.stage === 'waiting' ? GROUP_GAP - 8 : 0 }}><SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} /></div>}
         {voiceAllowed && (
           <button data-testid="voice-all" onClick={() => setVoiceOn(v => !v)}
             title={voiceOn ? 'Ученики во всех комнатах слышат вас. Нажмите, чтобы выключить' : 'Скажите что-то всему классу: задание, сколько осталось времени'}
@@ -936,24 +982,32 @@ export default function App() {
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {preview ? <LessonPreview slides={slides} /> : inSmallRoom
-            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} />}
+            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
+              quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.local ?? slides.material)?.blocks.find(b => b.id === slides.state.block)?.task}
               ask={roomAsk} />
-            : <StudentGrid students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={room => socket.emit('joinPair', { room })} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
+            : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
+                room,
+                // a group at work isn't disturbed: the teacher comes in unseen and unheard unless called
+                // (the bell) or asked to talk; «Войти открыто» in the room when it's needed
+                quiet: workStage && !toTalk && !callingRooms.has(room),
+              }); }} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
                 slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
           }
         </div>
       </div>
 
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
-        previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null} />}
-      {((demo?.solo && !preview) || state.stage !== 'waiting') && (
+        previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} />}
+      {/* at a group's board the task is over the board already: the notes would only take room there */}
+      {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{
           width: 'min(270px, 26vw)', flexShrink: 0, padding: 14, boxSizing: 'border-box', borderLeft: '1px solid #e5e5e5',
           background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',
         }}>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {demo?.solo && <SoloGuide stage={state.stage} calls={Object.values(callNotes)} />}
+            {demo?.solo && <SoloGuide stage={state.stage} />}
             {state.stage !== 'waiting' && <BlockNotes slides={slides} />}
           </div>
           {state.stage !== 'waiting' && (
@@ -976,17 +1030,17 @@ export default function App() {
 
   return (<AvatarProvider participants={state.participants}><StudentNames.Provider value={shownNames}><ClassCams.Provider value={classCams}>
     <LiveKitRoom
-      key={livekit.room}
+      key={`${livekit.room}${livekit.quiet ? '#quiet' : ''}`}
       serverUrl={livekit.url}
       token={livekit.token}
       connect={true}
-      video={media.camOn && camAllowed}
-      audio={media.micOn && !demo?.solo}
+      video={media.camOn && camAllowed && !livekit.quiet}
+      audio={media.micOn && !demo?.solo && !livekit.quiet}
       options={roomOptions}
       style={{ display: 'contents' }}
     >
       <RoomAudioRenderer />
-      <LocalMediaSync camOn={media.camOn && camAllowed} micOn={media.micOn && !demo?.solo} />
+      <LocalMediaSync camOn={media.camOn && camAllowed && !livekit.quiet} micOn={media.micOn && !demo?.solo && !livekit.quiet} />
       {inner}
     </LiveKitRoom>
     {voiceLink}

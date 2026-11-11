@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { setHintsOff, useHintsOff } from './demoHintsOff';
 
 export interface DemoTimes { endsAt: number; noStudentsAt: number | null; solo?: boolean }
 export interface DemoEnd { token: string; reason: string | null; solo?: boolean }
@@ -240,10 +239,10 @@ const GUIDE: Record<string, { title: string; steps: string[]; short?: string[] }
 };
 
 /** The solo demo has nobody to explain it: this says what to do on each stage */
-export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) {
+export function SoloGuide({ stage }: { stage: string }) {
   const part = GUIDE[stage] ?? GUIDE.waiting;
-  const hintsOff = useHintsOff();
-  const steps = !hintsOff && part.short ? part.short : part.steps;
+  // the hints beside the buttons are always on: the short version here, the rest is told by them
+  const steps = part.short ?? part.steps;
   return (
     // framed, and it blinks for 15 seconds when a new stage begins, then stays framed:
     // without reading it the screen makes no sense
@@ -256,15 +255,6 @@ export function SoloGuide({ stage, calls }: { stage: string; calls: string[] }) 
       <div style={{ fontSize: 11, color: '#a06a00', textTransform: 'uppercase', letterSpacing: 0.5 }}>Подсказка</div>
       <b style={{ fontSize: 15 }}>{part.title}</b>
       {steps.map(step => <div key={step}>{step}</div>)}
-      {hintsOff && <button data-testid="demo-hints-on" onClick={() => setHintsOff(false)} style={{
-        alignSelf: 'flex-start', border: 'none', background: 'transparent', color: '#4a90e2', cursor: 'pointer', fontSize: 12, padding: 0,
-      }}>Показывать подсказки у кнопок</button>}
-      {/* with the hints on, the bell has its own bubble and the question is shown at the board */}
-      {hintsOff && calls.map(note => (
-        <div key={note} data-testid="solo-call" style={{ padding: 10, borderRadius: 8, background: '#fdf1d6', color: '#8a5a00' }}>
-          <div style={{ fontSize: 11, marginBottom: 2 }}>Вас зовут</div>«{note}»
-        </div>
-      ))}
     </div>
   );
 }

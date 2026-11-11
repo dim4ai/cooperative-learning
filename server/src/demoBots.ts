@@ -17,6 +17,7 @@ export const SOLO_MIN_SEATS = 8;
 const SEAT_PAUSE_MS = 4000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
+const TALK_TICK_MS = 2000;
 const COLORS = ['#1971c2', '#2f9e44', '#9c36b5', '#f08c00'];
 
 interface Line { at: number; text: string } // seconds after the stage began
@@ -24,7 +25,9 @@ interface Line { at: number; text: string } // seconds after the stage began
 interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: who of the dialogue asks ({1} or {2})
 /** lead: the room where this bot sits gets this script. In its texts {1} is the lead and {2} the partner if they sit
  *  together, else the other one of the room; a line starting with «{1}: » or «{2}: » is said by them, as in a dialogue */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string }
+/** talk: how much each one talks, 0…1, in the room's order (lead, partner, then the rest); quietAfter: from then
+ *  on (seconds) the room keeps silent — the teacher's map shows it */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number }
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -50,7 +53,7 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
     { lines: lines(OBSERVATIONS.slice(1, 4), 5, 9) },
   ],
   pairs: [
-    { lines: lines(OBSERVATIONS, 4, 6) },
+    { lines: lines(OBSERVATIONS, 4, 6), talk: [0.55, 0.5] },
     // what the pair said before calling, written down at once: only so the teacher feels how it comes to a call
     { lead: 'Миша', partner: 'Артём', lines: lines([
       '{1}: AD = BC',
@@ -60,10 +63,11 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
       '{1}: нет, они не равны',
       '{2}: мне кажется, что равны,\nдавай у учителя спросим',
       '{1}: давай',
-    ], 2, 0), call: {
+    ], 2, 0), talk: [0.6, 0.6], quietAfter: 14, call: {
       at: 10, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
-    { lines: lines(OBSERVATIONS.slice(1), 6, 7) },
-    { lead: 'Тимур', lines: lines([
+    // one does all the talking, the other hardly a word
+    { lines: lines(OBSERVATIONS.slice(1), 6, 7), talk: [0.85, 0.05] },
+    { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
       '{1}: AO = OC',
       '{2}: BO = OD',
       '{1}: ∠AOB = ∠COD',
@@ -75,9 +79,10 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
       at: 30, by: 1, note: 'Мы спорим, можно ли брать вертикальные углы при пересечении диагоналей. Я думаю, что ∠AOB = ∠COD можно записать, а {2} говорит, что это не свойство параллелограмма. Кто прав?' } },
   ],
   fours: [
-    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), call: {
+    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), talk: [0.5, 0.4, 0.35, 0.03], call: {
       at: 15, note: 'В сторонах уверены, а углы на клетках не посчитать. Как быть?' } },
-    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC', 'Сомневаемся: ∠A = ∠C'], 6, 8) },
+    // talks for a while, then falls silent
+    { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC', 'Сомневаемся: ∠A = ∠C'], 6, 8), talk: [0.45, 0.4, 0.3, 0.3], quietAfter: 30 },
   ],
 };
 
@@ -99,7 +104,9 @@ export interface BotHost {
   seat(botIndex: number): void;
   /** The rooms of this stage, in a stable order */
   rooms(): string[];
-  write(room: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
+  write(room: string, obj: Record<string, unknown> & { uid: string; type: string }, author?: string): void;
+  /** A bot talked this long: counted as a real student's microphone would be */
+  talk(name: string, ms: number): void;
   /** Names of the bots in a room */
   members(room: string): string[];
   call(room: string, note: string, who?: string): void;
@@ -139,6 +146,8 @@ export class BotRun {
   private write(room: string, text: string) {
     const w = this.written.get(room) ?? { n: 0, top: 60 };
     const speaker = /^\{([12])\}: /.exec(text)?.[1];
+    const [lead, partner] = this.names.get(room) ?? ['', ''];
+    const author = (speaker === '2' ? partner : lead) || undefined;
     const fontSize = speaker ? 30 : 40;
     const rows = text.split('\n').length;
     const height = speaker ? rows * 36 + 14 : 72;
@@ -147,7 +156,7 @@ export class BotRun {
       uid: `bot-${room}-${this.uid++}`, type: 'IText', text: this.fill(room, text), left: speaker ? 760 : 860, top: w.top,
       originX: 'left', originY: 'top', fontSize, fontFamily: 'sans-serif',
       fill: speaker ? COLORS[Number(speaker) - 1] : COLORS[w.n % COLORS.length],
-    });
+    }, author);
     this.written.set(room, { n: w.n + 1, top: w.top + height });
   }
 
@@ -175,6 +184,7 @@ export class BotRun {
       const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
+      if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
       if (part.call) {
         const { at, note, reply, by } = part.call;
         this.after(at * 1000, () => {
@@ -183,6 +193,19 @@ export class BotRun {
         });
       }
     });
+  }
+
+  /** Talking in the room, as the microphones would count it: every couple of seconds each one may have said something */
+  private chatter(room: string, part: RoomScript, order: string[]) {
+    const started = Date.now();
+    const tick = () => {
+      const quiet = part.quietAfter !== undefined && Date.now() - started > part.quietAfter * 1000;
+      if (!quiet) order.forEach((name, i) => {
+        if (name && Math.random() < (part.talk?.[i] ?? 0.4)) this.host.talk(name, TALK_TICK_MS);
+      });
+      this.after(TALK_TICK_MS, tick);
+    };
+    this.after(1500 + Math.random() * 1000, tick);
   }
 
   /** The teacher came to a room that called: they take the hint and write the fix */

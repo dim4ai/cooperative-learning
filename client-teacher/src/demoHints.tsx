@@ -2,9 +2,8 @@
 // lesson gets to it and gone once it's done. The lesson screen knows nothing of them: the hints
 // find their buttons on the page by the marks they already carry (data-testid, data-hint).
 import { useEffect, useMemo, useState } from 'react';
-import { setHintsOff, useHintsOff } from './demoHintsOff';
 import type { CSSProperties } from 'react';
-import type { Seat } from './SeatingMap';
+import type { ClassActivity, Seat } from './SeatingMap';
 import type { TeacherSlides } from './LessonSlides';
 
 // ---------- which hint, when ----------
@@ -30,6 +29,29 @@ export interface HintsInput {
   calls: Record<string, { note: string }>;
   /** the room the teacher is in, if not the classroom */
   room: string | null;
+  /** in that room incognito: the group neither sees nor hears the teacher */
+  quiet: boolean;
+  /** who talks and writes, by student */
+  activity: ClassActivity | null;
+}
+
+/** The pair where one does the talking: the detective has something to look at there */
+function lopsidedPair(x: HintsInput): string | null {
+  const pairs = new Map<string, string[]>();
+  for (const s of x.seats) {
+    if (!s.occupant) continue;
+    const room = `${x.lesson}:pair-g${s.groupIndex}-r${s.row}`;
+    pairs.set(room, [...(pairs.get(room) ?? []), s.occupant]);
+  }
+  let best: string | null = null, bestShare = 1;
+  for (const [room, names] of pairs) {
+    if (names.length < 2) continue;
+    const talk = names.map(n => x.activity?.students[n]?.talk ?? 0);
+    const total = talk.reduce((a, b) => a + b, 0);
+    const share = total >= 6 ? Math.min(...talk) / total : 0.5;
+    if (!best || share < bestShare) { best = room; bestShare = share; }
+  }
+  return best;
 }
 
 const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null }>();
@@ -107,6 +129,11 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 
   if (stage === 'individual' || stage === 'pairs' || stage === 'fours') {
     // at a student's board
+    if (x.room && x.quiet) {
+      return { id: 'spy-in', anchor: '[data-testid="quiet-reveal"]', text:
+        'Вы здесь инкогнито — посмотрите на детектива справа: ученики вас не видят и не слышат. '
+        + 'Посмотрите, что они пишут. Заговорить с ними — «Войти открыто», уйти — «Назад».' };
+    }
     if (x.room) {
       const call = x.calls[x.room];
       if (call) {
@@ -127,6 +154,13 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     const answered = Object.keys(x.calls).filter(r => done.has(`visit:${r}`)).length;
     if (answered < (CALLS[stage] ?? 2)) return null; // the class works; someone will call
+    // the detective: a pair that didn't call, but the map shows something's off there
+    if (stage === 'pairs' && !done.has('spy')) {
+      const room = lopsidedPair(x);
+      if (room) return { id: 'spy', anchor: `[data-pair-room="${CSS.escape(room)}"]`, text:
+        'Все, кто звал, получили ответ. Посмотрите на полоски под учениками: в этой паре говорит в основном один. '
+        + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
+    }
     if (stage === 'fours') return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Это весь цикл урока. Завершите урок и расскажите, что думаете' };
     return { id: `next-block:${stage}`, anchor: NEXT_BLOCK, text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах' : 'Дальше пары объединяются в четвёрки' };
   }
@@ -172,7 +206,6 @@ function arrowStyle(side: Side, r: Box, pos: { top: number; left: number }): CSS
 const BG = '#2b3a55';
 
 export function DemoHints(props: HintsInput) {
-  const hintsOff = useHintsOff();
   // what the teacher has already done once needs no more showing (noted while rendering)
   // kept outside: the lesson screen is built anew whenever the teacher walks into a room
   const mem = memory.get(props.lesson) ?? { done: new Set<string>(), firstSlide: null };
@@ -187,7 +220,9 @@ export function DemoHints(props: HintsInput) {
   if (previewOpen) now.add('preview');
   if (slides.state.revealed.length) now.add('reveal');
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
-  if (props.room) { now.add(`visit:${props.room}`); now.add('in-room'); } else if (done.has('in-room')) now.add('room-back');
+  // incognito doesn't answer a call: only an open visit does
+  if (props.room && props.quiet) now.add('spy');
+  else if (props.room) { now.add(`visit:${props.room}`); now.add('in-room'); } else if (done.has('in-room')) now.add('room-back');
   if ([...now].some(id => !done.has(id))) setDone(new Set([...done, ...now]));
   if (slideAt && !firstSlide) setFirstSlide(slideAt);
 
@@ -208,7 +243,7 @@ export function DemoHints(props: HintsInput) {
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
   }, [previewOpen, lesson]);
 
-  const picked = hintsOff ? null : pickHint(props, done);
+  const picked = pickHint(props, done);
   const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
   return (<>
     {hints.map(h => <Bubble key={h.id} hint={h} />)}
@@ -270,11 +305,6 @@ function Bubble({ hint }: { hint: Hint }) {
       }}>
         <div style={arrowStyle(pos.side, box, pos)} />
         {hint.text}
-        <div style={{ marginTop: 6, textAlign: 'right' }}>
-          <button data-testid="demo-hints-off" onClick={() => setHintsOff(true)} style={{
-            border: 'none', background: 'transparent', color: '#aab6cc', cursor: 'pointer', fontSize: 11, padding: 0,
-          }}>Скрыть подсказки</button>
-        </div>
       </div>
     </>
   );

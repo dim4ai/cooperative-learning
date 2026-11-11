@@ -19,6 +19,51 @@ import { MediaCheck, LocalMediaSync, toggleStyle, loadMediaPrefs, saveMediaPrefs
 import type { MediaPrefs } from './mediaCheck';
 import { playStageBeep } from './beep';
 
+/** How long this student talks, for the teacher's map: the loudness of our own microphone, measured here and
+ *  summed; every few seconds the number of seconds is sent. Only the seconds leave the browser, never the sound */
+function TalkMeter() {
+  const room = useRoomContext();
+  useEffect(() => {
+    const STEP = 200;
+    const LOUD = 0.02; // RMS: above the hum of a quiet room, below a voice at the microphone
+    const HOLD = 600;  // a pause between words still counts as talking
+    let talked = 0, lastLoud = 0;
+    let ctx: AudioContext | null = null, analyser: AnalyserNode | null = null, source: MediaStreamAudioSourceNode | null = null;
+    let tracked: MediaStreamTrack | null = null;
+    const buf = new Float32Array(1024);
+    const attach = (track: MediaStreamTrack | null) => {
+      if (track === tracked) return;
+      source?.disconnect(); source = null; tracked = track;
+      if (!track) return;
+      try {
+        ctx ??= new AudioContext();
+        analyser ??= Object.assign(ctx.createAnalyser(), { fftSize: 1024 });
+        source = ctx.createMediaStreamSource(new MediaStream([track]));
+        source.connect(analyser);
+      } catch { /* no audio here: nothing is counted */ }
+    };
+    const tick = setInterval(() => {
+      const me = room.localParticipant;
+      const pub = me.getTrackPublication(Track.Source.Microphone);
+      const track = me.isMicrophoneEnabled && pub?.track && !pub.isMuted ? pub.track.mediaStreamTrack : null;
+      attach(track);
+      if (!track || !analyser) return;
+      if (ctx?.state === 'suspended') void ctx.resume();
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const now = Date.now();
+      if (Math.sqrt(sum / buf.length) > LOUD) lastLoud = now;
+      if (now - lastLoud < HOLD) talked += STEP;
+    }, STEP);
+    const report = setInterval(() => {
+      if (talked > 0) { socket.emit('activity:talk', { ms: talked }); talked = 0; }
+    }, 4000);
+    return () => { clearInterval(tick); clearInterval(report); source?.disconnect(); void ctx?.close(); };
+  }, [room]);
+  return null;
+}
+
 function MicControl({ enabled }: { enabled: boolean }) {
   const { localParticipant } = useLocalParticipant();
   const room = useRoomContext();
@@ -614,6 +659,7 @@ export default function App() {
           >
             <RoomAudioRenderer />
             <MicControl enabled={micOn} />
+            <TalkMeter />
             <LocalMediaSync camOn={media.camOn && camInClass} />
             {newcomer
               ? <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>

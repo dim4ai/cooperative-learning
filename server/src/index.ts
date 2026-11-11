@@ -400,6 +400,7 @@ interface Participant {
   newcomer?: boolean; // not let into the class yet: seen and heard by the teacher only
   teacherName?: string; // a student's name for the teacher; never sent to classmates
   bot?: boolean; // a simulated student of the solo demo: no socket behind the id
+  quiet?: boolean; // a teacher in a group's room unseen and unheard: listens and watches the board only
 }
 
 // Seating
@@ -429,6 +430,9 @@ interface LessonRuntime {
   atDesks: boolean;                // before the lesson: the teacher let those seated go to their fours
   timerEndsAt: number | null;      // the running block's planned end (its duration), for the teacher's countdown
   timerBeeps: NodeJS.Timeout[];    // the signals to everyone: 15 s before that end, and at it
+  activity: Map<string, Activity>; // the running work block: student name → how much they talked and wrote
+  activitySent: NodeJS.Timeout | null; // a send to the teacher is due
+  activitySince: number;           // counting began (the stage or block began)
   participants: Map<string, Participant>;
   seats: Seat[];
   seatPlan: Map<string, string>; // from the teacher's journal, in memory only: student uuid → seat id
@@ -617,7 +621,8 @@ function startBots(code: string, lesson: LessonRuntime) {
       broadcastState(code, lesson);
     },
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
-    write: (room, obj) => applyBoardOp(lesson, room, { t: 'add', obj }, 'Ученик', false, ''),
+    write: (room, obj, author) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, ''),
+    talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
     call(room, note, who) {
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note, who });
@@ -672,6 +677,8 @@ function dropLesson(code: string, why: string) {
   stopBots(lesson);
   lesson.relay.dispose();
   if (lesson.afterTimer) clearTimeout(lesson.afterTimer);
+  if (lesson.activitySent) clearTimeout(lesson.activitySent);
+  for (const t of lesson.timerBeeps) clearTimeout(t);
   if (lesson.joinCode) joinAliases.delete(lesson.joinCode);
   lessons.delete(code);
   console.log(`[${code}] dropped from memory (${why})`);
@@ -697,6 +704,9 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     atDesks: true, // those seated wait at their desks until the teacher calls everyone in
     timerEndsAt: null,
     timerBeeps: [],
+    activity: new Map(),
+    activitySent: null,
+    activitySince: Date.now(),
     participants: new Map(),
     seats: [],
     seatPlan: new Map(),
@@ -1219,6 +1229,7 @@ function enterBlock(lesson: LessonRuntime, block: Block) {
 
 async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   const wereAtDesks = lesson.atDesks;
+  if (stage !== lesson.stage) resetActivity(lesson); // who talked and wrote is counted for each stage anew
   lesson.stage = stage;
   lesson.atDesks = false;
   if (stage === 'waiting') setStageTimer(lesson, null); // back to the seating: no block runs
@@ -1232,6 +1243,70 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   broadcastState(code, lesson);
   lesson.bots?.onStage(stage);
   soloReached(code, stage);
+}
+
+// ---------- who talks and writes, in pairs and fours ----------
+// A student's browser tells how long its own microphone was talking (LiveKit's speaking flag, nothing is
+// recorded); the board ops are counted here. The teacher sees both by each student without going to the desk.
+
+interface Activity { talkMs: number; ops: number; lastTalk: number; lastOp: number; lastModAt: number }
+const ACTIVITY_SEND_MS = 2000;
+const TALK_REPORT_MAX_MS = 6000; // a client reports every few seconds: more than that at once isn't true
+
+function activityOf(lesson: LessonRuntime, name: string): Activity {
+  let a = lesson.activity.get(name);
+  if (!a) { a = { talkMs: 0, ops: 0, lastTalk: 0, lastOp: 0, lastModAt: 0 }; lesson.activity.set(name, a); }
+  return a;
+}
+
+function atWork(lesson: LessonRuntime): boolean {
+  return lesson.stage === 'individual' || lesson.stage === 'pairs' || lesson.stage === 'fours';
+}
+
+function activityPayload(lesson: LessonRuntime) {
+  return {
+    now: Date.now(),
+    since: lesson.activitySince,
+    students: Object.fromEntries([...lesson.activity].map(([name, a]) =>
+      [name, { talk: Math.round(a.talkMs / 1000), ops: a.ops, lastTalk: a.lastTalk || null, lastOp: a.lastOp || null }])),
+  };
+}
+
+function sendActivity(lesson: LessonRuntime, to?: Socket) {
+  if (to) { to.emit('activity', activityPayload(lesson)); return; }
+  if (lesson.activitySent) return; // at most once in a while
+  lesson.activitySent = setTimeout(() => {
+    lesson.activitySent = null;
+    const payload = activityPayload(lesson);
+    for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('activity', payload);
+  }, ACTIVITY_SEND_MS);
+}
+
+function resetActivity(lesson: LessonRuntime) {
+  lesson.activity = new Map();
+  lesson.activitySince = Date.now();
+  if (lesson.activitySent) { clearTimeout(lesson.activitySent); lesson.activitySent = null; }
+  const payload = activityPayload(lesson);
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('activity', payload);
+}
+
+function noteTalk(lesson: LessonRuntime, name: string, ms: number) {
+  if (!atWork(lesson) || !(ms > 0)) return;
+  const a = activityOf(lesson, name);
+  a.talkMs += Math.min(ms, TALK_REPORT_MAX_MS);
+  a.lastTalk = Date.now();
+  sendActivity(lesson);
+}
+
+/** A stroke, a text, a shape counts once; moving or changing things — once in a couple of seconds */
+function noteBoardOp(lesson: LessonRuntime, name: string, kind: unknown) {
+  if (!atWork(lesson)) return;
+  const a = activityOf(lesson, name);
+  const now = Date.now();
+  if (kind !== 'add') { if (now - a.lastModAt < 2000) return; a.lastModAt = now; }
+  a.ops++;
+  a.lastOp = now;
+  sendActivity(lesson);
 }
 
 // ---------- time of a block ----------
@@ -1258,6 +1333,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (!block || !STAGES.includes(block.type as Stage)) return;
   // pressing the running block again doesn't start its time over
   if (block.id !== lesson.block || lesson.timerEndsAt === null) setStageTimer(lesson, block.duration);
+  if (block.id !== lesson.block) resetActivity(lesson);
   // A new explanation is a new topic: last topic's marks would say nothing about it
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
   enterBlock(lesson, block);
@@ -1383,6 +1459,7 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
     board.clear();
     out = { t: 'clear' };
   } else return;
+  if (!isTeacher) noteBoardOp(lesson, author, op.t);
 
   for (const [id, p] of lesson.participants) {
     if (p.livekitRoom === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('boardOp', out);
@@ -1426,6 +1503,13 @@ async function makeVoiceListenerToken(identity: string, room: string): Promise<s
   return await token.toJwt();
 }
 
+/** The teacher's quiet visit: hidden from the room, may not publish anything */
+async function makeQuietToken(identity: string, room: string): Promise<string> {
+  const token = new AccessToken(API_KEY, API_SECRET, { identity });
+  token.addGrant({ roomJoin: true, room, canPublish: false, canPublishData: false, canSubscribe: true, hidden: true });
+  return await token.toJwt();
+}
+
 /** Without video the token itself forbids the camera, so no client can switch it on anyway */
 async function makeLivekitToken(identity: string, room: string, video = true): Promise<string> {
   const token = new AccessToken(API_KEY, API_SECRET, { identity });
@@ -1441,15 +1525,16 @@ async function prepareRoom(lesson: LessonRuntime, room: string) {
   if (!lesson.bots) await livekit.createRoom({ name: room }).catch(() => {});
 }
 
-async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string, room: string) {
+async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string, room: string, quiet = false) {
   const participant = lesson.participants.get(socketId);
   if (participant?.bot) { participant.livekitRoom = room; noteRoom(lesson, participant); return; }
   const socket = io.sockets.sockets.get(socketId);
   if (!socket) return;
   if (!participant) return;
-  const token = await makeLivekitToken(participant.name, room, canVideo(lesson, participant.role));
-  socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room });
+  const token = quiet ? await makeQuietToken(participant.name, room) : await makeLivekitToken(participant.name, room, canVideo(lesson, participant.role));
+  socket.emit('livekit', { url: LIVEKIT_WS_URL, token, room, quiet });
   participant.livekitRoom = room;
+  participant.quiet = quiet || undefined;
   noteRoom(lesson, participant);
   socket.emit('sharedText', { room, text: lesson.sharedTexts.get(room) ?? '' });
   socket.emit('boardState', boardState(lesson, room));
@@ -1808,6 +1893,7 @@ io.on('connection', async (socket) => {
       socket.emit('slides:state', teacherSlidesState(lesson));
       sendMarks(lesson, socket);
       sendEntry(code, lesson, socket);
+      sendActivity(lesson, socket);
     } else {
       socket.emit('slides:view', studentSlidesView(lesson));
       sendEarlierBoards(lesson, socket.id);
@@ -1997,7 +2083,7 @@ io.on('connection', async (socket) => {
 
     socket.on('boardOp', (op: unknown) => {
       const participant = lesson.participants.get(socket.id);
-      if (!participant?.livekitRoom) return;
+      if (!participant?.livekitRoom || participant.quiet) return;
       applyBoardOp(lesson, participant.livekitRoom, op, participant.name, role === 'teacher', socket.id);
     });
 
@@ -2022,8 +2108,21 @@ io.on('connection', async (socket) => {
       io.to(code).emit('pollResults', null);
     });
 
-    socket.on('joinPair', async ({ room }: { room: string }) => {
+    socket.on('joinPair', async ({ room, quiet }: { room: string; quiet?: boolean }) => {
       if (role !== 'teacher') return;
+      // quietly: the group neither sees nor hears the teacher, a call for help stays on
+      if (quiet) { await sendToRoom(code, lesson, socket.id, room, true); return; }
+      await visitOpenly(room);
+    });
+
+    // A quiet visitor shows up in the same room
+    socket.on('revealSelf', async () => {
+      const me = lesson.participants.get(socket.id);
+      if (role !== 'teacher' || !me?.quiet || !me.livekitRoom) return;
+      await visitOpenly(me.livekitRoom);
+    });
+
+    async function visitOpenly(room: string) {
       await sendToRoom(code, lesson, socket.id, room);
       // Dismiss call indicator for this room on teacher side
       socket.emit('callTeacher', { room, calling: false });
@@ -2034,7 +2133,7 @@ io.on('connection', async (socket) => {
           io.sockets.sockets.get(id)?.emit('teacherJoined');
         }
       }
-    });
+    }
 
     socket.on('leavePair', async () => {
       if (role !== 'teacher') return;
@@ -2048,6 +2147,13 @@ io.on('connection', async (socket) => {
           io.sockets.sockets.get(id)?.emit('muted');
         }
       }
+    });
+
+    // the student's browser: how long its microphone was talking since the last report
+    socket.on('activity:talk', ({ ms }: { ms?: unknown } = {}) => {
+      const p = lesson.participants.get(socket.id);
+      if (role !== 'student' || !p?.livekitRoom || typeof ms !== 'number') return;
+      noteTalk(lesson, p.name, ms);
     });
 
     socket.on('callTeacher', ({ room }: { room: string }) => {

@@ -323,7 +323,7 @@ const panelBtn: CSSProperties = { padding: '8px 10px', borderRadius: 6, border: 
 
 // ---------- group stage: the board with the slide under it ----------
 
-export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides }) {
+export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: TeacherSlides; readOnly?: boolean }) {
   const { local, state, setState } = teacherSlides;
   // Without the file here the slides can still be navigated, just without pictures
   const material: { blocks: MaterialBlock[] } | null = local ?? teacherSlides.material;
@@ -360,7 +360,7 @@ export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides 
   const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
   const hiddenLeft = scene ? scene.objects.filter(o => o.studentHidden && !revealed.has(o.uid)).length : 0;
 
-  if (!scene) return <SharedBoard />;
+  if (!scene) return <SharedBoard readOnly={readOnly} />;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -371,7 +371,7 @@ export function ExplainBoard({ slides: teacherSlides }: { slides: TeacherSlides 
         {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <SharedBoard underlay={width => (
+        <SharedBoard readOnly={readOnly} underlay={width => (
           <SlidePlayer
             key={`${scene.id}:${local ? 'local' : 'none'}`}
             scene={scene}
