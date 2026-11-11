@@ -226,12 +226,15 @@ export class BotRun {
   private chatter(room: string, part: RoomScript, order: string[]) {
     const started = Date.now();
     const recent: string[] = [];
+    let last = '';
     const tick = () => {
       const quiet = part.quietAfter !== undefined && Date.now() - started > part.quietAfter * 1000;
       if (quiet || this.quietRooms.has(room)) { this.after(TALK_TICK_MS, tick); return; }
-      const weights = order.map((name, i) => (name ? part.talk?.[i] ?? 0.4 : 0));
+      // a conversation takes turns: who has just spoken is less likely to go on, unless they do all the talking anyway
+      const weights = order.map((name, i) => (name ? part.talk?.[i] ?? 0.4 : 0) * (name === last ? 0.3 : 1));
       let r = Math.random() * weights.reduce((a, b) => a + b, 0);
       const name = order[Math.max(0, weights.findIndex(w => (r -= w) < 0))];
+      last = name;
       const fresh = CHATTER.filter(c => !recent.includes(c.id));
       const phrase = fresh[Math.floor(Math.random() * fresh.length)];
       recent.push(phrase.id);
