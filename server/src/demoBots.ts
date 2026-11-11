@@ -20,6 +20,8 @@ const SEAT_PAUSE_MS = 4000;
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
 const TALK_TICK_MS = 2000;
+const SPOKEN_AFTER_CALLS_MS = 1000; // the last call answered: the dialogue begins, so it's under way when the hint points there
+const SPOKEN_LATEST_MS = 90_000; // …or by then anyway
 const NEXT_CALL_GAP_MS = 6000; // back in the classroom, a moment to look around before the next bell
 const COLORS = ['#1971c2', '#2f9e44', '#9c36b5', '#f08c00'];
 
@@ -128,6 +130,8 @@ export class BotRun {
   private callQueue: { room: string; at: number; fire: () => void }[] = [];
   private calling: { room: string; visited: boolean } | null = null;
   private stageStart = 0;
+  private spoken: { room: string; lines: SpokenLine[] } | null = null;
+  private quietRooms = new Set<string>(); // rooms whose random talk stops: their dialogue speaks now
   private uid = 0;
 
   constructor(private host: BotHost) {}
@@ -177,6 +181,8 @@ export class BotRun {
     this.replies.clear();
     this.callQueue = [];
     this.calling = null;
+    this.spoken = null;
+    this.quietRooms.clear();
     this.stageStart = Date.now();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
     const script = SCRIPT[stage];
@@ -197,8 +203,12 @@ export class BotRun {
       const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
-      if (part.spoken) this.speak(room, part.spoken);
-      else if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
+      if (part.spoken) {
+        // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
+        this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
+        this.spoken = { room, lines: part.spoken };
+        this.after(SPOKEN_LATEST_MS, () => this.speakNow());
+      } else if (stage !== 'individual') this.chatter(room, part, [...new Set([lead, partner, ...members])]);
       if (part.call) {
         const { at, note, reply, by } = part.call;
         this.callQueue.push({ room, at: at * 1000, fire: () => {
@@ -216,12 +226,20 @@ export class BotRun {
     const started = Date.now();
     const tick = () => {
       const quiet = part.quietAfter !== undefined && Date.now() - started > part.quietAfter * 1000;
-      if (!quiet) order.forEach((name, i) => {
+      if (!quiet && !this.quietRooms.has(room)) order.forEach((name, i) => {
         if (name && Math.random() < (part.talk?.[i] ?? 0.4)) this.host.talk(name, TALK_TICK_MS);
       });
       this.after(TALK_TICK_MS, tick);
     };
     this.after(1500 + Math.random() * 1000, tick);
+  }
+
+  private speakNow() {
+    if (!this.spoken) return;
+    const { room, lines } = this.spoken;
+    this.spoken = null;
+    this.quietRooms.add(room);
+    this.speak(room, lines);
   }
 
   /** A dialogue line by line: each one heard, counted as talk while it lasts, and written down as it ends */
@@ -232,7 +250,7 @@ export class BotRun {
       const ms = line.ms[who] ?? Math.max(...Object.values(line.ms));
       t += line.pause;
       this.after(t, () => {
-        this.host.say(room, { src: `/demo/voice/${line.id}-${VOICE_OF[who] ?? 'eduard'}.mp3`, ms });
+        this.host.say(room, { src: `/demo/voice/${line.id}-${VOICE_OF[who] ?? 'kirill'}.mp3`, ms });
         for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
       });
       t += ms;
@@ -243,7 +261,7 @@ export class BotRun {
   /** The next room calls: the stage's first one at its time in the script, every next one `gap` after the teacher came back */
   private nextCall(gap?: number) {
     const next = this.callQueue.shift();
-    if (!next) return;
+    if (!next) { if (gap !== undefined) this.after(SPOKEN_AFTER_CALLS_MS, () => this.speakNow()); return; }
     const due = gap ?? Math.max(next.at - (Date.now() - this.stageStart), 0);
     this.after(due, () => { this.calling = { room: next.room, visited: false }; next.fire(); });
   }
