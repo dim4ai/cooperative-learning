@@ -164,7 +164,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (stage === 'pairs' && !done.has('spy')) {
       const room = lopsidedPair(x);
       if (room) return { id: 'spy', anchor: `[data-pair-room="${CSS.escape(room)}"]`, text:
-        'Все, кто звал, получили ответ. Посмотрите на эту пару: говорит в основном один, у второго полоска почти пустая. '
+        'Посмотрите на эту пару: говорит и пишет в основном один ученик. '
         + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
     }
     if (stage === 'fours') return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Это весь цикл урока. Завершите урок и расскажите, что думаете' };
