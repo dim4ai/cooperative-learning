@@ -772,6 +772,7 @@ export default function App() {
 
         {state.stage !== 'waiting' && (
           <>
+            <div style={{ fontSize: 22, fontWeight: 'bold', color: '#222', marginBottom: 4 }}>План урока</div>
             <LessonPlan slides={slides} stage={state.stage} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>

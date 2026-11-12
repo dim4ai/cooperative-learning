@@ -212,7 +212,7 @@ export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: st
   const current = stage === 'waiting' ? null : slides.state.block;
   return (
     // about five blocks high, the rest scrolls: the sidebar keeps room for what's under the plan
-    <div data-testid="lesson-plan" style={{ flex: '0 1 auto', minHeight: 60, maxHeight: 234, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
+    <div data-testid="lesson-plan" style={{ flex: '0 1 auto', minHeight: 60, maxHeight: 234, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '0 -4px', padding: '0 4px' }}>
       {blocks.map(b => {
         const on = b.id === current;
         return (
