@@ -729,10 +729,6 @@ export default function App() {
       }}>
         {!connected && <div data-testid="no-connection" style={{ fontSize: 12, color: '#e74c3c', marginBottom: 4 }}>● Нет связи</div>}
 
-        <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
-        <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
-          {entry?.joinCode ?? (lessonCode || '…')}
-        </div>
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
@@ -821,6 +817,12 @@ export default function App() {
         )}
 
         <div style={{ marginTop: 'auto' }} />
+        <div data-testid="join-code-box" style={{ marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
+          <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
+            {entry?.joinCode ?? (lessonCode || '…')}
+          </div>
+        </div>
         <div style={{ fontSize: 12, color: '#222' }}>
           {students.length} учеников
         </div>
