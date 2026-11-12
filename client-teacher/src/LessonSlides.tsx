@@ -211,11 +211,13 @@ export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: st
   const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
   return (
-    <div data-testid="lesson-plan" style={{ flex: 1, minHeight: 60, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
+    // about five blocks high, the rest scrolls: the sidebar keeps room for what's under the plan
+    <div data-testid="lesson-plan" style={{ flex: '0 1 auto', minHeight: 60, maxHeight: 234, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
       {blocks.map(b => {
         const on = b.id === current;
         return (
-          <button key={b.id} data-testid="plan-block" data-current={on || undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
+          <button key={b.id} data-testid="plan-block" data-current={on || undefined}
+            ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
             background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
