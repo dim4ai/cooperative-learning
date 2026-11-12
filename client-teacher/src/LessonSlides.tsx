@@ -206,25 +206,7 @@ const TYPE_LABELS: Record<string, string> = { group: 'объяснение', ind
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */
-function BlockTime({ endsAt, clockSkew }: { endsAt: number; clockSkew: number }) {
-  const [now, setNow] = useState(() => Date.now() + clockSkew);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now() + clockSkew), 500);
-    return () => clearInterval(id);
-  }, [clockSkew]);
-  const left = Math.round((endsAt - now) / 1000);
-  const abs = Math.abs(left);
-  const text = `${left < 0 ? '+' : ''}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, '0')}`;
-  const bg = left < 0 ? '#c0392b' : left <= 60 ? '#f0b429' : 'rgba(255,255,255,0.25)';
-  return (
-    <span data-testid="block-time" title={left < 0 ? 'Время этапа вышло' : 'Осталось на этап'} style={{
-      float: 'right', marginLeft: 6, padding: '0 5px', borderRadius: 4, fontSize: 11.5, fontWeight: 'bold',
-      fontVariantNumeric: 'tabular-nums', background: bg, color: left <= 60 && left >= 0 ? '#3a2a00' : '#fff',
-    }}>{text}</span>
-  );
-}
-
-export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: TeacherSlides; stage: string; endsAt: number | null; clockSkew: number }) {
+export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: string }) {
   // the server's order: the tasks added during the lesson are in it too
   const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
@@ -237,7 +219,6 @@ export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: Teach
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
             background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
-            {on && endsAt && <BlockTime endsAt={endsAt} clockSkew={clockSkew} />}
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
             <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
               {isLiveBlock(b) && <span data-testid="plan-block-added" title="Добавлено по ходу урока">＋ </span>}

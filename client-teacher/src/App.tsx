@@ -22,6 +22,7 @@ import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
 import { RecordButton, RecordingFinished } from './RecordingUI';
 import { LessonMenu, NewTaskDialog, TaskMenu } from './TopMenu';
+import { StageTimer, type TimerState } from './StageTimer';
 import { useRecording } from './recording';
 import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
@@ -51,6 +52,7 @@ interface LessonState {
   atDesks?: boolean;
   videoMode?: VideoMode;
   timerEndsAt: number | null;
+  timer?: TimerState;
   demo?: DemoTimes | null;
   now?: number;
   participants: Participant[];
@@ -774,7 +776,7 @@ export default function App() {
 
         {state.stage !== 'waiting' && (
           <>
-            <LessonPlan slides={slides} stage={state.stage} endsAt={state.timerEndsAt} clockSkew={clockSkew} />
+            <LessonPlan slides={slides} stage={state.stage} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         )}
@@ -872,6 +874,9 @@ export default function App() {
               }}>Сменить экран</button>}
             </div>
           )}
+          {state.stage !== 'waiting' && !preview && <div style={{ marginLeft: 'auto' }}>
+            <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />
+          </div>}
           {lessonCode && !demo && <div style={{ marginLeft: 'auto' }}>
             <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} ask={recordAsk} />
             <RecordingFinished />

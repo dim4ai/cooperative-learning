@@ -44,6 +44,8 @@ export interface Block {
   /** minutes planned for it: the teacher sees the time run, everyone hears 15 s before the end and at the end */
   duration: number | null;
   slides: Scene[];
+  /** a task added during the lesson: what the teacher drew for it, on every room's board to start with */
+  starter?: Record<string, unknown>[];
 }
 
 export interface MediaInfo { hash: string; size: number; type: string }

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { socket } from './socket';
 import type { TeacherSlides } from './LessonSlides';
 import { RecordingsDialog } from './RecordingUI';
+import { Board, type BoardLink, type BoardObject, type BoardOp } from './slides/Board';
+import { boardPictures } from './BoardPictures';
 
 // The menus over the lesson: what the lesson is and who gets in («Урок»), and a task the lesson file
 // doesn't have, to change the course of the lesson as it goes («Новое задание»)
@@ -98,46 +100,87 @@ export function TaskMenu({ onPick }: { onPick: (type: string) => void }) {
   );
 }
 
+/** A board kept in memory: what the teacher draws for a task before it goes to every room */
+function memoryBoard() {
+  const objects = new Map<string, BoardObject>();
+  const link: BoardLink = {
+    send(op: BoardOp) {
+      if (op.t === 'add' || op.t === 'mod') objects.set(op.obj.uid, op.obj);
+      else if (op.t === 'del') objects.delete(op.uid);
+      else objects.clear();
+    },
+    subscribe(_onOp, onState) { onState([...objects.values()]); return () => {}; },
+  };
+  return { link, objects: () => [...objects.values()] };
+}
+
 export function NewTaskDialog({ type, running, onClose }: { type: string; running: boolean; onClose: () => void }) {
   const label = TASK_TYPES.find(t => t.type === type)?.label ?? '';
   const [title, setTitle] = useState('');
   const [task, setTask] = useState('');
   const [minutes, setMinutes] = useState('');
+  const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
   const work = type !== 'group';
+  const [board] = useState(memoryBoard);
   const n = Number(minutes);
   const okMinutes = minutes.trim() === '' || (Number.isInteger(n) && n >= 1 && n <= 120);
 
   function add(start: boolean) {
-    if (!okMinutes) return;
-    socket.emit('block:add', { type, title, task, minutes: minutes.trim() ? n : null, start });
-    onClose();
+    if (!okMinutes || sending) return;
+    setSending(true);
+    setError('');
+    const objs = work ? board.objects() : [];
+    socket.timeout(15_000).emit('block:add', { type, title, task, minutes: minutes.trim() ? n : null, board: objs, start },
+      (err: unknown, res?: { ok?: boolean }) => {
+        setSending(false);
+        if (!err && res?.ok) { onClose(); return; }
+        setError(err ? 'Сервер не ответил, попробуйте ещё раз' : 'Доска слишком большая: уберите часть картинок');
+      });
   }
 
+  const minutesRow = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#333' }}>
+      Время
+      <button data-testid="new-task-less" aria-label="На минуту меньше" disabled={!minutes || n <= 1}
+        onClick={() => setMinutes(n <= 1 ? '' : String(n - 1))} style={step}>−</button>
+      <input data-testid="new-task-minutes" value={minutes} onChange={e => setMinutes(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" placeholder="—"
+        style={{ ...field, width: 52, textAlign: 'center', borderColor: okMinutes ? '#ccc' : '#e74c3c' }} />
+      <button data-testid="new-task-more" aria-label="На минуту больше" disabled={n >= 120}
+        onClick={() => setMinutes(String(Math.min(120, (minutes ? n : 0) + 1)))} style={step}>+</button>
+      мин
+      <span style={{ fontSize: 12, color: '#888' }}>{minutes ? 'таймер запустите сами' : 'без времени'}</span>
+    </div>
+  );
+
   return (
-    <div onClick={onClose} style={overlay}>
-      <div role="dialog" aria-label="Новое задание" data-testid="new-task" onClick={e => e.stopPropagation()} style={dialog}>
+    // with a board drawn on, a stray click outside mustn't throw it away: only «Отмена» closes
+    <div onClick={work ? undefined : onClose} style={overlay}>
+      <div role="dialog" aria-label="Новое задание" data-testid="new-task" onClick={e => e.stopPropagation()}
+        style={{ ...dialog, ...(work ? { width: 'min(1100px, 96vw)', maxHeight: '96vh', overflowY: 'auto' } : {}) }}>
         <h3 style={{ margin: 0 }}>Новое задание: {label.toLowerCase()}</h3>
-        <input data-testid="new-task-title" value={title} onChange={e => setTitle(e.target.value)} maxLength={120} placeholder={`Название, например «${label}»`} style={field} autoFocus />
-        {work && <textarea data-testid="new-task-text" value={task} onChange={e => setTask(e.target.value)} maxLength={2000} rows={4}
-          placeholder="Задание: ученики увидят его над доской" style={{ ...field, resize: 'vertical', fontFamily: 'inherit' }} />}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#333' }}>
-          Время
-          <button data-testid="new-task-less" aria-label="На минуту меньше" disabled={!minutes || n <= 1}
-            onClick={() => setMinutes(n <= 1 ? '' : String(n - 1))} style={step}>−</button>
-          <input data-testid="new-task-minutes" value={minutes} onChange={e => setMinutes(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" placeholder="—"
-            style={{ ...field, width: 52, textAlign: 'center', borderColor: okMinutes ? '#ccc' : '#e74c3c' }} />
-          <button data-testid="new-task-more" aria-label="На минуту больше" disabled={n >= 120}
-            onClick={() => setMinutes(String(Math.min(120, (minutes ? n : 0) + 1)))} style={step}>+</button>
-          мин
-          <span style={{ fontSize: 12, color: '#888' }}>{minutes ? '' : 'без времени'}</span>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input data-testid="new-task-title" value={title} onChange={e => setTitle(e.target.value)} maxLength={120} placeholder={`Название, например «${label}»`}
+            style={{ ...field, flex: '1 1 260px', width: 'auto' }} autoFocus />
+          {minutesRow}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button data-testid="new-task-start" onClick={() => add(true)} disabled={!okMinutes} style={{ ...btn, background: '#2ecc71', color: '#fff', border: 'none', flex: 1 }}>Начать сейчас</button>
-          <button data-testid="new-task-add" onClick={() => add(false)} disabled={!okMinutes} style={{ ...btn, flex: 1 }}>
+        {work && <textarea data-testid="new-task-text" value={task} onChange={e => setTask(e.target.value)} maxLength={2000} rows={2}
+          placeholder="Задание: ученики увидят его над доской" style={{ ...field, resize: 'vertical', fontFamily: 'inherit' }} />}
+        {work && <>
+          <div style={{ fontSize: 13, color: '#555' }}>Начальная доска: с ней начнёт {type === 'individual' ? 'каждый ученик' : type === 'pairs' ? 'каждая пара' : 'каждая четвёрка'}. Можно оставить пустой.</div>
+          <div data-testid="new-task-board" style={{ height: 'min(52vh, calc((min(1100px, 96vw) - 40px) * 9 / 16 + 44px))', minHeight: 220, border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+            <Board role="teacher" link={board.link} pictures={boardPictures} />
+          </div>
+        </>}
+        {error && <div data-testid="new-task-error" style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button data-testid="new-task-start" onClick={() => add(true)} disabled={!okMinutes || sending}
+            style={{ ...btn, background: '#2ecc71', color: '#fff', border: 'none', flex: '1 1 160px', fontWeight: 'bold' }}>{sending ? 'Отправляем…' : 'Начать'}</button>
+          <button data-testid="new-task-add" onClick={() => add(false)} disabled={!okMinutes || sending} style={{ ...btn, flex: '1 1 160px' }}>
             {running ? 'Следующим в плане' : 'Добавить в план'}
           </button>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13, padding: '0 8px' }}>Отмена</button>
         </div>
-        <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Отмена</button>
       </div>
     </div>
   );

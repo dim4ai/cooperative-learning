@@ -392,6 +392,7 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   pingTimeout: 60000,
   pingInterval: 25000,
+  maxHttpBufferSize: 5e6, // a task's starting board may carry pictures (block:add)
 });
 
 type Role = 'teacher' | 'student' | 'board';
@@ -435,7 +436,9 @@ interface LessonRuntime {
   teacherId: number | null; // owner, for the per-teacher limit
   stage: Stage;
   atDesks: boolean;                // before the lesson: the teacher let those seated go to their fours
-  timerEndsAt: number | null;      // the running block's planned end (its duration), for the teacher's countdown
+  timerEndsAt: number | null;      // the stage timer's end while it runs (the teacher starts it), else null
+  timerTotalMs: number | null;     // the block's time, as set; null: no timer
+  timerLeftMs: number | null;      // what is left while the timer stands (not started yet, or paused)
   timerBeeps: NodeJS.Timeout[];    // the signals to everyone: 15 s before that end, and at it
   activity: Map<string, Activity>; // the running work block: student name → how much they talked and wrote
   activitySent: NodeJS.Timeout | null; // a send to the teacher is due
@@ -653,6 +656,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     stage: 'waiting',
     atDesks: true, // those seated wait at their desks until the teacher calls everyone in
     timerEndsAt: null,
+    timerTotalMs: null,
+    timerLeftMs: null,
     timerBeeps: [],
     activity: new Map(),
     activitySent: null,
@@ -872,6 +877,7 @@ function lessonStateBase(code: string, lesson: LessonRuntime) {
     atDesks: lesson.atDesks,
     videoMode: lesson.videoMode,
     timerEndsAt: lesson.timerEndsAt,
+    timer: { totalMs: lesson.timerTotalMs, leftMs: lesson.timerLeftMs },
     afterUntil: lesson.afterUntil,
     demo: demoState(code),
     now: Date.now(), // the clients' clocks may be off; the demo's times are the server's
@@ -1135,9 +1141,9 @@ function earlierBoardsFor(lesson: LessonRuntime, p: Participant) {
       ? b.slides.map(sc => {
           const scene = studentScene(sc, lesson.slides);
           scenes.push(scene);
-          return { scene, objects: [...(lesson.boards.get(`${room}#${sc.id}`)?.values() ?? [])] };
+          return { scene, objects: [...(boardAt(lesson, `${room}#${sc.id}`)?.values() ?? [])] };
         })
-      : [{ scene: null, objects: [...(lesson.boards.get(`${room}#${b.id}`)?.values() ?? [])] }];
+      : [{ scene: null, objects: [...(boardAt(lesson, `${room}#${b.id}`)?.values() ?? [])] }];
     blocks.push({ id: b.id, title: b.title, type: b.type, sheets });
   }
   return { blocks, media: lesson.material ? scenesMedia(lesson.material, scenes) : {} };
@@ -1174,6 +1180,8 @@ const LIVE_TYPES: readonly string[] = ['group', 'individual', 'pairs', 'fours'];
 const LIVE_TITLES: Record<string, string> = { group: 'Объяснение', individual: 'Индивидуально', pairs: 'В парах', fours: 'В четвёрках' };
 const isLiveBlock = (id: string) => id.startsWith('live-');
 let liveSeq = 0;
+const STARTER_MAX_OBJECTS = 500;
+const STARTER_MAX_BYTES = 4_000_000;
 const lastAdded = new WeakMap<LessonRuntime, { id: string; during: string | null }>();
 
 function liveMaterial(blocks: Block[]): Material {
@@ -1199,7 +1207,7 @@ function resumeBlock(lesson: LessonRuntime, blockId: string) {
   pushBoards(lesson);
 }
 
-function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown }): Block | null {
+function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown }): Block | null {
   if (typeof b.type !== 'string' || !LIVE_TYPES.includes(b.type)) return null;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
   const minutes = typeof b.minutes === 'number' && Number.isInteger(b.minutes) && b.minutes >= 1 && b.minutes <= 120 ? b.minutes : null;
@@ -1207,6 +1215,13 @@ function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknow
     id: `live-${Date.now().toString(36)}-${++liveSeq}`, type: b.type, title: text(b.title, 120) || LIVE_TITLES[b.type],
     task: b.type === 'group' ? '' : text(b.task, 2000), sheetReadOnly: false, boardsFrom: [], duration: minutes, slides: [],
   };
+  // the teacher's starting board for every room: whole or not at all
+  if (Array.isArray(b.board) && b.board.length) {
+    const objs = b.board;
+    if (objs.length > STARTER_MAX_OBJECTS || JSON.stringify(objs).length > STARTER_MAX_BYTES) return null;
+    if (!objs.every(o => isBoardObject(o) && boardObjectAllowed(o, true))) return null;
+    block.starter = objs.map(o => ({ ...(o as BoardObject), author: 'Учитель' }));
+  }
   if (!lesson.material) lesson.material = liveMaterial([]);
   const blocks = lesson.material.blocks;
   if (blocks.filter(x => isLiveBlock(x.id)).length >= 100) return null;
@@ -1317,21 +1332,64 @@ function beep(lesson: LessonRuntime, kind: 'soon' | 'end') {
 }
 
 /** The block's time starts now (or there's none): the old one's signals are off */
+/** A block's time is set, not started: the teacher starts it, after explaining the task, say */
 function setStageTimer(lesson: LessonRuntime, minutes: number | null) {
+  lesson.timerTotalMs = minutes ? minutes * 60_000 : null;
+  lesson.timerLeftMs = lesson.timerTotalMs;
+  lesson.timerEndsAt = null;
+  scheduleBeeps(lesson);
+}
+
+/** The signals to everyone: 15 s before the end and at it, while the timer runs */
+function scheduleBeeps(lesson: LessonRuntime) {
   for (const t of lesson.timerBeeps) clearTimeout(t);
   lesson.timerBeeps = [];
-  if (!minutes) { lesson.timerEndsAt = null; return; }
-  const ms = minutes * 60_000;
-  lesson.timerEndsAt = Date.now() + ms;
-  if (ms > BEEP_BEFORE_MS * 2) lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'soon'), ms - BEEP_BEFORE_MS));
-  lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'end'), ms));
+  if (lesson.timerEndsAt === null) return;
+  const left = lesson.timerEndsAt - Date.now();
+  if (left <= 0) return;
+  if (left > BEEP_BEFORE_MS * 2) lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'soon'), left - BEEP_BEFORE_MS));
+  lesson.timerBeeps.push(setTimeout(() => beep(lesson, 'end'), left));
+}
+
+/** The teacher's buttons under the timer */
+function timerAction(lesson: LessonRuntime, action: unknown): boolean {
+  const now = Date.now();
+  const running = lesson.timerEndsAt !== null;
+  if (action === 'start') {
+    if (running || !lesson.timerLeftMs) return false;
+    lesson.timerEndsAt = now + lesson.timerLeftMs;
+    lesson.timerLeftMs = null;
+  } else if (action === 'pause') {
+    if (!running) return false;
+    lesson.timerLeftMs = Math.max(0, lesson.timerEndsAt! - now);
+    lesson.timerEndsAt = null;
+  } else if (action === 'restart') {
+    if (!lesson.timerTotalMs) return false;
+    lesson.timerEndsAt = now + lesson.timerTotalMs;
+    lesson.timerLeftMs = null;
+  } else if (action === 'reset') {
+    if (!lesson.timerTotalMs) return false;
+    lesson.timerEndsAt = null;
+    lesson.timerLeftMs = lesson.timerTotalMs;
+  } else if (action === 'plus' || action === 'minus') {
+    const d = action === 'plus' ? 60_000 : -60_000;
+    const total = (lesson.timerTotalMs ?? 0) + d;
+    if (total < 60_000 || total > 180 * 60_000) return false;
+    lesson.timerTotalMs = total;
+    // the time over already, when the minute is added to a timer that ran out: it counts from now
+    if (running) lesson.timerEndsAt = Math.max(lesson.timerEndsAt!, now) + d;
+    else lesson.timerLeftMs = Math.max(0, (lesson.timerLeftMs ?? 0) + d);
+    if (running && lesson.timerEndsAt! <= now) { lesson.timerEndsAt = null; lesson.timerLeftMs = 0; }
+  } else return false;
+  scheduleBeeps(lesson);
+  return true;
 }
 
 async function startBlock(code: string, lesson: LessonRuntime, blockId: string) {
   const block = lesson.material?.blocks.find(b => b.id === blockId);
   if (!block || !STAGES.includes(block.type as Stage)) return;
   // pressing the running block again doesn't start its time over
-  if (block.id !== lesson.block || lesson.timerEndsAt === null) setStageTimer(lesson, block.duration);
+  if (block.id !== lesson.block || lesson.timerTotalMs === null) setStageTimer(lesson, block.duration);
   if (block.id !== lesson.block) resetActivity(lesson);
   // A new explanation is a new topic: last topic's marks would say nothing about it
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
@@ -1415,8 +1473,20 @@ function boardKey(lesson: LessonRuntime, room: string): string {
   return `${room}#${scene?.id ?? lesson.block}`;
 }
 
+/** A room's board for a block; the first look at it lays out the block's starting board, if it has one */
+function boardAt(lesson: LessonRuntime, key: string): Map<string, BoardObject> | undefined {
+  const board = lesson.boards.get(key);
+  if (board) return board;
+  const blockId = key.slice(key.lastIndexOf('#') + 1);
+  const starter = lesson.material?.blocks.find(b => b.id === blockId)?.starter;
+  if (!starter?.length) return undefined;
+  const seeded = new Map(starter.map(o => [o.uid as string, { ...o } as BoardObject]));
+  lesson.boards.set(key, seeded);
+  return seeded;
+}
+
 function boardState(lesson: LessonRuntime, room: string): BoardObject[] {
-  return Array.from(lesson.boards.get(boardKey(lesson, room))?.values() ?? []);
+  return Array.from(boardAt(lesson, boardKey(lesson, room))?.values() ?? []);
 }
 
 /** The slide or sheet changed: everyone gets its drawing in their room */
@@ -1440,7 +1510,7 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
   if (!isTeacher && lesson.material?.blocks.find(b => b.id === lesson.block)?.sheetReadOnly) return;
   const op = raw as { t?: unknown; obj?: unknown; uid?: unknown };
   const key = boardKey(lesson, room);
-  let board = lesson.boards.get(key);
+  let board = boardAt(lesson, key);
   if (!board) { board = new Map(); lesson.boards.set(key, board); }
 
   let out: unknown;
@@ -1999,6 +2069,11 @@ io.on('connection', async (socket) => {
       broadcastState(code, lesson);
     });
 
+    socket.on('timer', (action: unknown) => {
+      if (role !== 'teacher' || lesson.stage === 'waiting') return;
+      if (timerAction(lesson, action)) broadcastState(code, lesson);
+    });
+
     socket.on('setStage', async (stage: Stage) => {
       if (role !== 'teacher' || !STAGES.includes(stage)) return;
       await changeStage(code, lesson, stage);
@@ -2024,9 +2099,10 @@ io.on('connection', async (socket) => {
     });
 
     // A task the lesson file doesn't have: into the plan after the running one, and started at once if asked
-    socket.on('block:add', async (b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; start?: unknown } = {}) => {
+    socket.on('block:add', async (b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown; start?: unknown } = {}, ack?: unknown) => {
       if (role !== 'teacher') return;
       const block = addLiveBlock(lesson, b ?? {});
+      if (typeof ack === 'function') ack({ ok: !!block });
       if (!block) return;
       console.log(`[${code}] task added: ${block.type} "${block.title}"`);
       broadcastSlides(lesson, { material: true });
