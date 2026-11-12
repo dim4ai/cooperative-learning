@@ -218,7 +218,7 @@ export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: st
         return (
           <button key={b.id} data-testid="plan-block" data-current={on || undefined}
             ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
-            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
+            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'center',
             background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
