@@ -13,6 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # co-learn.ru/demo/ is the standalone demo, deployed on its own (deploy-demo.yml): left as it is
+      # co-learn.ru/demo/ is the standalone demo, deployed on its own from the demo branch (tags demo-v*): left as it is
       - name: Deploy landing page
         run: rsync -a --delete --exclude /demo/ landing/ ~/co-learn/landing/

@@ -168,8 +168,7 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
 
 // ---------- sidebar: open / remove ----------
 
-/** fixed: the lesson can't be changed here (the solo demo runs its own) */
-export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?: boolean }) {
+export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { material, local, busy, error } = slides;
   const slideCount = material?.blocks.reduce((n, b) => n + (b.slides?.length ?? 0), 0) ?? 0;
@@ -192,7 +191,6 @@ export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
-      {!fixed && <>
       <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
       <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
@@ -201,7 +199,6 @@ export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?
       }}>
         {busy ? 'Открываем…' : material && local ? 'Заменить урок…' : 'Открыть урок…'}
       </button>
-      </>}
       {error && <div style={{ fontSize: 11, color: '#e74c3c', marginTop: 2 }}>{error}</div>}
     </div>
   );
@@ -288,8 +285,7 @@ const noteLabel: CSSProperties = { fontSize: 11, color: '#888', textTransform: '
 const noteText: CSSProperties = { whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.45, color: '#222' };
 
 /** End of an explanation: ask the class, see the answers, drop the marks when they're of no more use */
-/** askReady: false hides «Всем понятно?» (the solo demo keeps it for the last slide: it's the end of an explanation) */
-export function UnderstoodPanel({ understood, canAsk, askReady = true, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; askReady?: boolean; mapOpen: boolean; onToggleMap: () => void }) {
+export function UnderstoodPanel({ understood, canAsk, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; mapOpen: boolean; onToggleMap: () => void }) {
   const answers = Object.values(understood.marks);
   const yes = answers.filter(a => a === 'yes').length;
   const no = answers.length - yes;
@@ -306,7 +302,7 @@ export function UnderstoodPanel({ understood, canAsk, askReady = true, mapOpen, 
           {answers.length > 0 && <><span style={{ color: '#1e8e4e' }}>Поняли: {yes}</span> · <span style={{ color: '#d00000' }}>Не поняли: {no}</span></>}
         </div>
       )}
-      {canAsk && askReady && !understood.asking && (
+      {canAsk && !understood.asking && (
         <button data-testid="understood-ask" onClick={() => socket.emit('understood:ask')} style={panelBtn}>Всем понятно?</button>
       )}
       {canAsk && !understood.asking && (
@@ -367,7 +363,7 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', color: '#444', fontSize: 13, background: '#ece2d2', borderBottom: '1px solid #e0d4c0', flexShrink: 0 }}>
         <button onClick={() => goto(index - 1)} disabled={index === 0} style={navBtn} title="Предыдущий (←)">←</button>
         <span data-testid="slide-counter">{index + 1} / {slides.length}</span>
-        <button data-hint="slide-next" onClick={() => goto(index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
+        <button onClick={() => goto(index + 1)} disabled={index >= slides.length - 1} style={navBtn} title="Следующий (→)">→</button>
         {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -473,7 +469,7 @@ export function LessonPreview({ slides: teacherSlides }: { slides: TeacherSlides
           {scenes.length > 0 ? (<>
             <button onClick={() => go(at - 1)} disabled={at === 0} style={navBtn} title="Предыдущий (←)">←</button>
             <span data-testid="preview-counter">{at + 1} / {scenes.length}</span>
-            <button data-hint="preview-next" onClick={() => go(at + 1)} disabled={at >= scenes.length - 1} style={navBtn} title="Следующий (→)">→</button>
+            <button onClick={() => go(at + 1)} disabled={at >= scenes.length - 1} style={navBtn} title="Следующий (→)">→</button>
           </>) : <span>В этом блоке нет слайдов</span>}
           <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>← → слайды, ↑ ↓ блоки · ученики этого не видят</span>
         </div>

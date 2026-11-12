@@ -63,12 +63,8 @@ export function cleanFeedback(body: unknown, ua: unknown): Letter | { error: str
   return { app, kind, text, contact: line(b.contact, 200), where: line(b.where, 300), ua: line(ua, 300) };
 }
 
-const SOLO_STAGE_NAMES: Record<string, string> = {
-  waiting: 'рассадка', group: 'объяснение', individual: 'индивидуальная работа', pairs: 'пары', fours: 'четвёрки',
-};
-
 /** A review left after the demo lesson: kept in the database, and a copy to our box */
-export async function sendDemoFeedback(f: { code: string; rating: number | null; comment: string; email: string; solo: boolean; reached: string | null }): Promise<void> {
+export async function sendDemoFeedback(f: { code: string; rating: number | null; comment: string; email: string }): Promise<void> {
   const first = f.comment.split('\n')[0].replace(/\s+/g, ' ').slice(0, 60);
   const body = [
     `Оценка: ${f.rating ? `${f.rating} из 5` : 'не поставлена'}`,
@@ -77,7 +73,6 @@ export async function sendDemoFeedback(f: { code: string; rating: number | null;
     '',
     '—',
     `Ответить: ${f.email || 'не указано'}`,
-    `Демо: ${f.solo ? `с ботами, дошёл до этапа «${SOLO_STAGE_NAMES[f.reached ?? 'waiting'] ?? f.reached}»` : 'с живым классом'}`,
     `Урок: ${f.code}`,
     `Время: ${new Date().toISOString()}`,
   ].join('\n');

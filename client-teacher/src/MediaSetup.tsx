@@ -37,7 +37,7 @@ export const mainButton: CSSProperties = {
   background: '#4a90e2', color: '#fff', cursor: 'pointer',
 };
 
-export interface DemoStart { code: string; token: string; solo?: boolean }
+export interface DemoStart { code: string; token: string }
 
 export function ModeButton({ mode, chosen, onChoose }: { mode: VideoMode; chosen: boolean; onChoose: () => void }) {
   return (
