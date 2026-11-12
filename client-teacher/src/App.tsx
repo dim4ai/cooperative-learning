@@ -28,6 +28,7 @@ import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from '
 import type { MediaPrefs } from './mediaCheck';
 import { playStageBeep } from './beep';
 import { DemoVoice, demoVoiceHeard } from './DemoVoice';
+import { DemoOff } from './DemoOff';
 
 interface LivekitInfo {
   url: string;
@@ -814,6 +815,14 @@ export default function App() {
             <button data-testid="entry-new-code" onClick={() => socket.emit('entry:newCode')} title="Кто уже был на уроке, вернётся и со старым" style={entryBtn}>Сменить код</button>
           </div>
         )}
+        {demo && state.stage !== 'waiting' && (
+          <DemoOff style={{ marginTop: 2 }} note="Когда все пришли, вход можно закрыть, а если код ушёл за пределы класса — сменить его.">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <button tabIndex={-1} style={entryBtn}>Закрыть вход</button>
+              <button tabIndex={-1} style={entryBtn}>Сменить код</button>
+            </div>
+          </DemoOff>
+        )}
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
@@ -826,6 +835,11 @@ export default function App() {
         }}>
           {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
         </button>}
+        {demo && state.stage === 'waiting' && (
+          <DemoOff style={{ marginTop: GROUP_GAP }} note="Журнал класса: кто пришёл, кого нет, а рассадка и число мест запоминаются до следующего урока.">
+            <button tabIndex={-1} style={{ width: '100%', padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 12 }}>Журнал класса</button>
+          </DemoOff>
+        )}
         {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
           lesson={{ students: lessonStudents, capacity: seats.filter(s => s.extra === undefined).length }} onClose={() => setJournalOpen(false)} />}
 
@@ -883,6 +897,16 @@ export default function App() {
         )}
 
         {livekit && !demo?.solo && !livekit.quiet && <div style={{ marginTop: state.stage === 'waiting' ? GROUP_GAP - 8 : 0 }}><SidebarMediaToggles prefs={media} onChange={setMedia} camAllowed={camAllowed} /></div>}
+        {livekit && demo?.solo && (
+          <DemoOff style={{ marginTop: state.stage === 'waiting' ? GROUP_GAP - 8 : 0 }} note="Ваши микрофон и камера: класс слышит и видит вас, а в группах — только те, к кому вы подошли.">
+            <SidebarMediaToggles prefs={media} onChange={() => {}} camAllowed={camAllowed} />
+          </DemoOff>
+        )}
+        {demo?.solo && !inSmallRoom && (state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours') && (
+          <DemoOff style={{ marginTop: 8 }} note="Сказать что-то сразу всем группам — задание или сколько осталось времени, — не заходя к каждой.">
+            <button tabIndex={-1} style={{ width: '100%', padding: '8px 6px', borderRadius: 6, fontSize: 12, fontWeight: 'bold', border: '1px solid #4a90e2', background: '#fff', color: '#2a6bb8' }}>🔊 Говорить всем</button>
+          </DemoOff>
+        )}
         {voiceAllowed && (
           <button data-testid="voice-all" onClick={() => setVoiceOn(v => !v)}
             title={voiceOn ? 'Ученики во всех комнатах слышат вас. Нажмите, чтобы выключить' : 'Скажите что-то всему классу: задание, сколько осталось времени'}
@@ -908,6 +932,12 @@ export default function App() {
           </button>
         )}
 
+        {livekit && demo?.solo && (
+          <DemoOff style={{ marginTop: 8 }} note="Выключить микрофоны всем ученикам одним нажатием, если в классе шумно.">
+            <button tabIndex={-1} style={{ width: '100%', padding: '8px 6px', borderRadius: 6, border: 'none', background: '#e74c3c', color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔇 Заглушить всех</button>
+          </DemoOff>
+        )}
+
         {state.stage === 'waiting' && (
           <button
             data-hint="start-lesson"
@@ -928,6 +958,11 @@ export default function App() {
             <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} />
             <RecordingFinished />
           </div>
+        )}
+        {demo && lessonCode && (
+          <DemoOff style={{ marginBottom: GROUP_GAP }} note="Запись урока: слайды, доски и разговоры в группах, чтобы потом пересмотреть, как шла работа. Записывает учитель, согласие учеников или родителей — на нём.">
+            <button tabIndex={-1} style={{ width: '100%', padding: '7px 6px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#333', fontSize: 13 }}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</button>
+          </DemoOff>
         )}
         <div style={{ fontSize: 12, color: '#222' }}>
           {students.length} учеников
@@ -963,6 +998,17 @@ export default function App() {
                 <button role="tab" data-testid="tab-preview" aria-selected={preview} onClick={() => setPreviewTab(true)} style={tabStyle(preview)}>Просмотр урока</button>
               </div>
             : <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>}
+          {state.stage === 'group' && demo?.solo && (
+            <DemoOff style={{ marginLeft: 8 }} note="Показать классу вместо слайдов свой экран: сайт, видео, другую программу.">
+              <div style={{ display: 'flex', gap: 4 }}>
+                {(['board', 'screen'] as GroupMode[]).map(m => (
+                  <button key={m} tabIndex={-1} style={{ padding: '4px 10px', borderRadius: 4, border: 'none', fontSize: 12, background: m === 'board' ? '#4a90e2' : '#e0e0e0', color: m === 'board' ? '#fff' : '#555', fontWeight: m === 'board' ? 'bold' : 'normal' }}>
+                    {GROUP_MODE_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            </DemoOff>
+          )}
           {state.stage === 'group' && livekit && !demo?.solo && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
               {(['board', 'screen'] as GroupMode[]).map(m => (
