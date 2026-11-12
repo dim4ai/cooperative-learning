@@ -21,6 +21,8 @@ import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, use
 import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
 import { RecordButton, RecordingFinished } from './RecordingUI';
+import { LessonMenu, NewTaskDialog, TaskMenu } from './TopMenu';
+import { useRecording } from './recording';
 import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
@@ -54,9 +56,6 @@ interface LessonState {
   participants: Participant[];
 }
 
-const entryBtn: CSSProperties = {
-  padding: '3px 6px', borderRadius: 5, border: '1px solid #c9b99c', background: '#fff', color: '#555', fontSize: 11, cursor: 'pointer', textAlign: 'center',
-};
 const backToSeats: CSSProperties = {
   marginTop: 6, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer', background: '#fff', color: '#555', fontSize: 11, textAlign: 'center', flexShrink: 0,
 };
@@ -549,6 +548,9 @@ export default function App() {
   useEffect(() => { if (!Object.keys(slides.understood.marks).length && !slides.understood.asking) setMapOpen(false); }, [slides.understood]);
 
   const [endDialog, setEndDialog] = useState(false);
+  const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
+  const [recordAsk, setRecordAsk] = useState(0);
+  const recording = useRecording().recording;
   const [startWarning, setStartWarning] = useState(false);
 
   /** The demo is over, whoever or whatever ended it: on to the feedback form */
@@ -679,7 +681,8 @@ export default function App() {
   function startLesson() {
     const blocks = slides.material?.blocks;
     if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
-    else socket.emit('setStage', 'group');
+    // no lesson file: an explanation on a clean board, the rest is added as the lesson goes
+    else socket.emit('block:add', { type: 'group', start: true });
   }
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
   // room names are "<lessonCode>:<base>" — check the base, not the full string
@@ -728,14 +731,6 @@ export default function App() {
         <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
           {entry?.joinCode ?? (lessonCode || '…')}
         </div>
-        {!demo && state.stage !== 'waiting' && entry && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 }}>
-            <button data-testid="entry-close" onClick={() => socket.emit('entry:close', { closed: !entry.closed })} style={{ ...entryBtn, color: entry.closed ? '#b07800' : '#555' }}>
-              {entry.closed ? '🔒 Вход закрыт, открыть' : 'Закрыть вход'}
-            </button>
-            <button data-testid="entry-new-code" onClick={() => socket.emit('entry:newCode')} title="Кто уже был на уроке, вернётся и со старым" style={entryBtn}>Сменить код</button>
-          </div>
-        )}
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
@@ -777,29 +772,9 @@ export default function App() {
           </button>
         )}
 
-        {state.stage === 'waiting' ? null : slides.material?.blocks.length ? (
+        {state.stage !== 'waiting' && (
           <>
             <LessonPlan slides={slides} stage={state.stage} endsAt={state.timerEndsAt} clockSkew={clockSkew} />
-            <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 11, color: '#222', marginTop: 12 }}>ЭТАП</div>
-            {LESSON_STAGES.map(s => (
-              <button
-                key={s.value}
-                onClick={() => socket.emit('setStage', s.value)}
-                style={{
-                  padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: state.stage === s.value ? '#4a90e2' : '#fff',
-                  color: state.stage === s.value ? '#fff' : '#333',
-                  fontWeight: state.stage === s.value ? 'bold' : 'normal',
-                  fontSize: 13, textAlign: 'left',
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         )}
@@ -844,12 +819,6 @@ export default function App() {
         )}
 
         <div style={{ marginTop: 'auto' }} />
-        {!demo && lessonCode && (
-          <div style={{ marginBottom: GROUP_GAP, display: 'flex', flexDirection: 'column' }}>
-            <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} />
-            <RecordingFinished />
-          </div>
-        )}
         <div style={{ fontSize: 12, color: '#222' }}>
           {students.length} учеников
         </div>
@@ -874,7 +843,10 @@ export default function App() {
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
-        <div style={{ padding: '10px 16px 10px 32px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)} />
+          <TaskMenu onPick={setNewTask} />
+          <div style={{ width: 1, alignSelf: 'stretch', background: '#d6c8b0', margin: '0 6px' }} />
           {canPreview
             ? <div role="tablist" style={{ display: 'flex', gap: 4 }}>
                 <button role="tab" data-testid="tab-seating" aria-selected={!preview} onClick={() => setPreviewTab(false)} style={tabStyle(!preview)}>
@@ -900,13 +872,18 @@ export default function App() {
               }}>Сменить экран</button>}
             </div>
           )}
+          {lessonCode && !demo && <div style={{ marginLeft: 'auto' }}>
+            <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} ask={recordAsk} />
+            <RecordingFinished />
+          </div>}
         </div>
+        {newTask && <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />}
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {preview ? <LessonPreview slides={slides} /> : inSmallRoom
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
-              task={state.stage === 'group' ? undefined : (slides.local ?? slides.material)?.blocks.find(b => b.id === slides.state.block)?.task} />
+              task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task} />
             : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
                 room,
                 // a group at work isn't disturbed: the teacher comes in unseen and unheard unless called

@@ -13,7 +13,7 @@ export function StartLessonDialog({ names, noLesson, onStart, onCancel }: { name
         display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif',
       }}>
         <h3 style={{ margin: 0 }}>{title}</h3>
-        {noLesson && <div data-testid="start-warning-lesson" style={{ fontSize: 14 }}>Файл урока не загружен: не будет плана, слайдов и заданий.</div>}
+        {noLesson && <div data-testid="start-warning-lesson" style={{ fontSize: 14 }}>Файл урока не открыт: урок начнётся с объяснения на чистой доске, дальше задания можно добавлять в меню «Новое задание».</div>}
         {names.length > 0 && <>
           <div data-testid="start-warning-names" style={{ fontSize: 14, overflowWrap: 'anywhere' }}>Без места: {names.join(', ')}</div>
           <div style={{ fontSize: 13, color: '#666' }}>Пока вы не определите им место, они не попадут в работу.</div>

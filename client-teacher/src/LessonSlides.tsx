@@ -19,6 +19,9 @@ const API = import.meta.env.VITE_API_URL;
 export interface MaterialBlock { id: string; type: string; title: string; slides?: Scene[]; teacherNote?: string; task?: string; duration?: number | null }
 /** The lesson as the server knows it */
 export interface Material { id: string; title: string; blocks: MaterialBlock[] }
+/** A task the teacher added during the lesson (server: addLiveBlock); without a file the material is only these */
+export const isLiveBlock = (b: { id: string }) => b.id.startsWith('live-');
+export const isLiveMaterial = (m: Material | null) => !!m && m.id.startsWith('live:');
 export interface SlidesState {
   /** the lesson block running now */
   block: string | null;
@@ -169,8 +172,8 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
 // ---------- sidebar: open / remove ----------
 
 export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { material, local, busy, error } = slides;
+  const { local, busy, error } = slides;
+  const material = isLiveMaterial(slides.material) ? null : slides.material;
   const slideCount = material?.blocks.reduce((n, b) => n + (b.slides?.length ?? 0), 0) ?? 0;
 
   return (
@@ -191,14 +194,7 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
-      <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
-      <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
-        marginTop: 4, width: '100%', padding: '5px 6px', borderRadius: 4, border: '1px dashed #a8987a',
-        background: '#fff', color: '#444', fontSize: 11, cursor: 'pointer', textAlign: 'center',
-      }}>
-        {busy ? 'Открываем…' : material && local ? 'Заменить урок…' : 'Открыть урок…'}
-      </button>
+      {busy && <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>Открываем…</div>}
       {error && <div style={{ fontSize: 11, color: '#e74c3c', marginTop: 2 }}>{error}</div>}
     </div>
   );
@@ -229,7 +225,8 @@ function BlockTime({ endsAt, clockSkew }: { endsAt: number; clockSkew: number })
 }
 
 export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: TeacherSlides; stage: string; endsAt: number | null; clockSkew: number }) {
-  const blocks: MaterialBlock[] = slides.local?.blocks ?? slides.material?.blocks ?? [];
+  // the server's order: the tasks added during the lesson are in it too
+  const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
   return (
     <div data-testid="lesson-plan" style={{ flex: 1, minHeight: 60, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
@@ -243,6 +240,7 @@ export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: Teach
             {on && endsAt && <BlockTime endsAt={endsAt} clockSkew={clockSkew} />}
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
             <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
+              {isLiveBlock(b) && <span data-testid="plan-block-added" title="Добавлено по ходу урока">＋ </span>}
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
             </div>
           </button>
@@ -256,6 +254,16 @@ export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: Teach
 export function BlockNotes({ slides }: { slides: TeacherSlides }) {
   const { local, material, state } = slides;
   if (!material || !state.block) return null;
+  const added = material.blocks.find(b => b.id === state.block && isLiveBlock(b));
+  if (added) return (
+    <div data-testid="block-notes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {added.task && <div>
+        <div style={noteLabel}>Задание</div>
+        <div data-testid="block-task" style={noteText}>{added.task}</div>
+      </div>}
+      <div style={{ fontSize: 12, color: '#777' }}>Добавлено по ходу урока.</div>
+    </div>
+  );
   const block = local?.blocks.find(b => b.id === state.block);
   if (!local) return <div style={{ fontSize: 12, color: '#b57600' }}>Заметки лежат в файле урока: откройте его в этом браузере.</div>;
   if (!block) return null;

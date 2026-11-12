@@ -365,7 +365,10 @@ app.post('/lessons/:code/material', requireTeacherOrDemo, async (req: AuthedRequ
   const lesson = getLessonRuntime(code, req.teacherId ?? null);
   if (!lesson) { res.status(429).json({ error: 'too many open lessons' }); return; }
   const same = lesson.material?.id === material.id;
+  const runningLive = lesson.block && isLiveBlock(lesson.block) ? lesson.block : null;
+  keepLiveBlocks(material, lesson.material, same);
   setMaterial(code, lesson, material, { keepState: same });
+  if (runningLive && !same) resumeBlock(lesson, runningLive);
   console.log(`[${code}] material ${same ? 'resent' : 'loaded'}: "${material.title}", ${material.media.size} media, ${Math.round(material.bytes / 1024)} KB`);
   res.json({ ok: true });
 });
@@ -374,7 +377,13 @@ app.delete('/lessons/:code/material', requireTeacherOrDemo, async (req: AuthedRe
   const code = await ownLesson(req, res);
   if (!code) return;
   const lesson = lessons.get(code);
-  if (lesson) setMaterial(code, lesson, null);
+  if (lesson) {
+    // the tasks added during the lesson stay without the file
+    const live = lesson.material?.blocks.filter(b => isLiveBlock(b.id)) ?? [];
+    const runningLive = lesson.block && isLiveBlock(lesson.block) ? lesson.block : null;
+    setMaterial(code, lesson, live.length ? liveMaterial(live) : null);
+    if (runningLive) resumeBlock(lesson, runningLive);
+  }
   res.json({ ok: true });
 });
 
@@ -1155,6 +1164,59 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
   }
   broadcastSlides(lesson, { material: true });
   pushBoards(lesson);
+}
+
+// ---------- tasks added during the lesson ----------
+// The teacher may change the course of the lesson: a new block of any kind goes into the plan right
+// after the running one, with or without a lesson file. It lives in the lesson's memory only.
+
+const LIVE_TYPES: readonly string[] = ['group', 'individual', 'pairs', 'fours'];
+const LIVE_TITLES: Record<string, string> = { group: 'Объяснение', individual: 'Индивидуально', pairs: 'В парах', fours: 'В четвёрках' };
+const isLiveBlock = (id: string) => id.startsWith('live-');
+let liveSeq = 0;
+const lastAdded = new WeakMap<LessonRuntime, { id: string; during: string | null }>();
+
+function liveMaterial(blocks: Block[]): Material {
+  return { id: `live:${crypto.randomUUID()}`, title: '', blocks, media: new Map(), bytes: 0, teacherId: null };
+}
+
+/** A lesson file (re)sent: the added tasks stay — in their places if it's the same file, after its blocks if not */
+function keepLiveBlocks(next: Material, old: Material | null, same: boolean) {
+  if (!old?.blocks.some(b => isLiveBlock(b.id))) return;
+  if (same) {
+    const fresh = new Map(next.blocks.map(b => [b.id, b]));
+    const order = old.blocks.map(b => (isLiveBlock(b.id) ? b : fresh.get(b.id))).filter((b): b is Block => !!b);
+    next.blocks = [...order, ...next.blocks.filter(b => !order.includes(b))];
+  } else next.blocks.push(...old.blocks.filter(b => isLiveBlock(b.id)));
+}
+
+/** The added task that was running goes on running under the new material */
+function resumeBlock(lesson: LessonRuntime, blockId: string) {
+  const block = lesson.material?.blocks.find(b => b.id === blockId);
+  if (!block) return;
+  enterBlock(lesson, block);
+  broadcastSlides(lesson);
+  pushBoards(lesson);
+}
+
+function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown }): Block | null {
+  if (typeof b.type !== 'string' || !LIVE_TYPES.includes(b.type)) return null;
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const minutes = typeof b.minutes === 'number' && Number.isInteger(b.minutes) && b.minutes >= 1 && b.minutes <= 120 ? b.minutes : null;
+  const block: Block = {
+    id: `live-${Date.now().toString(36)}-${++liveSeq}`, type: b.type, title: text(b.title, 120) || LIVE_TITLES[b.type],
+    task: b.type === 'group' ? '' : text(b.task, 2000), sheetReadOnly: false, boardsFrom: [], duration: minutes, slides: [],
+  };
+  if (!lesson.material) lesson.material = liveMaterial([]);
+  const blocks = lesson.material.blocks;
+  if (blocks.filter(x => isLiveBlock(x.id)).length >= 100) return null;
+  // several added while one block runs line up in the order they were added
+  const last = lastAdded.get(lesson);
+  const anchor = last && last.during === lesson.block && blocks.some(x => x.id === last.id) ? last.id : lesson.block;
+  const at = blocks.findIndex(x => x.id === anchor);
+  blocks.splice(at < 0 ? blocks.length : at + 1, 0, block);
+  lastAdded.set(lesson, { id: block.id, during: lesson.block });
+  return block;
 }
 
 /** Make a block the current one. Its slides are on the board at once: in the explanation for all
@@ -1945,6 +2007,16 @@ io.on('connection', async (socket) => {
     socket.on('block:start', async ({ blockId }: { blockId: string }) => {
       if (role !== 'teacher') return;
       await startBlock(code, lesson, blockId);
+    });
+
+    // A task the lesson file doesn't have: into the plan after the running one, and started at once if asked
+    socket.on('block:add', async (b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; start?: unknown } = {}) => {
+      if (role !== 'teacher') return;
+      const block = addLiveBlock(lesson, b ?? {});
+      if (!block) return;
+      console.log(`[${code}] task added: ${block.type} "${block.title}"`);
+      broadcastSlides(lesson, { material: true });
+      if (b.start === true) await startBlock(code, lesson, block.id);
     });
 
     // Everyone is here: nobody new gets in. Those who dropped out still can
