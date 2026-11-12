@@ -30,7 +30,7 @@ export function StageTimer({ endsAt, timer, clockSkew }: { endsAt: number | null
   const fresh = !running && left !== null && left === total; // set, not started
 
   return (
-    <div data-testid="stage-timer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+    <div data-testid="stage-timer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: 132, marginLeft: 6, flexShrink: 0 }}>
       <div data-testid="timer-time" title={over ? 'Время этапа вышло' : running ? 'Осталось на этап' : left !== null ? 'Таймер стоит' : 'Время не задано'} style={{
         fontSize: 20, fontWeight: 'bold', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, padding: '1px 10px', borderRadius: 6,
         color: over ? '#fff' : soon && running ? '#3a2a00' : left === null ? '#999' : running ? '#222' : '#777',

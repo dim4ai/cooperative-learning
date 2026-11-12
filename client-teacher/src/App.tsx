@@ -848,6 +848,8 @@ export default function App() {
         <div style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)} />
           <TaskMenu onPick={setNewTask} />
+          {/* right after the menus, so it stays put whatever the stage's title is */}
+          {state.stage !== 'waiting' && <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />}
           <div style={{ width: 1, alignSelf: 'stretch', background: '#d6c8b0', margin: '0 6px' }} />
           {canPreview
             ? <div role="tablist" style={{ display: 'flex', gap: 4 }}>
@@ -874,9 +876,6 @@ export default function App() {
               }}>Сменить экран</button>}
             </div>
           )}
-          {state.stage !== 'waiting' && !preview && <div style={{ marginLeft: 'auto' }}>
-            <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />
-          </div>}
           {lessonCode && !demo && <div style={{ marginLeft: 'auto' }}>
             <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} ask={recordAsk} />
             <RecordingFinished />
