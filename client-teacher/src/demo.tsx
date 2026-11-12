@@ -43,6 +43,10 @@ function endText({ reason }: DemoEnd): string {
 }
 
 const EDITOR_URL = 'https://editor.co-learn.ru';
+/** The standalone demo (client-teacher/standalone): the lesson server runs in the page, nothing else is here */
+export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
+// from there, booking a lesson with one's own class is on the real site
+const BOOK_URL = (import.meta.env.VITE_REAL_TEACHER_URL as string | undefined) ?? 'https://teacher.co-learn.ru/?demo';
 
 /** After the lesson with the simulated class: what it was about, and where to go from here */
 function SoloConclusion({ onBook }: { onBook: () => void }) {
@@ -54,7 +58,7 @@ function SoloConclusion({ onBook }: { onBook: () => void }) {
       <p style={p}>Смысл кооперативного обучения в том, чтобы каждый ученик был занят весь урок и мог обсудить новое с товарищами: сначала думает сам, потом объясняет соседу, потом договаривается в группе. Учитель задаёт ход урока и подходит туда, где нужна помощь.</p>
       <p style={p}>У онлайн-формата есть и свои преимущества. Пары и четвёрки собираются автоматически, и никто не путает, с кем он работает. На самостоятельной работе ученики не видят чужих тетрадей и не слышат подсказок, поэтому каждый думает сам. А если вам нужно сделать объявление, тишину в классе можно вернуть одной кнопкой.</p>
       <p style={p}>Урок для Co-Learn готовится в свободно доступном редакторе <a href={EDITOR_URL} target="_blank" rel="noreferrer">editor.co-learn.ru</a>: слайды, задания, листы учеников и этапы урока.</p>
-      <p style={p}>Расскажите, что вам понравилось, а что было неудобно или непонятно. Если хотите провести такое занятие со своим классом, <a href="#" onClick={e => { e.preventDefault(); onBook(); }}>забронируйте время</a>: ученики войдут по коду, без регистрации.</p>
+      <p style={p}>Расскажите, что вам понравилось, а что было неудобно или непонятно. Если хотите провести такое занятие со своим классом, <a href={STANDALONE ? BOOK_URL : '#'} onClick={e => { if (STANDALONE) return; e.preventDefault(); onBook(); }}>забронируйте время</a>: ученики войдут по коду, без регистрации.</p>
     </div>
   );
 }
@@ -162,11 +166,17 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
           <div style={cardText}>
             Забронируйте время: код для учеников будет сразу, а место останется за вами. До 32 учеников, урок идёт час.
           </div>
-          <button data-testid="book-open" onClick={onBook} style={{ ...primary, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2' }}>
-            Забронировать занятие
-          </button>
+          {STANDALONE
+            ? <a data-testid="book-open" href={BOOK_URL} style={{ ...primary, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2', textAlign: 'center', textDecoration: 'none' }}>
+                Забронировать занятие
+              </a>
+            : <button data-testid="book-open" onClick={onBook} style={{ ...primary, background: 'transparent', color: '#4a90e2', border: '1px solid #4a90e2' }}>
+                Забронировать занятие
+              </button>}
         </div>
-        <button onClick={onBack} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Назад</button>
+        {STANDALONE
+          ? <a href="/" style={{ color: '#888', fontSize: 13, textAlign: 'center', textDecoration: 'none' }}>Назад</a>
+          : <button onClick={onBack} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Назад</button>}
       </div>
     </div>
   );

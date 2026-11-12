@@ -1,0 +1,32 @@
+name: Deploy demo
+
+# The standalone demo at co-learn.ru/demo/ (client-teacher/standalone): the teacher's page with the lesson
+# server inside, frozen at the commit tagged demo-v*. Pushes to main don't touch it; a new tag does:
+#   git tag demo-v4 && git push origin demo-v4
+on:
+  push:
+    tags: ['demo-v*']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shared slide player copies are in sync
+        run: scripts/sync-slides.sh --check
+
+      - name: Build the standalone demo
+        working-directory: client-teacher
+        env:
+          REAL_API_URL: https://api.co-learn.ru
+          REAL_TEACHER_URL: https://teacher.co-learn.ru/?demo
+        run: |
+          npm ci
+          npx vite build -c vite.standalone.config.ts
+
+      - name: Deploy the standalone demo
+        run: |
+          mkdir -p ~/co-learn/landing/demo
+          rsync -a --delete client-teacher/dist-demo/ ~/co-learn/landing/demo/

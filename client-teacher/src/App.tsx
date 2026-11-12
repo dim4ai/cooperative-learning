@@ -10,7 +10,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -490,7 +490,7 @@ export default function App() {
   function setDemo(d: DemoStart | null) { setDemoState(d); saveDemo(d); }
   // null: not in the demo; 'choice': alone or with a class; 'book': the booking screen
   const [demoScreen, setDemoScreen] = useState<'choice' | 'book' | null>(() =>
-    loadSavedDemo() ? null : hasBookingLink() ? 'book' : new URLSearchParams(location.search).has('demo') ? 'choice' : null);
+    loadSavedDemo() ? null : hasBookingLink() ? 'book' : STANDALONE || new URLSearchParams(location.search).has('demo') ? 'choice' : null);
   const [demoEnd, setDemoEnd] = useState<DemoEnd | null>(null);
   const lessonToken = demo?.token ?? token; // a demo lesson is run with its own token, not an account's
   const [lessonCode, setLessonCodeReady] = useState<string | null>(demo?.code ?? null);
@@ -607,7 +607,7 @@ export default function App() {
   useEffect(() => {
     if (!demo?.solo || !confirmed || !lessonCode || soloLoaded.current === lessonCode) return;
     soloLoaded.current = lessonCode;
-    fetch('/demo/parallelogram.colesson')
+    fetch(`${import.meta.env.BASE_URL}demo/parallelogram.colesson`)
       .then(res => res.ok ? res.blob() : Promise.reject(new Error('no sample lesson')))
       .then(blob => slides.open(new File([blob], 'parallelogram.colesson')))
       .catch(e => console.error('sample lesson not loaded:', e));
@@ -1082,7 +1082,7 @@ export default function App() {
       key={`${livekit.room}${livekit.quiet ? '#quiet' : ''}`}
       serverUrl={livekit.url}
       token={livekit.token}
-      connect={true}
+      connect={!STANDALONE} // the standalone demo's server is in the page: no LiveKit there, and nothing to hear
       video={media.camOn && camAllowed && !livekit.quiet}
       audio={media.micOn && !demo?.solo && !livekit.quiet}
       options={roomOptions}

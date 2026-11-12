@@ -40,7 +40,7 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
     const offset = Date.now() - clip.startedAt;
     if (offset >= clip.ms - 150) { stop(); return; } // over already: silence till the next line
     stop();
-    const a = new Audio(clip.src);
+    const a = new Audio(clip.src.startsWith('/') ? import.meta.env.BASE_URL + clip.src.slice(1) : clip.src);
     audio.current = a;
     playing.current = clip;
     a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); }, { once: true });
