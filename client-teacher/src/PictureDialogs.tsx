@@ -4,9 +4,14 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 export type Crop = { x: number; y: number; w: number; h: number };
 
-export function PageChooser({ pages, onDone }: { pages: { count: number; render: (n: number, w: number) => Promise<string> }; onDone: (n: number | null) => void }) {
-  const shown = Math.min(pages.count, 40);
+/** Pages of a PDF: a tap picks a page or drops it, a tap with Shift takes all from the last one; or «с … по …» */
+export function PageChooser({ pages, onDone }: { pages: { count: number; render: (n: number, w: number) => Promise<string> }; onDone: (ns: number[] | null) => void }) {
+  const shown = Math.min(pages.count, 60);
   const [thumbs, setThumbs] = useState<string[]>([]);
+  const [chosen, setChosen] = useState<Set<number>>(new Set());
+  const [last, setLast] = useState<number | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   useEffect(() => {
     let stop = false;
     (async () => {
@@ -17,22 +22,60 @@ export function PageChooser({ pages, onDone }: { pages: { count: number; render:
     })();
     return () => { stop = true; };
   }, [pages, shown]);
+
+  const range = (a: number, b: number) => Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => Math.min(a, b) + i);
+  const tap = (n: number, shift: boolean) => {
+    setChosen(prev => {
+      const next = new Set(prev);
+      if (shift && last !== null) range(last, n).forEach(i => next.add(i));
+      else if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+    setLast(n);
+  };
+  const a = Number(from), b = Number(to || from);
+  const rangeOk = Number.isInteger(a) && Number.isInteger(b) && a >= 1 && b >= 1 && a <= pages.count && b <= pages.count && from !== '';
+  const list = [...chosen].sort((x, y) => x - y);
+
   return (
     <div style={overlay} onClick={() => onDone(null)}>
-      <div role="dialog" aria-label="Страница PDF" data-testid="pdf-pages" onClick={e => e.stopPropagation()} style={{ ...box, width: 760 }}>
-        <h3 style={{ margin: 0 }}>Какую страницу вставить?</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: '60vh', overflowY: 'auto' }}>
-          {Array.from({ length: shown }, (_, i) => (
-            <button key={i} data-testid="pdf-page" onClick={() => onDone(i + 1)} style={{
-              width: 130, padding: 4, border: '1px solid #ddd', borderRadius: 6, background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            }}>
-              {thumbs[i] ? <img src={thumbs[i]} alt="" style={{ width: '100%', display: 'block' }} /> : <div style={{ width: '100%', aspectRatio: '0.7', background: '#f3f3f3' }} />}
-              <span style={{ fontSize: 12, color: '#555' }}>{i + 1}</span>
-            </button>
-          ))}
+      <div role="dialog" aria-label="Страницы PDF" data-testid="pdf-pages" onClick={e => e.stopPropagation()} style={{ ...box, width: 780 }}>
+        <h3 style={{ margin: 0 }}>Какие страницы вставить?</h3>
+        <div style={{ fontSize: 13, color: '#555', lineHeight: 1.4 }}>
+          Одну страницу перед вставкой можно обрезать, несколько встанут целиком рядом друг с другом.
+          Нажмите на страницы или задайте диапазон.
         </div>
-        {pages.count > shown && <div style={{ fontSize: 12, color: '#888' }}>Показаны первые {shown} страниц из {pages.count}.</div>}
-        <button onClick={() => onDone(null)} style={plain}>Отмена</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, flexWrap: 'wrap' }}>
+          Страницы с
+          <input data-testid="pdf-from" value={from} onChange={e => setFrom(e.target.value.replace(/\D/g, ''))} inputMode="numeric" style={num} />
+          по
+          <input data-testid="pdf-to" value={to} onChange={e => setTo(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder={from} style={num} />
+          <button data-testid="pdf-range" disabled={!rangeOk} onClick={() => setChosen(new Set(range(a, b)))} style={{ ...secondary, padding: '6px 12px', opacity: rangeOk ? 1 : 0.5 }}>Выбрать</button>
+          <span style={{ color: '#888', fontSize: 12 }}>всего {pages.count}</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: '52vh', overflowY: 'auto' }}>
+          {Array.from({ length: shown }, (_, i) => {
+            const on = chosen.has(i + 1);
+            return (
+              <button key={i} data-testid="pdf-page" aria-pressed={on} onClick={e => tap(i + 1, e.shiftKey)} style={{
+                width: 130, padding: 4, borderRadius: 6, background: on ? '#e7f1fc' : '#fff', cursor: 'pointer',
+                border: on ? '2px solid #4a90e2' : '2px solid #e2e2e2', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              }}>
+                {thumbs[i] ? <img src={thumbs[i]} alt="" style={{ width: '100%', display: 'block' }} /> : <div style={{ width: '100%', aspectRatio: '0.7', background: '#f3f3f3' }} />}
+                <span style={{ fontSize: 12, color: on ? '#2a6bb8' : '#555', fontWeight: on ? 'bold' : 'normal' }}>{on ? '✓ ' : ''}{i + 1}</span>
+              </button>
+            );
+          })}
+        </div>
+        {pages.count > shown && <div style={{ fontSize: 12, color: '#888' }}>Показаны первые {shown} страниц, дальние можно взять диапазоном.</div>}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button data-testid="pdf-insert" disabled={!list.length} onClick={() => onDone(list)} style={{ ...main, opacity: list.length ? 1 : 0.5 }}>
+            {list.length === 1 ? 'Дальше: обрезать' : list.length ? `Вставить ${list.length} стр.` : 'Выберите страницы'}
+          </button>
+          {list.length > 1 && <span style={{ fontSize: 12, color: '#888' }}>{list.length > 6 ? 'Много страниц на одной доске выйдут мелко' : ''}</span>}
+          <button onClick={() => onDone(null)} style={{ ...plain, marginLeft: 'auto' }}>Отмена</button>
+        </div>
       </div>
     </div>
   );
@@ -153,4 +196,5 @@ const box: CSSProperties = {
 const dim: CSSProperties = { position: 'absolute', background: 'rgba(0,0,0,0.45)', pointerEvents: 'none' };
 const main: CSSProperties = { padding: '9px 16px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', fontSize: 14, cursor: 'pointer' };
 const secondary: CSSProperties = { padding: '9px 14px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 14, cursor: 'pointer' };
+const num: CSSProperties = { width: 56, fontSize: 14, padding: '6px 8px', borderRadius: 6, border: '1px solid #ccc', textAlign: 'center', boxSizing: 'border-box' };
 const plain: CSSProperties = { border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 };

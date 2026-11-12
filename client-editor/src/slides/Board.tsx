@@ -109,7 +109,8 @@ export interface BoardPicture { src: string; width: number; height: number }
 /** The app's own ways to get a picture (a file, a PDF page) and to crop one; the board only places them.
  *  crop: `from` is the kept part in the old picture's pixels */
 export interface BoardPictures {
-  pick(): Promise<BoardPicture | null>
+  /** several (pages of a PDF, say) are laid out side by side */
+  pick(): Promise<BoardPicture[] | null>
   crop(src: string): Promise<(BoardPicture & { from: { x: number; y: number; w: number; h: number } }) | null>
 }
 
@@ -147,7 +148,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
 
   const api = useRef({
     undo() {}, redo() {}, clear() {}, deleteSelection() {}, restyle() {},
-    insertPicture(_p: BoardPicture) {}, pickedSrc(): string | null { return null },
+    insertPictures(_ps: BoardPicture[]) {}, pickedSrc(): string | null { return null },
     recrop(_p: BoardPicture & { from: { x: number; y: number; w: number; h: number } }) {},
   })
 
@@ -266,17 +267,36 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
         const sel = fc.getActiveObjects()
         if (sel.length && !(sel[0] as IText).isEditing) erase(sel)
       },
-      // a new picture in the middle of the page, at most most of it; then it's picked to be moved
-      insertPicture: p => {
+      // new pictures in the middle of the page, in a grid as big as fits; then they're picked to be moved
+      insertPictures: ps => {
+        if (!ps.length) return
         enqueue(async () => {
-          const img = await FabricImage.fromURL(p.src)
-          const k = Math.min(1, (W * 0.8) / p.width, (H * 0.8) / p.height)
-          img.set({ originX: 'left', originY: 'top', scaleX: k, scaleY: k, left: (W - p.width * k) / 2, top: (H - p.height * k) / 2 })
-          fc.add(img)
-          added(img)
+          const imgs = await Promise.all(ps.map(p => FabricImage.fromURL(p.src)))
+          const gap = 20
+          const cw = Math.max(...ps.map(p => p.width)), ch = Math.max(...ps.map(p => p.height))
+          let best = { k: 0, cols: 1, rows: 1 }
+          for (let cols = 1; cols <= ps.length; cols++) {
+            const rows = Math.ceil(ps.length / cols)
+            const k = Math.min(1, (W * 0.9 - gap * (cols - 1)) / (cols * cw), (H * 0.85 - gap * (rows - 1)) / (rows * ch))
+            if (k > best.k) best = { k, cols, rows }
+          }
+          const { k, cols, rows } = best
+          const x0 = (W - (cols * cw * k + gap * (cols - 1))) / 2, y0 = (H - (rows * ch * k + gap * (rows - 1))) / 2
+          imgs.forEach((img, i) => {
+            const p = ps[i], c = i % cols, r = Math.floor(i / cols)
+            img.set({
+              originX: 'left', originY: 'top', scaleX: k, scaleY: k,
+              left: x0 + c * (cw * k + gap) + (cw - p.width) * k / 2, top: y0 + r * (ch * k + gap) + (ch - p.height) * k / 2,
+            });
+            (img as Obj).uid = newUid()
+            style(img)
+            fc.add(img)
+          })
+          const json = imgs.map(toJson)
+          commit(json.map(obj => ({ t: 'add', obj })), json.map(obj => ({ t: 'del', uid: obj.uid })))
           setTool('select')
-          img.set({ selectable: true, evented: true })
-          fc.setActiveObject(img)
+          imgs.forEach(img => img.set({ selectable: true, evented: true }))
+          fc.setActiveObject(imgs.length > 1 ? new ActiveSelection(imgs, { canvas: fc }) : imgs[0])
           fc.requestRenderAll()
         })
       },
@@ -498,7 +518,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
           {pictures && role === 'teacher' && <>
             <Sep />
             <Btn title="Картинка или страница PDF: вставить на доску" testId="board-picture" onClick={() => {
-              pictures.pick().then(p => { if (p) api.current.insertPicture(p) }).catch(e => console.error('picture:', e))
+              pictures.pick().then(ps => { if (ps) api.current.insertPictures(ps) }).catch(e => console.error('picture:', e))
             }}>🖼</Btn>
             {imagePicked && <Btn title="Обрезать картинку" testId="board-crop" onClick={() => {
               const src = api.current.pickedSrc()

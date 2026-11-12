@@ -101,9 +101,18 @@ export const boardPictures: BoardPictures = {
       const pages = await pdfPages(file).catch(() => null);
       if (!pages) { await dialog<true>(done => <Note text="Не удалось открыть PDF." onClose={() => done(true)} />); return null; }
       try {
-        const n = pages.count === 1 ? 1 : await dialog<number>(done => <PageChooser pages={pages} onDone={done} />);
-        if (!n) return null;
-        src = await pages.render(n, PDF_PAGE_WIDTH);
+        const chosen = pages.count === 1 ? [1] : await dialog<number[]>(done => <PageChooser pages={pages} onDone={done} />);
+        if (!chosen?.length) return null;
+        // several pages go on whole, side by side; one is cropped first
+        if (chosen.length > 1) {
+          const out: BoardPicture[] = [];
+          for (const n of chosen) {
+            const img = await loadImage(await pages.render(n, PDF_PAGE_WIDTH));
+            out.push(encode(img, { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight }, false));
+          }
+          return out;
+        }
+        src = await pages.render(chosen[0], PDF_PAGE_WIDTH);
         png = false;
       } finally { pages.close(); }
     } else if (file.type.startsWith('image/')) {
@@ -115,7 +124,7 @@ export const boardPictures: BoardPictures = {
     try {
       const img = await loadImage(src);
       const crop = await dialog<Crop>(done => <Cropper img={img} action="Вставить" onDone={done} />);
-      return crop ? encode(img, crop, png) : null;
+      return crop ? [encode(img, crop, png)] : null;
     } finally {
       if (src.startsWith('blob:')) URL.revokeObjectURL(src);
     }

@@ -120,13 +120,17 @@ export function NewTaskDialog({ type, running, onClose }: { type: string; runnin
         <input data-testid="new-task-title" value={title} onChange={e => setTitle(e.target.value)} maxLength={120} placeholder={`Название, например «${label}»`} style={field} autoFocus />
         {work && <textarea data-testid="new-task-text" value={task} onChange={e => setTask(e.target.value)} maxLength={2000} rows={4}
           placeholder="Задание: ученики увидят его над доской" style={{ ...field, resize: 'vertical', fontFamily: 'inherit' }} />}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#333' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#333' }}>
           Время
-          <input data-testid="new-task-minutes" value={minutes} onChange={e => setMinutes(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="—"
-            style={{ ...field, width: 60, textAlign: 'center', borderColor: okMinutes ? '#ccc' : '#e74c3c' }} />
+          <button data-testid="new-task-less" aria-label="На минуту меньше" disabled={!minutes || n <= 1}
+            onClick={() => setMinutes(n <= 1 ? '' : String(n - 1))} style={step}>−</button>
+          <input data-testid="new-task-minutes" value={minutes} onChange={e => setMinutes(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" placeholder="—"
+            style={{ ...field, width: 52, textAlign: 'center', borderColor: okMinutes ? '#ccc' : '#e74c3c' }} />
+          <button data-testid="new-task-more" aria-label="На минуту больше" disabled={n >= 120}
+            onClick={() => setMinutes(String(Math.min(120, (minutes ? n : 0) + 1)))} style={step}>+</button>
           мин
-          <span style={{ fontSize: 12, color: '#888' }}>можно не указывать</span>
-        </label>
+          <span style={{ fontSize: 12, color: '#888' }}>{minutes ? '' : 'без времени'}</span>
+        </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button data-testid="new-task-start" onClick={() => add(true)} disabled={!okMinutes} style={{ ...btn, background: '#2ecc71', color: '#fff', border: 'none', flex: 1 }}>Начать сейчас</button>
           <button data-testid="new-task-add" onClick={() => add(false)} disabled={!okMinutes} style={{ ...btn, flex: 1 }}>
@@ -147,4 +151,5 @@ const dialog: CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
 };
 const field: CSSProperties = { fontSize: 14, padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box', width: '100%' };
+const step: CSSProperties = { width: 34, height: 34, borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 };
 const btn: CSSProperties = { padding: '9px 12px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 14, cursor: 'pointer' };
