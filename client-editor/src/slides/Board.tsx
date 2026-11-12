@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  ActiveSelection, Canvas, Ellipse, IText, Line, Path, PencilBrush, Rect, Triangle, util,
+  ActiveSelection, Canvas, Ellipse, FabricImage, IText, Line, Path, PencilBrush, Rect, Triangle, util,
   type FabricObject, type TPointerEventInfo,
 } from 'fabric'
 import { SLIDE_HEIGHT as H, SLIDE_WIDTH as W } from './model'
@@ -104,8 +104,19 @@ function makeShape(tool: ShapeTool, a: { x: number; y: number }, b: { x: number;
   return new Ellipse({ ...box, rx: w / 2, ry: h / 2, ...stroke })
 }
 
+/** A picture ready for the board: a data URL, its size in pixels */
+export interface BoardPicture { src: string; width: number; height: number }
+/** The app's own ways to get a picture (a file, a PDF page) and to crop one; the board only places them.
+ *  crop: `from` is the kept part in the old picture's pixels */
+export interface BoardPictures {
+  pick(): Promise<BoardPicture | null>
+  crop(src: string): Promise<(BoardPicture & { from: { x: number; y: number; w: number; h: number } }) | null>
+}
+
 interface Props {
   role?: BoardRole
+  /** Pictures on the board (teacher only): without it there is no such button */
+  pictures?: BoardPictures
   readOnly?: boolean
   /** Shared board transport; omitted — a local board nobody else sees */
   link?: BoardLink
@@ -113,7 +124,7 @@ interface Props {
   underlay?: (width: number) => ReactNode
 }
 
-export function Board({ role = 'student', readOnly = false, link, underlay }: Props) {
+export function Board({ role = 'student', readOnly = false, link, underlay, pictures }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const fcRef = useRef<Canvas | null>(null)
@@ -122,6 +133,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
   const [width, setWidth] = useState(WIDTHS[0])
   const [hist, setHist] = useState({ undo: 0, redo: 0 })
   const [pageWidth, setPageWidth] = useState(0)
+  const [imagePicked, setImagePicked] = useState(false) // one picture selected: it can be cropped
   const hasUnderlay = !!underlay
   const live = useRef({ tool, color, width, readOnly, link, hasUnderlay })
   live.current = { tool, color, width, readOnly, link, hasUnderlay }
@@ -133,7 +145,11 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
   const redoStack = useRef<Entry[]>([])
   const syncHist = () => setHist({ undo: undoStack.current.length, redo: redoStack.current.length })
 
-  const api = useRef({ undo() {}, redo() {}, clear() {}, deleteSelection() {}, restyle() {} })
+  const api = useRef({
+    undo() {}, redo() {}, clear() {}, deleteSelection() {}, restyle() {},
+    insertPicture(_p: BoardPicture) {}, pickedSrc(): string | null { return null },
+    recrop(_p: BoardPicture & { from: { x: number; y: number; w: number; h: number } }) {},
+  })
 
   // Set up the canvas once
   useEffect(() => {
@@ -250,6 +266,52 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
         const sel = fc.getActiveObjects()
         if (sel.length && !(sel[0] as IText).isEditing) erase(sel)
       },
+      // a new picture in the middle of the page, at most most of it; then it's picked to be moved
+      insertPicture: p => {
+        enqueue(async () => {
+          const img = await FabricImage.fromURL(p.src)
+          const k = Math.min(1, (W * 0.8) / p.width, (H * 0.8) / p.height)
+          img.set({ originX: 'left', originY: 'top', scaleX: k, scaleY: k, left: (W - p.width * k) / 2, top: (H - p.height * k) / 2 })
+          fc.add(img)
+          added(img)
+          setTool('select')
+          img.set({ selectable: true, evented: true })
+          fc.setActiveObject(img)
+          fc.requestRenderAll()
+        })
+      },
+      pickedSrc: () => {
+        const o = fc.getActiveObject()
+        return o instanceof FabricImage ? o.getSrc() : null
+      },
+      // the picked picture gives way to its cropped part, which stays where it was on the page
+      recrop: p => {
+        const old = fc.getActiveObject()
+        if (!(old instanceof FabricImage)) return
+        const uid = (old as Obj).uid
+        const prev = uid ? known.current.get(uid) : undefined
+        if (!uid || !prev) return
+        enqueue(async () => {
+          const img = await FabricImage.fromURL(p.src)
+          const sx = old.scaleX * p.from.w / p.width, sy = old.scaleY * p.from.h / p.height
+          const tl = old.getPointByOrigin('left', 'top')
+          const cos = Math.cos(util.degreesToRadians(old.angle)), sin = Math.sin(util.degreesToRadians(old.angle))
+          const dx = p.from.x * old.scaleX, dy = p.from.y * old.scaleY
+          img.set({
+            originX: 'left', originY: 'top', angle: old.angle, scaleX: sx, scaleY: sy,
+            left: tl.x + dx * cos - dy * sin, top: tl.y + dx * sin + dy * cos,
+          });
+          (img as Obj).uid = uid
+          const i = fc.getObjects().indexOf(old)
+          fc.discardActiveObject()
+          fc.remove(old)
+          fc.insertAt(i, img)
+          style(img)
+          fc.setActiveObject(img)
+          fc.requestRenderAll()
+          commit([{ t: 'mod', obj: toJson(img) }], [{ t: 'mod', obj: prev }])
+        })
+      },
       restyle: () => {
         fc.getObjects().forEach(style)
         const { tool, readOnly } = live.current
@@ -363,6 +425,11 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
       if (redo.length) commit(redo, undo)
     })
 
+    const picked = () => setImagePicked(fc.getActiveObjects().length === 1 && fc.getActiveObject() instanceof FabricImage)
+    fc.on('selection:created', picked)
+    fc.on('selection:updated', picked)
+    fc.on('selection:cleared', picked)
+
     const unsubscribe = live.current.link?.subscribe(op => enqueue(() => applyNow(op)), loadState)
     api.current.restyle()
 
@@ -428,6 +495,16 @@ export function Board({ role = 'student', readOnly = false, link, underlay }: Pr
           <Btn title="Отменить (Ctrl+Z)" disabled={!hist.undo} onClick={() => api.current.undo()}>↶</Btn>
           <Btn title="Повторить (Ctrl+Shift+Z)" disabled={!hist.redo} onClick={() => api.current.redo()}>↷</Btn>
           {role === 'teacher' && <Btn title="Очистить доску (можно отменить)" onClick={() => api.current.clear()} testId="board-clear">🗑</Btn>}
+          {pictures && role === 'teacher' && <>
+            <Sep />
+            <Btn title="Картинка или страница PDF: вставить на доску" testId="board-picture" onClick={() => {
+              pictures.pick().then(p => { if (p) api.current.insertPicture(p) }).catch(e => console.error('picture:', e))
+            }}>🖼</Btn>
+            {imagePicked && <Btn title="Обрезать картинку" testId="board-crop" onClick={() => {
+              const src = api.current.pickedSrc()
+              if (src) pictures.crop(src).then(p => { if (p) api.current.recrop(p) }).catch(e => console.error('crop:', e))
+            }}>✂</Btn>}
+          </>}
         </div>
       )}
       <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'hidden' }}>

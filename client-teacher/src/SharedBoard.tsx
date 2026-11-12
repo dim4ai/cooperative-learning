@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { Board, type BoardLink, type BoardObject, type BoardOp } from './slides/Board';
 import { socket } from './socket';
+import { boardPictures } from './BoardPictures';
 
 const link: BoardLink = {
   send: op => socket.emit('boardOp', op),
@@ -17,5 +18,5 @@ const link: BoardLink = {
 };
 
 export function SharedBoard({ readOnly, underlay }: { room?: string; readOnly?: boolean; underlay?: (width: number) => ReactNode }) {
-  return <Board role="teacher" readOnly={readOnly} link={link} underlay={underlay} />;
+  return <Board role="teacher" readOnly={readOnly} link={link} underlay={underlay} pictures={boardPictures} />;
 }

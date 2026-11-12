@@ -1392,6 +1392,20 @@ function finishVote(lesson: LessonRuntime) {
 type BoardObject = Record<string, unknown> & { uid: string; type: string };
 const BOARD_MAX_OBJECTS = 3000;
 const BOARD_MAX_OP_BYTES = 256 * 1024;
+const BOARD_MAX_PICTURE_BYTES = 400_000; // a picture the teacher put on the board (client-teacher BoardPictures.tsx)
+const PICTURE_SRC = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
+
+/** Nothing on a board may make the browsers showing it fetch anything: a picture comes inside the object */
+function boardObjectAllowed(o: BoardObject, isTeacher: boolean): boolean {
+  const size = JSON.stringify(o).length;
+  const picture = o.type.toLowerCase() === 'image';
+  if (size > (picture ? BOARD_MAX_PICTURE_BYTES : BOARD_MAX_OP_BYTES)) return false;
+  if (picture) return isTeacher && typeof o.src === 'string' && PICTURE_SRC.test(o.src);
+  if ('src' in o) return false;
+  // a pattern fill or stroke would load its source
+  for (const v of [o.fill, o.stroke]) if (v && typeof v === 'object') return false;
+  return true;
+}
 
 /** Each slide or sheet (or block without any) keeps its own drawing, per room */
 function boardKey(lesson: LessonRuntime, room: string): string {
@@ -1431,7 +1445,7 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
 
   let out: unknown;
   if (op.t === 'add' || op.t === 'mod') {
-    if (!isBoardObject(op.obj) || JSON.stringify(op.obj).length > BOARD_MAX_OP_BYTES) return;
+    if (!isBoardObject(op.obj) || !boardObjectAllowed(op.obj, isTeacher)) return;
     const prev = board.get(op.obj.uid);
     if (!prev && board.size >= BOARD_MAX_OBJECTS) return;
     // the author is whoever created the object, as the server saw it
