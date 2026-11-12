@@ -29,4 +29,5 @@ jobs:
       - name: Deploy the standalone demo
         run: |
           mkdir -p ~/co-learn/landing/demo
-          rsync -a --delete client-teacher/dist-demo/ ~/co-learn/landing/demo/
+          # the bots' voices are kept on the server only, not in git: --delete must not touch them
+          rsync -a --delete --exclude /demo/voice/ client-teacher/dist-demo/ ~/co-learn/landing/demo/
