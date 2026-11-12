@@ -833,7 +833,7 @@ export default function App() {
           marginTop: GROUP_GAP, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer',
           background: '#fff', color: journal.status === 'locked' ? '#b07800' : '#222', fontSize: 12, textAlign: 'center',
         }}>
-          {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && ` · новых: ${notInJournal}`}
+          {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && <><br />новых: {notInJournal}</>}
         </button>}
         {demo && state.stage === 'waiting' && (
           <DemoOff style={{ marginTop: GROUP_GAP }} note="Журнал класса: кто пришёл, кого нет, а рассадка и число мест запоминаются до следующего урока.">
