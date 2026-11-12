@@ -1367,6 +1367,10 @@ function timerAction(lesson: LessonRuntime, action: unknown): boolean {
     if (!lesson.timerTotalMs) return false;
     lesson.timerEndsAt = now + lesson.timerTotalMs;
     lesson.timerLeftMs = null;
+  } else if (action === 'stop') {
+    if (!running && !lesson.timerLeftMs) return false;
+    lesson.timerEndsAt = null;
+    lesson.timerLeftMs = 0;
   } else if (action === 'reset') {
     if (!lesson.timerTotalMs) return false;
     lesson.timerEndsAt = null;

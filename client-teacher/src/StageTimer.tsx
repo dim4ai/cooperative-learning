@@ -24,7 +24,9 @@ export function StageTimer({ endsAt, timer, clockSkew }: { endsAt: number | null
   const left = running ? endsAt - now : timer?.leftMs ?? null;
   const over = left !== null && left < 0;
   const soon = left !== null && left >= 0 && left <= 60_000;
-  const act = (a: string) => socket.emit('timer', a);
+  // the clock stands still while the timer does: a press reads it anew, or the first moment after
+  // a resume would count from the moment of the pause
+  const act = (a: string) => { setNow(Date.now() + clockSkew); socket.emit('timer', a); };
   const fresh = !running && left !== null && left === total; // set, not started
 
   return (
@@ -34,7 +36,7 @@ export function StageTimer({ endsAt, timer, clockSkew }: { endsAt: number | null
         color: over ? '#fff' : soon && running ? '#3a2a00' : left === null ? '#999' : running ? '#222' : '#777',
         background: over ? '#c0392b' : soon && running ? '#f0b429' : 'transparent',
       }}>
-        {left === null ? '—:——' : clock(left)}{!running && left !== null && !fresh && <span style={{ fontSize: 12, marginLeft: 4 }}>⏸</span>}
+        {left === null ? '—:——' : clock(left)}{!running && left !== null && left > 0 && !fresh && <span style={{ fontSize: 12, marginLeft: 4 }}>⏸</span>}
       </div>
       <div style={{ display: 'flex', gap: 3 }}>
         {running
@@ -43,7 +45,9 @@ export function StageTimer({ endsAt, timer, clockSkew }: { endsAt: number | null
               style={{ ...btn, ...(left && left > 0 ? { background: '#2ecc71', color: '#fff', borderColor: '#2ecc71' } : {}) }}>▶</button>}
         <button data-testid="timer-restart" onClick={() => act('restart')} disabled={!total} title="Перезапустить: всё время этапа заново, сразу" style={btn}>↻</button>
         <button data-testid="timer-plus" onClick={() => act('plus')} title="Добавить минуту" style={{ ...btn, width: 'auto', padding: '0 6px' }}>+1</button>
-        <button data-testid="timer-reset" onClick={() => act('reset')} disabled={!total || fresh} title="Сбросить: всё время этапа, не запуская" style={btn}>⟲</button>
+        <button data-testid="timer-stop" onClick={() => act('stop')} disabled={left === null || (!running && left === 0)} title="Стоп: таймер на 0:00" style={btn}>
+          <span style={{ display: 'block', width: 9, height: 9, margin: 'auto', background: 'currentColor', borderRadius: 1 }} />
+        </button>
       </div>
     </div>
   );
