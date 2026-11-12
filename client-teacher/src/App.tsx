@@ -772,7 +772,8 @@ export default function App() {
 
         {state.stage !== 'waiting' && (
           <>
-            <div style={{ fontSize: 22, fontWeight: 'bold', color: '#222', marginBottom: 4 }}>План урока</div>
+            {/* as high as the top bar: the plan starts level with the bar's lower edge */}
+            <div style={{ fontSize: 22, fontWeight: 'bold', color: '#222', height: 62, marginTop: -12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>План урока</div>
             <LessonPlan slides={slides} stage={state.stage} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
@@ -848,7 +849,7 @@ export default function App() {
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
-        <div style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div data-testid="top-bar" style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)} />
           <TaskMenu onPick={setNewTask} />
           {/* right after the menus, so it stays put whatever the stage's title is */}
