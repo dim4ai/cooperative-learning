@@ -202,7 +202,7 @@ export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
 
 // ---------- the lesson plan and the teacher's notes ----------
 
-const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки' };
+const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки', poll: 'голосование' };
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */

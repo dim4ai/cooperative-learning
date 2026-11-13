@@ -86,6 +86,7 @@ const TASK_TYPES: { type: string; label: string; hint: string }[] = [
   { type: 'individual', label: 'Индивидуально', hint: 'Каждый сам, у каждого своя доска' },
   { type: 'pairs', label: 'В парах', hint: 'Пары говорят между собой, доска на двоих' },
   { type: 'fours', label: 'В четвёрках', hint: 'Четвёрки говорят между собой, доска на четверых' },
+  { type: 'poll', label: 'Голосование', hint: 'Вопрос всему классу с вариантами ответа: один или несколько' },
 ];
 
 /** «Новое задание»: a task of any kind, right after the running one */

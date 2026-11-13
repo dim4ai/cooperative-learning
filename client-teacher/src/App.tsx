@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useConnectionState, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { NameCard, NAME_CARD_BG, SpeakingRing } from './speaking';
+import { NewPollDialog, PollResults } from './Poll';
+import { pollMarks, usePoll, type TeacherPollView } from './pollState';
 import { AvatarProvider, useTeacherTitle } from './avatars';
 import { ConnectionState, Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
@@ -251,9 +253,19 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity }: { activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
+function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity, poll }: { poll: TeacherPollView | null; activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
+  }
+
+  if (stage === 'group' && poll) {
+    // a poll: the answers so far, and on the map who answered what
+    return (
+      <div data-testid="poll-view" style={{ height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PollResults poll={poll} students={students.length} />
+        <SeatingMap seats={seats} showSelf={hasLivekit} readOnly lessonCode={lessonCode} names={names} answers={pollMarks(poll)} waiting={waiting} />
+      </div>
+    );
   }
 
   if (stage === 'group') {
@@ -551,6 +563,7 @@ export default function App() {
 
   const [endDialog, setEndDialog] = useState(false);
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
+  const poll = usePoll();
   const [recordAsk, setRecordAsk] = useState(0);
   const recording = useRecording().recording;
   const [startWarning, setStartWarning] = useState(false);
@@ -863,7 +876,7 @@ export default function App() {
                 <button role="tab" data-testid="tab-preview" aria-selected={preview} onClick={() => setPreviewTab(true)} style={tabStyle(preview)}>Просмотр урока</button>
               </div>
             : <span data-testid="stage-title">{currentBlockTitle ?? currentLabel}</span>}
-          {state.stage === 'group' && livekit && (
+          {state.stage === 'group' && livekit && !poll && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
               {(['board', 'screen'] as GroupMode[]).map(m => (
                 <button key={m} onClick={() => { setGroupMode(m); setMapOpen(false); }} style={{
@@ -885,8 +898,10 @@ export default function App() {
             <RecordingFinished />
           </div>}
         </div>
-        {newTask && <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />}
-        {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} pick={screenPick} onCancel={() => setGroupMode('board')} />}
+        {newTask && (newTask === 'poll'
+          ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />
+          : <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />)}
+        {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen' && !poll} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {preview ? <LessonPreview slides={slides} /> : inSmallRoom
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
@@ -898,7 +913,7 @@ export default function App() {
                 // (the bell) or asked to talk; «Войти открыто» in the room when it's needed
                 quiet: workStage && !toTalk && !callingRooms.has(room),
               }); }} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
-                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
+                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} poll={poll} />
           }
         </div>
       </div>
@@ -912,7 +927,7 @@ export default function App() {
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <BlockNotes slides={slides} />
           </div>
-          <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
+          {!poll && <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />}
         </div>
       )}
     </div>

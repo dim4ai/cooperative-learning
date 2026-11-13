@@ -1,3 +1,4 @@
+import type { PollDef } from './poll';
 // Lesson material for the slides. The lesson file itself stays in the teacher's browser.
 // The server keeps, in memory and only while the lesson lives:
 //   - the lesson structure (slides as JSON; media referenced by name), sent by the teacher;
@@ -46,6 +47,8 @@ export interface Block {
   slides: Scene[];
   /** a task added during the lesson: what the teacher drew for it, on every room's board to start with */
   starter?: Record<string, unknown>[];
+  /** Голосование: the question and its options (block type 'poll') */
+  poll?: PollDef;
 }
 
 export interface MediaInfo { hash: string; size: number; type: string }

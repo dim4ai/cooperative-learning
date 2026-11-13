@@ -24,6 +24,7 @@ import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
 import { RecordingTap } from './recorder';
+import { parsePoll, parseChoice, teacherView, studentView, type PollRun } from './poll';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -424,12 +425,6 @@ export interface Seat {
 
 type UnderstoodMark = 'yes' | 'no';
 
-interface Poll {
-  question: string;
-  options: string[];
-  votes: Map<string, number>;
-}
-
 // Everything scoped to one lesson (one teacher + their students). Keyed by lesson code.
 interface LessonRuntime {
   videoMode: VideoMode; // from the DB, fixed for the lesson
@@ -450,7 +445,7 @@ interface LessonRuntime {
   boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
   roomsByBlock: Map<string, Map<string, string>>; // work block id → student name → the room they wrote in there
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
-  currentPoll: Poll | null;
+  polls: Map<string, PollRun>;     // the answers to each poll block, by block id
   material: Material | null;
   slides: SlidesState;
   closed: boolean;                 // no new students: only those who have been here get back in
@@ -669,7 +664,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     boards: new Map(),
     roomsByBlock: new Map(),
     boardConnections: new Map(),
-    currentPoll: null,
+    polls: new Map(),
     material: null,
     slides: emptySlidesState(),
     closed: false,
@@ -856,13 +851,38 @@ function isNewcomer(lesson: LessonRuntime, p: Participant): boolean {
 
 const inClass = (lesson: LessonRuntime) => Array.from(lesson.participants.values()).filter(p => p.role === 'student' && !isNewcomer(lesson, p));
 
-function pollResults(lesson: LessonRuntime) {
-  if (!lesson.currentPoll) return null;
-  const poll = lesson.currentPoll;
-  const counts = poll.options.map((_, i) =>
-    Array.from(poll.votes.values()).filter(v => v === i).length
-  );
-  return { question: poll.question, options: poll.options, counts, total: poll.votes.size };
+// ---------- Голосование (poll.ts) ----------
+
+/** The poll of the running block and its answers so far */
+function currentPoll(lesson: LessonRuntime) {
+  const block = lesson.stage === 'waiting' ? null : lesson.material?.blocks.find(b => b.id === lesson.block);
+  if (!block?.poll) return null;
+  let run = lesson.polls.get(block.id);
+  if (!run) { run = { answers: new Map(), revealed: false }; lesson.polls.set(block.id, run); }
+  return { blockId: block.id, poll: block.poll, run };
+}
+
+function sendPoll(lesson: LessonRuntime, to?: Socket) {
+  const cur = currentPoll(lesson);
+  const sendTo = (id: string) => {
+    const p = lesson.participants.get(id);
+    const sock = io.sockets.sockets.get(id);
+    if (!p || !sock) return;
+    sock.emit('poll', !cur ? null : p.role === 'teacher' ? teacherView(cur.blockId, cur.poll, cur.run) : studentView(cur.blockId, cur.poll, cur.run, p.name));
+  };
+  if (to) return sendTo(to.id);
+  for (const id of lesson.participants.keys()) sendTo(id);
+}
+
+/** Answers come one by one: the teachers hear of them at most a few times a second */
+const pollSent = new WeakMap<LessonRuntime, NodeJS.Timeout>();
+function sendPollToTeachers(lesson: LessonRuntime) {
+  if (pollSent.has(lesson)) return;
+  pollSent.set(lesson, setTimeout(() => {
+    pollSent.delete(lesson);
+    const cur = currentPoll(lesson);
+    for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('poll', cur && teacherView(cur.blockId, cur.poll, cur.run));
+  }, 300));
 }
 
 function demoState(code: string) {
@@ -930,10 +950,8 @@ function studentSnapshot(code: string, lesson: LessonRuntime, p: Participant): [
     out.push(['sharedText', { room: p.livekitRoom, text: lesson.sharedTexts.get(p.livekitRoom) ?? '' }]);
     out.push(['boardState', boardState(lesson, p.livekitRoom)]);
   }
-  if (lesson.currentPoll) {
-    const vote = lesson.currentPoll.votes.get(p.id);
-    out.push(['poll', { question: lesson.currentPoll.question, options: lesson.currentPoll.options, myVote: vote ?? null }]);
-  }
+  const poll = currentPoll(lesson);
+  if (poll) out.push(['poll', studentView(poll.blockId, poll.poll, poll.run, p.name)]);
   return out;
 }
 
@@ -1005,7 +1023,6 @@ function endLesson(code: string, lesson: LessonRuntime, why: string) {
   updateRecording(code, lesson);
   lesson.stage = 'waiting';
   setStageTimer(lesson, null);
-  lesson.currentPoll = null;
   lesson.afterUntil = null;
   if (lesson.afterTimer) { clearTimeout(lesson.afterTimer); lesson.afterTimer = null; }
   setMaterial(code, lesson, null);
@@ -1048,7 +1065,6 @@ async function startAfterLesson(code: string, lesson: LessonRuntime, minutes: nu
   lesson.stage = 'fours';
   lesson.atDesks = false;
   setStageTimer(lesson, null);
-  lesson.currentPoll = null;
   setMaterial(code, lesson, null);
   for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.disconnect(true);
   await assignFours(code, lesson, 'after-fours');
@@ -1078,7 +1094,7 @@ function teacherSlidesState(lesson: LessonRuntime) {
 function studentSlidesView(lesson: LessonRuntime) {
   const s = studentScenes(lesson.material, lesson.slides);
   const block = lesson.material?.blocks.find(b => b.id === lesson.block);
-  const work = block && block.type !== 'group' ? { task: block.task, readOnly: block.sheetReadOnly } : {};
+  const work = block && WORK_STAGES.includes(block.type) ? { task: block.task, readOnly: block.sheetReadOnly } : {};
   if (!s) return { active: false, ...work };
   return {
     ...work,
@@ -1101,6 +1117,7 @@ function broadcastSlides(lesson: LessonRuntime, opts: { material?: boolean } = {
   const view = studentSlidesView(lesson);
   for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('slides:view', view);
   sendEarlierBoards(lesson);
+  sendPoll(lesson);
   lesson.relay.setAllowed([...new Set([...allowedHashes(lesson.material, lesson.slides), ...earlierHashes(lesson)])]);
 }
 
@@ -1176,8 +1193,8 @@ function setMaterial(code: string, lesson: LessonRuntime, material: Material | n
 // The teacher may change the course of the lesson: a new block of any kind goes into the plan right
 // after the running one, with or without a lesson file. It lives in the lesson's memory only.
 
-const LIVE_TYPES: readonly string[] = ['group', 'individual', 'pairs', 'fours'];
-const LIVE_TITLES: Record<string, string> = { group: 'Объяснение', individual: 'Индивидуально', pairs: 'В парах', fours: 'В четвёрках' };
+const LIVE_TYPES: readonly string[] = ['group', 'individual', 'pairs', 'fours', 'poll'];
+const LIVE_TITLES: Record<string, string> = { group: 'Объяснение', individual: 'Индивидуально', pairs: 'В парах', fours: 'В четвёрках', poll: 'Голосование' };
 const isLiveBlock = (id: string) => id.startsWith('live-');
 let liveSeq = 0;
 const STARTER_MAX_OBJECTS = 500;
@@ -1207,16 +1224,19 @@ function resumeBlock(lesson: LessonRuntime, blockId: string) {
   pushBoards(lesson);
 }
 
-function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown }): Block | null {
+function addLiveBlock(lesson: LessonRuntime, b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown; poll?: unknown }): Block | null {
   if (typeof b.type !== 'string' || !LIVE_TYPES.includes(b.type)) return null;
+  const poll = b.type === 'poll' ? parsePoll(b.poll) : undefined;
+  if (poll === null) return null;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
   const minutes = typeof b.minutes === 'number' && Number.isInteger(b.minutes) && b.minutes >= 1 && b.minutes <= 120 ? b.minutes : null;
   const block: Block = {
     id: `live-${Date.now().toString(36)}-${++liveSeq}`, type: b.type, title: text(b.title, 120) || LIVE_TITLES[b.type],
-    task: b.type === 'group' ? '' : text(b.task, 2000), sheetReadOnly: false, boardsFrom: [], duration: minutes, slides: [],
+    task: b.type === 'group' || poll ? '' : text(b.task, 2000), sheetReadOnly: false, boardsFrom: [], duration: minutes, slides: [],
+    ...(poll ? { poll } : {}),
   };
   // the teacher's starting board for every room: whole or not at all
-  if (Array.isArray(b.board) && b.board.length) {
+  if (!poll && Array.isArray(b.board) && b.board.length) {
     const objs = b.board;
     if (objs.length > STARTER_MAX_OBJECTS || JSON.stringify(objs).length > STARTER_MAX_BYTES) return null;
     if (!objs.every(o => isBoardObject(o) && boardObjectAllowed(o, true))) return null;
@@ -1257,6 +1277,7 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   else await sendAllToMain(code, lesson);
   if (wereAtDesks) await bringTeachersToMain(code, lesson);
   broadcastState(code, lesson);
+  sendPoll(lesson); // a poll is there only while its block runs, not on the seating
 }
 
 // ---------- who talks and writes, in pairs and fours ----------
@@ -1389,9 +1410,16 @@ function timerAction(lesson: LessonRuntime, action: unknown): boolean {
   return true;
 }
 
+/** Where the class is for a block: a poll is answered by everyone together, as in an explanation */
+function stageOf(block: Block): Stage | null {
+  if (block.type === 'poll') return block.poll ? 'group' : null;
+  return STAGES.includes(block.type as Stage) ? block.type as Stage : null;
+}
+
 async function startBlock(code: string, lesson: LessonRuntime, blockId: string) {
   const block = lesson.material?.blocks.find(b => b.id === blockId);
-  if (!block || !STAGES.includes(block.type as Stage)) return;
+  const stage = block && stageOf(block);
+  if (!block || !stage) return;
   // pressing the running block again doesn't start its time over
   if (block.id !== lesson.block || lesson.timerTotalMs === null) setStageTimer(lesson, block.duration);
   if (block.id !== lesson.block) resetActivity(lesson);
@@ -1400,7 +1428,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
-  if (block.type !== lesson.stage) await changeStage(code, lesson, block.type as Stage);
+  if (stage !== lesson.stage) await changeStage(code, lesson, stage);
   else broadcastState(code, lesson); // the new block's time
   // the same stage again: everyone stays where they are, and writes there for this block
   for (const p of lesson.participants.values()) noteRoom(lesson, p);
@@ -1970,6 +1998,7 @@ io.on('connection', async (socket) => {
       socket.emit('slides:view', studentSlidesView(lesson));
       sendEarlierBoards(lesson, socket.id);
     }
+    sendPoll(lesson, socket);
     // Media relay (see mediaRelay.ts). Registered right away: a student's first wants come with its first view.
     if (role === 'teacher') {
       // the teacher's browser has this lesson file open and can send its media
@@ -2103,7 +2132,7 @@ io.on('connection', async (socket) => {
     });
 
     // A task the lesson file doesn't have: into the plan after the running one, and started at once if asked
-    socket.on('block:add', async (b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown; start?: unknown } = {}, ack?: unknown) => {
+    socket.on('block:add', async (b: { type?: unknown; title?: unknown; task?: unknown; minutes?: unknown; board?: unknown; poll?: unknown; start?: unknown } = {}, ack?: unknown) => {
       if (role !== 'teacher') return;
       const block = addLiveBlock(lesson, b ?? {});
       if (typeof ack === 'function') ack({ ok: !!block });
@@ -2170,25 +2199,23 @@ io.on('connection', async (socket) => {
       applyBoardOp(lesson, participant.livekitRoom, op, participant.name, role === 'teacher', socket.id);
     });
 
-    socket.on('startPoll', ({ question, options }: { question: string; options: string[] }) => {
-      if (role !== 'teacher') return;
-      lesson.currentPoll = { question, options, votes: new Map() };
-      io.to(code).emit('poll', { question, options, myVote: null });
-      io.to(code).emit('pollResults', pollResults(lesson));
+    socket.on('poll:answer', ({ blockId, choice }: { blockId?: unknown; choice?: unknown } = {}) => {
+      const name = lesson.participants.get(socket.id)?.name;
+      const cur = currentPoll(lesson);
+      if (role !== 'student' || !name || !cur || cur.blockId !== blockId || cur.run.revealed) return;
+      const picked = parseChoice(cur.poll, choice);
+      if (!picked) return;
+      cur.run.answers.set(name, picked);
+      socket.emit('poll', studentView(cur.blockId, cur.poll, cur.run, name));
+      sendPollToTeachers(lesson);
     });
 
-    socket.on('vote', ({ optionIndex }: { optionIndex: number }) => {
-      if (role !== 'student' || !lesson.currentPoll) return;
-      lesson.currentPoll.votes.set(effectiveName, optionIndex);
-      socket.emit('poll', { question: lesson.currentPoll.question, options: lesson.currentPoll.options, myVote: optionIndex });
-      io.to(code).emit('pollResults', pollResults(lesson));
-    });
-
-    socket.on('stopPoll', () => {
-      if (role !== 'teacher') return;
-      lesson.currentPoll = null;
-      io.to(code).emit('poll', null);
-      io.to(code).emit('pollResults', null);
+    // the results to the class: answers are closed while they're shown
+    socket.on('poll:reveal', ({ revealed }: { revealed?: unknown } = {}) => {
+      const cur = currentPoll(lesson);
+      if (role !== 'teacher' || !cur) return;
+      cur.run.revealed = revealed === true;
+      sendPoll(lesson);
     });
 
     socket.on('joinPair', async ({ room, quiet }: { room: string; quiet?: boolean }) => {
