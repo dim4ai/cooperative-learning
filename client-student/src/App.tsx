@@ -6,6 +6,8 @@ import { DeskLayout } from './DeskLayout';
 import { FoursLayout } from './FoursLayout';
 import { IndividualLayout } from './IndividualLayout';
 import { GroupView } from './GroupView';
+import { PollView } from './Poll';
+import { usePoll } from './pollState';
 import { useStudentSlides } from './LessonSlides';
 import { SeatingMap } from './SeatingMap';
 import type { Seat } from './SeatingMap';
@@ -347,7 +349,7 @@ export default function App() {
   const [teacherVoice, setTeacherVoice] = useState<LivekitInfo | null>(null);
   const [, setSharedText] = useState('');
   const [seats, setSeats] = useState<Seat[]>([]);
-  const [poll, setPoll] = useState<{ question: string; options: string[]; myVote: number | null } | null>(null);
+  const poll = usePoll();
   const [micOn, setMicOn] = useState(false);
   const [media, setMediaState] = useState<MediaPrefs>(loadMediaPrefs);
   function setMedia(p: MediaPrefs) { setMediaState(p); saveMediaPrefs(p); }
@@ -428,9 +430,6 @@ export default function App() {
     });
     socket.on('sharedText', ({ text }: { room: string; text: string }) => {
       setSharedText(text);
-    });
-    socket.on('poll', (data: { question: string; options: string[]; myVote: number | null } | null) => {
-      setPoll(data);
     });
     socket.on('muted', () => setMicOn(false));
     socket.on('teacherLook', setTeacherLook);
@@ -583,7 +582,7 @@ export default function App() {
           ? <strong data-testid="after-lesson">
               Урок окончен. Учитель покинул занятие. Можно поболтать ещё {Math.floor(afterLeft / 60)}:{String(afterLeft % 60).padStart(2, '0')}
             </strong>
-          : <strong data-testid="stage-label">{atDesk ? 'До начала урока: вы за своим столом' : STAGE_LABELS[lessonState.stage]}</strong>}
+          : <strong data-testid="stage-label">{atDesk ? 'До начала урока: вы за своим столом' : (poll && lessonState.stage === 'group' ? 'Голосование' : STAGE_LABELS[lessonState.stage])}</strong>}
         {demoLeft !== null && demoLeft <= 300 && (
           <span data-testid="demo-ending" style={{ color: '#b9770e', fontSize: 13 }}>
             Демо-урок закончится через {Math.floor(demoLeft / 60)}:{String(demoLeft % 60).padStart(2, '0')}
@@ -598,29 +597,6 @@ export default function App() {
         {!newcomer && <>{mediaControls}{leaveButton}</>}
       </div>
 
-      {poll && (
-        <div style={{ padding: '12px 16px', background: '#fffbe6', borderBottom: '1px solid #ffe58f' }}>
-          <strong>{poll.question}</strong>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            {poll.options.map((opt, i) => (
-              <button
-                key={i}
-                onClick={() => socket.emit('vote', { optionIndex: i })}
-                style={{
-                  padding: '6px 14px',
-                  background: poll.myVote === i ? '#4a90e2' : '#fff',
-                  color: poll.myVote === i ? '#fff' : '#333',
-                  border: '1px solid #ccc',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                }}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {/* The teacher's voice to the whole class: heard over the room's own talk */}
@@ -678,7 +654,7 @@ export default function App() {
                     Класс уже работает. Подождите: учитель посадит вас за стол
                   </div>
               : showGroup
-                ? <GroupView slides={slides} />
+                ? poll ? <PollView poll={poll} /> : <GroupView slides={slides} />
                 : showIndividual
                   ? <IndividualLayout room={livekit.room} slides={slides} />
                   : showFours

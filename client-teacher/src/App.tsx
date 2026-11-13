@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { isTrackReference, LiveKitRoom, RoomAudioRenderer, useConnectionState, useLocalParticipant, useTracks, VideoTrack } from '@livekit/components-react';
 import { NameCard, NAME_CARD_BG, SpeakingRing } from './speaking';
+import { NewPollDialog, PollResults } from './Poll';
+import { pollMarks, usePoll, type TeacherPollView } from './pollState';
 import { AvatarProvider, useTeacherTitle } from './avatars';
 import { ConnectionState, Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
@@ -22,6 +24,9 @@ import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, use
 import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
 import { RecordButton, RecordingFinished } from './RecordingUI';
+import { LessonMenu, NewTaskDialog, TaskMenu } from './TopMenu';
+import { StageTimer, type TimerState } from './StageTimer';
+import { useRecording } from './recording';
 import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
@@ -52,14 +57,12 @@ interface LessonState {
   atDesks?: boolean;
   videoMode?: VideoMode;
   timerEndsAt: number | null;
+  timer?: TimerState;
   demo?: DemoTimes | null;
   now?: number;
   participants: Participant[];
 }
 
-const entryBtn: CSSProperties = {
-  padding: '3px 6px', borderRadius: 5, border: '1px solid #c9b99c', background: '#fff', color: '#555', fontSize: 11, cursor: 'pointer', textAlign: 'center',
-};
 const backToSeats: CSSProperties = {
   marginTop: 6, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer', background: '#fff', color: '#555', fontSize: 11, textAlign: 'center', flexShrink: 0,
 };
@@ -297,9 +300,19 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity }: { activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
+function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity, poll }: { poll: TeacherPollView | null; activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
   if (stage === 'waiting') {
     return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
+  }
+
+  if (stage === 'group' && poll) {
+    // a poll: the answers so far, and on the map who answered what
+    return (
+      <div data-testid="poll-view" style={{ height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PollResults poll={poll} students={students.length} />
+        <SeatingMap seats={seats} showSelf={hasLivekit} readOnly lessonCode={lessonCode} names={names} answers={pollMarks(poll)} waiting={waiting} />
+      </div>
+    );
   }
 
   if (stage === 'group') {
@@ -600,6 +613,10 @@ export default function App() {
   useEffect(() => { if (!Object.keys(slides.understood.marks).length && !slides.understood.asking) setMapOpen(false); }, [slides.understood]);
 
   const [endDialog, setEndDialog] = useState(false);
+  const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
+  const poll = usePoll();
+  const [recordAsk, setRecordAsk] = useState(0);
+  const recording = useRecording().recording;
   const [startWarning, setStartWarning] = useState(false);
 
   // The solo demo's class works on the sample lesson, so it is open from the start
@@ -754,7 +771,8 @@ export default function App() {
   function startLesson() {
     const blocks = slides.material?.blocks;
     if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
-    else socket.emit('setStage', 'group');
+    // no lesson file: an explanation on a clean board, the rest is added as the lesson goes
+    else socket.emit('block:add', { type: 'group', start: true });
   }
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
   // room names are "<lessonCode>:<base>" — check the base, not the full string
@@ -803,31 +821,11 @@ export default function App() {
       }}>
         {!connected && <div data-testid="no-connection" style={{ fontSize: 12, color: '#e74c3c', marginBottom: 4 }}>● Нет связи</div>}
 
-        <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
-        <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
-          {entry?.joinCode ?? (lessonCode || '…')}
-        </div>
-        {!demo && state.stage !== 'waiting' && entry && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 }}>
-            <button data-testid="entry-close" onClick={() => socket.emit('entry:close', { closed: !entry.closed })} style={{ ...entryBtn, color: entry.closed ? '#b07800' : '#555' }}>
-              {entry.closed ? '🔒 Вход закрыт, открыть' : 'Закрыть вход'}
-            </button>
-            <button data-testid="entry-new-code" onClick={() => socket.emit('entry:newCode')} title="Кто уже был на уроке, вернётся и со старым" style={entryBtn}>Сменить код</button>
-          </div>
-        )}
-        {demo && state.stage !== 'waiting' && (
-          <DemoOff style={{ marginTop: 2 }} note="Когда все пришли, вход можно закрыть, а если код ушёл за пределы класса — сменить его.">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <button tabIndex={-1} style={entryBtn}>Закрыть вход</button>
-              <button tabIndex={-1} style={entryBtn}>Сменить код</button>
-            </div>
-          </DemoOff>
-        )}
         {state.stage === 'waiting' && state.videoMode && state.videoMode !== 'all' && (
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
 
-        {(state.stage === 'waiting' || !slides.local) && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} fixed={!!demo?.solo} /></div>}
+        {(state.stage === 'waiting' || !slides.local) && !demo?.solo && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} /></div>}
 
         {!demo && state.stage === 'waiting' && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
           marginTop: GROUP_GAP, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer',
@@ -869,29 +867,11 @@ export default function App() {
           </button>
         )}
 
-        {state.stage === 'waiting' ? null : slides.material?.blocks.length ? (
+        {state.stage !== 'waiting' && (
           <>
-            <LessonPlan slides={slides} stage={state.stage} endsAt={state.timerEndsAt} clockSkew={clockSkew} />
-            <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 11, color: '#222', marginTop: 12 }}>ЭТАП</div>
-            {LESSON_STAGES.map(s => (
-              <button
-                key={s.value}
-                onClick={() => socket.emit('setStage', s.value)}
-                style={{
-                  padding: '8px 6px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: state.stage === s.value ? '#4a90e2' : '#fff',
-                  color: state.stage === s.value ? '#fff' : '#333',
-                  fontWeight: state.stage === s.value ? 'bold' : 'normal',
-                  fontSize: 13, textAlign: 'left',
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
+            {/* as high as the top bar: the plan starts level with the bar's lower edge */}
+            <div style={{ fontSize: 22, fontWeight: 'bold', color: '#222', height: 62, marginTop: -12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>План урока</div>
+            <LessonPlan slides={slides} stage={state.stage} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         )}
@@ -953,17 +933,12 @@ export default function App() {
         )}
 
         <div style={{ marginTop: 'auto' }} />
-        {!demo && lessonCode && (
-          <div style={{ marginBottom: GROUP_GAP, display: 'flex', flexDirection: 'column' }}>
-            <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} />
-            <RecordingFinished />
+        <div data-testid="join-code-box" style={{ marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
+          <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>
+            {entry?.joinCode ?? (lessonCode || '…')}
           </div>
-        )}
-        {demo && lessonCode && (
-          <DemoOff style={{ marginBottom: GROUP_GAP }} note="Запись урока: слайды, доски и разговоры в группах, чтобы потом пересмотреть, как шла работа. Записывает учитель, согласие учеников или родителей — на нём.">
-            <button tabIndex={-1} style={{ width: '100%', padding: '7px 6px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#333', fontSize: 13 }}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</button>
-          </DemoOff>
-        )}
+        </div>
         <div style={{ fontSize: 12, color: '#222' }}>
           {students.length} учеников
         </div>
@@ -989,7 +964,13 @@ export default function App() {
       {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
-        <div style={{ padding: '10px 16px 10px 32px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div data-testid="top-bar" style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)}
+            demoNote={demo?.solo ? 'В демо урок уже открыт: параллелограмм. На настоящем уроке здесь открывают свой урок, закрывают вход, когда все пришли, меняют код и записывают урок.' : undefined} />
+          <TaskMenu onPick={setNewTask} />
+          {/* right after the menus, so it stays put whatever the stage's title is */}
+          {state.stage !== 'waiting' && <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />}
+          <div style={{ width: 1, alignSelf: 'stretch', background: '#d6c8b0', margin: '0 6px' }} />
           {canPreview
             ? <div role="tablist" style={{ display: 'flex', gap: 4 }}>
                 <button role="tab" data-testid="tab-seating" aria-selected={!preview} onClick={() => setPreviewTab(false)} style={tabStyle(!preview)}>
@@ -1009,7 +990,7 @@ export default function App() {
               </div>
             </DemoOff>
           )}
-          {state.stage === 'group' && livekit && !demo?.solo && (
+          {state.stage === 'group' && livekit && !demo?.solo && !poll && (
             <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
               {(['board', 'screen'] as GroupMode[]).map(m => (
                 <button key={m} onClick={() => { setGroupMode(m); setMapOpen(false); }} style={{
@@ -1026,13 +1007,25 @@ export default function App() {
               }}>Сменить экран</button>}
             </div>
           )}
+          {lessonCode && !demo && <div style={{ marginLeft: 'auto' }}>
+            <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} ask={recordAsk} />
+            <RecordingFinished />
+          </div>}
+          {lessonCode && demo && (
+            <DemoOff style={{ marginLeft: 'auto' }} note="Запись урока: слайды, доски и разговоры в группах, чтобы потом пересмотреть, как шла работа. Записывает учитель, согласие учеников или родителей — на нём.">
+              <button tabIndex={-1} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#333', fontSize: 12 }}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</button>
+            </DemoOff>
+          )}
         </div>
-        {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen'} pick={screenPick} onCancel={() => setGroupMode('board')} />}
+        {newTask && (newTask === 'poll'
+          ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />
+          : <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />)}
+        {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen' && !poll} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {preview ? <LessonPreview slides={slides} /> : inSmallRoom
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
-              task={state.stage === 'group' ? undefined : (slides.local ?? slides.material)?.blocks.find(b => b.id === slides.state.block)?.task}
+              task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
               ask={roomAsk} />
             : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
                 room,
@@ -1040,7 +1033,7 @@ export default function App() {
                 // (the bell) or asked to talk; «Войти открыто» in the room when it's needed
                 quiet: workStage && !toTalk && !callingRooms.has(room),
               }); }} onMute={name => socket.emit('mute', { target: name })} lessonCode={entry?.roomCode ?? lessonCode}
-                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} />
+                slidesView={<ExplainBoard slides={slides} />} names={seatNames} marks={slides.understood.marks} mapOpen={mapOpen} waiting={waitingSeat} poll={poll} />
           }
         </div>
       </div>
@@ -1059,7 +1052,7 @@ export default function App() {
             {demo?.solo && <SoloGuide stage={state.stage} />}
             {state.stage !== 'waiting' && <BlockNotes slides={slides} />}
           </div>
-          {state.stage !== 'waiting' && (
+          {state.stage !== 'waiting' && !poll && (
             <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} askReady={!demo?.solo || onLastSlide(slides)} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
           )}
         </div>

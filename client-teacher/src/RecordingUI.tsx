@@ -1,6 +1,6 @@
 // The lesson recording, as the teacher sees it: a button in the lesson's sidebar, a word on the
 // first use, and the list of recordings this browser holds until they are saved and removed.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { clearJustFinished, currentRecordingId, startRecording, stopRecording, useRecording } from './recording';
 import { buildRecordingFile, deleteRecording, download, hasJournalNames, listRecordings, type RecordingMeta } from './recStore';
@@ -147,7 +147,8 @@ export function RecordingsLink({ style }: { style?: CSSProperties }) {
 
 // ---------- in the lesson ----------
 
-export function RecordButton({ title, code, clockSkew, style }: { title: string; code: string; clockSkew: number; style?: CSSProperties }) {
+/** ask: bumped by «Записать урок» in the lesson menu; while recording, a red stop button with the time, its state in the tooltip */
+export function RecordButton({ title, code, clockSkew, ask, style }: { title: string; code: string; clockSkew: number; ask: number; style?: CSSProperties }) {
   const rec = useRecording();
   const [notice, setNotice] = useState(false);
   const [now, setNow] = useState(0); // ticks while recording; the first second shows 0:00
@@ -170,28 +171,29 @@ export function RecordButton({ title, code, clockSkew, style }: { title: string;
     }
   };
 
+  const asked = useRef(ask);
+  useEffect(() => {
+    if (ask === asked.current) return;
+    asked.current = ask;
+    // a press in the menu, passed down as a counter: it opens the notice or starts at once
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!rec.recording) { if (seenNotice()) begin(); else setNotice(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask]);
+
   const status = !rec.recording ? null
     : rec.lessonLive ? 'Звук и действия пишутся'
     : 'Звук и действия — с «Начать урок»';
 
   return (<>
-    {rec.recording ? (
-      <button data-testid="record-stop" onClick={stop} disabled={stopping} style={{
-        padding: '7px 6px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#c0392b', color: '#fff',
-        fontWeight: 'bold', fontSize: 13, ...style,
-      }}>{stopping ? 'Сохраняем…' : `⏹ ${duration(now - rec.startedAt)}`}</button>
-    ) : (
-      <button data-testid="record-start" onClick={() => (seenNotice() ? begin() : setNotice(true))} style={{
-        padding: '7px 6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer', background: '#fff', color: '#333',
-        fontSize: 13, ...style,
-      }}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</button>
+    {rec.recording && (
+      <button data-testid="record-stop" onClick={stop} disabled={stopping}
+        title={`${rec.video === 'on' ? 'Экран пишется' : rec.video === 'stopped' ? 'Экран остановлен' : 'Без экрана'}. ${status}. Нажмите, чтобы остановить`}
+        style={{
+          padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#c0392b', color: '#fff',
+          fontWeight: 'bold', fontSize: 13, whiteSpace: 'nowrap', ...style,
+        }}>{stopping ? 'Сохраняем…' : `⏹ Запись ${duration(now - rec.startedAt)}`}</button>
     )}
-    {status && (
-      <div data-testid="record-status" style={{ fontSize: 11, color: '#555', marginTop: 4, lineHeight: 1.3 }}>
-        {rec.video === 'on' ? 'Экран пишется' : rec.video === 'stopped' ? 'Экран остановлен' : 'Без экрана'}<br />{status}
-      </div>
-    )}
-    {!rec.recording && <RecordingsLink style={{ marginTop: 4, fontSize: 11 }} />}
     {notice && (
       <div onClick={() => setNotice(false)} style={overlay}>
         <div role="dialog" aria-label="Запись урока" onClick={e => e.stopPropagation()} style={dialog}>

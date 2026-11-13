@@ -19,6 +19,9 @@ const API = import.meta.env.VITE_API_URL;
 export interface MaterialBlock { id: string; type: string; title: string; slides?: Scene[]; teacherNote?: string; task?: string; duration?: number | null }
 /** The lesson as the server knows it */
 export interface Material { id: string; title: string; blocks: MaterialBlock[] }
+/** A task the teacher added during the lesson (server: addLiveBlock); without a file the material is only these */
+export const isLiveBlock = (b: { id: string }) => b.id.startsWith('live-');
+export const isLiveMaterial = (m: Material | null) => !!m && m.id.startsWith('live:');
 export interface SlidesState {
   /** the lesson block running now */
   block: string | null;
@@ -168,10 +171,9 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
 
 // ---------- sidebar: open / remove ----------
 
-/** fixed: the lesson can't be changed here (the solo demo runs its own) */
-export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?: boolean }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { material, local, busy, error } = slides;
+export function MaterialPanel({ slides }: { slides: TeacherSlides }) {
+  const { local, busy, error } = slides;
+  const material = isLiveMaterial(slides.material) ? null : slides.material;
   const slideCount = material?.blocks.reduce((n, b) => n + (b.slides?.length ?? 0), 0) ?? 0;
 
   return (
@@ -192,16 +194,7 @@ export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?
           Файл урока не открыт в этом браузере — ученики не получат картинки. Откройте его снова.
         </div>
       )}
-      {!fixed && <>
-      <input ref={inputRef} type="file" accept=".colesson" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} data-testid="material-input" />
-      <button onClick={() => inputRef.current?.click()} disabled={busy} style={{
-        marginTop: 4, width: '100%', padding: '5px 6px', borderRadius: 4, border: '1px dashed #a8987a',
-        background: '#fff', color: '#444', fontSize: 11, cursor: 'pointer', textAlign: 'center',
-      }}>
-        {busy ? 'Открываем…' : material && local ? 'Заменить урок…' : 'Открыть урок…'}
-      </button>
-      </>}
+      {busy && <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>Открываем…</div>}
       {error && <div style={{ fontSize: 11, color: '#e74c3c', marginTop: 2 }}>{error}</div>}
     </div>
   );
@@ -209,43 +202,28 @@ export function MaterialPanel({ slides, fixed }: { slides: TeacherSlides; fixed?
 
 // ---------- the lesson plan and the teacher's notes ----------
 
-const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки' };
+const TYPE_LABELS: Record<string, string> = { group: 'объяснение', individual: 'индивидуально', pairs: 'пары', fours: 'четвёрки', poll: 'голосование' };
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */
-function BlockTime({ endsAt, clockSkew }: { endsAt: number; clockSkew: number }) {
-  const [now, setNow] = useState(() => Date.now() + clockSkew);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now() + clockSkew), 500);
-    return () => clearInterval(id);
-  }, [clockSkew]);
-  const left = Math.round((endsAt - now) / 1000);
-  const abs = Math.abs(left);
-  const text = `${left < 0 ? '+' : ''}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, '0')}`;
-  const bg = left < 0 ? '#c0392b' : left <= 60 ? '#f0b429' : 'rgba(255,255,255,0.25)';
-  return (
-    <span data-testid="block-time" title={left < 0 ? 'Время этапа вышло' : 'Осталось на этап'} style={{
-      float: 'right', marginLeft: 6, padding: '0 5px', borderRadius: 4, fontSize: 11.5, fontWeight: 'bold',
-      fontVariantNumeric: 'tabular-nums', background: bg, color: left <= 60 && left >= 0 ? '#3a2a00' : '#fff',
-    }}>{text}</span>
-  );
-}
-
-export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: TeacherSlides; stage: string; endsAt: number | null; clockSkew: number }) {
-  const blocks: MaterialBlock[] = slides.local?.blocks ?? slides.material?.blocks ?? [];
+export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: string }) {
+  // the server's order: the tasks added during the lesson are in it too
+  const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
   return (
-    <div data-testid="lesson-plan" style={{ flex: 1, minHeight: 60, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '8px -4px 0', padding: '0 4px' }}>
+    // about five blocks high, the rest scrolls: the sidebar keeps room for what's under the plan
+    <div data-testid="lesson-plan" style={{ flex: '0 1 auto', minHeight: 60, maxHeight: 234, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '0 -4px', padding: '0 4px' }}>
       {blocks.map(b => {
         const on = b.id === current;
         return (
-          <button key={b.id} data-testid="plan-block" data-current={on || undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
-            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
+          <button key={b.id} data-testid="plan-block" data-current={on || undefined}
+            ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
+            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'center',
             background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
           }}>
-            {on && endsAt && <BlockTime endsAt={endsAt} clockSkew={clockSkew} />}
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
             <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
+              {isLiveBlock(b) && <span data-testid="plan-block-added" title="Добавлено по ходу урока">＋ </span>}
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
             </div>
           </button>
@@ -259,6 +237,16 @@ export function LessonPlan({ slides, stage, endsAt, clockSkew }: { slides: Teach
 export function BlockNotes({ slides }: { slides: TeacherSlides }) {
   const { local, material, state } = slides;
   if (!material || !state.block) return null;
+  const added = material.blocks.find(b => b.id === state.block && isLiveBlock(b));
+  if (added) return (
+    <div data-testid="block-notes" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {added.task && <div>
+        <div style={noteLabel}>Задание</div>
+        <div data-testid="block-task" style={noteText}>{added.task}</div>
+      </div>}
+      <div style={{ fontSize: 12, color: '#777' }}>Добавлено по ходу урока.</div>
+    </div>
+  );
   const block = local?.blocks.find(b => b.id === state.block);
   if (!local) return <div style={{ fontSize: 12, color: '#b57600' }}>Заметки лежат в файле урока: откройте его в этом браузере.</div>;
   if (!block) return null;

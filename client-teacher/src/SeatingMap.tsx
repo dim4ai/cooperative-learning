@@ -181,7 +181,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks, activity }: { activity?: ClassActivity | null; seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string, toTalk?: boolean) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks, activity, answers }: { answers?: Record<string, { color: string; label: string }>; activity?: ClassActivity | null; seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string, toTalk?: boolean) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
   const [swap, setSwap] = useState<{ a: string; b: string; seatId: string } | null>(null);
@@ -349,6 +349,11 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
                     animation: pulsing ? 'pairPulse 1.2s infinite' : 'none',
                   }}
                 >
+                  {seat.occupant && answers?.[seat.occupant] && <>
+                    <div data-testid="poll-answer-frame" style={{ position: 'absolute', inset: 0, borderRadius: 5, zIndex: 2, pointerEvents: 'none', border: `4px solid ${answers[seat.occupant].color}` }} />
+                    <div data-testid="poll-answer" style={{ position: 'absolute', top: 4, left: 4, zIndex: 3, minWidth: 22, height: 22, padding: '0 5px', boxSizing: 'border-box', borderRadius: 11,
+                      background: answers[seat.occupant].color, color: '#fff', fontWeight: 'bold', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{answers[seat.occupant].label}</div>
+                  </>}
                   {mark && <div data-testid={`mark-${mark}`} style={{
                     position: 'absolute', inset: 0, borderRadius: 5, zIndex: 2, pointerEvents: 'none',
                     border: `${mark === 'no' ? 4 : 3}px solid ${mark === 'no' ? NOT_UNDERSTOOD : UNDERSTOOD}`,
