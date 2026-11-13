@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { socket } from './socket';
-import type { StudentPollView } from './pollState';
+import { clock, useSecondsLeft, type StudentPollView } from './pollState';
 
 // Голосование (server/src/poll.ts) as a student sees it: the question and the options. The answer can
 // be changed until the teacher shows the results; then the class sees how many chose each option
@@ -18,7 +18,9 @@ const GRADES: Record<string, { color: string; text: string }> = {
 export function PollView({ poll }: { poll: StudentPollView }) {
   // the press shows at once; the server's answer confirms it
   const [pressed, setPressed] = useState<{ blockId: string; choice: number[] } | null>(null);
-  const open = !poll.revealed;
+  const left = useSecondsLeft(poll);
+  const out = poll.timeUp || left === 0;
+  const open = !poll.revealed && !out;
   const mine = open && pressed?.blockId === poll.blockId ? pressed.choice : poll.mine;
 
   function press(i: number) {
@@ -35,8 +37,13 @@ export function PollView({ poll }: { poll: StudentPollView }) {
       <div style={{ width: '100%', maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {poll.picture && <img src={poll.picture.src} alt="" style={{ maxWidth: '100%', maxHeight: '40vh', objectFit: 'contain', alignSelf: 'center', borderRadius: 8, background: '#fff' }} />}
         {poll.question && <div data-testid="poll-question" style={{ fontSize: 22, fontWeight: 'bold', color: '#222' }}>{poll.question}</div>}
-        <div style={{ fontSize: 13, color: '#777' }}>
-          {open ? (poll.multi ? 'Выберите все подходящие ответы' : 'Выберите один ответ') : 'Итоги класса'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, color: '#777' }}>
+            {poll.revealed ? 'Итоги класса' : out ? 'Время вышло' : poll.multi ? 'Выберите все подходящие ответы' : 'Выберите один ответ'}
+          </span>
+          {left !== null && !poll.revealed && !out && <span data-testid="poll-time-left" style={{
+            marginLeft: 'auto', fontSize: 22, fontWeight: 'bold', fontVariantNumeric: 'tabular-nums', color: left <= 10 ? '#e67e22' : '#222',
+          }}>⏱ {clock(left)}</span>}
         </div>
         {poll.options.map((o, i) => {
           const picked = mine.includes(i);
@@ -58,8 +65,11 @@ export function PollView({ poll }: { poll: StudentPollView }) {
             </button>
           );
         })}
-        {open && mine.length > 0 && <div data-testid="poll-sent" style={{ fontSize: 13, color: '#5c8a5c' }}>Ответ принят. Его можно изменить, пока учитель не покажет итоги.</div>}
-        {!open && <div data-testid="poll-closed" style={{ fontSize: 14, color: '#555' }}>
+        {open && mine.length > 0 && <div data-testid="poll-sent" style={{ fontSize: 13, color: '#5c8a5c' }}>Ответ принят. Его можно изменить, {left !== null ? 'пока не вышло время' : 'пока учитель не покажет итоги'}.</div>}
+        {!open && !poll.revealed && <div data-testid="poll-time-out" style={{ fontSize: 14, color: '#555' }}>
+          {mine.length ? 'Время вышло. Ваш ответ принят — ждём итогов.' : 'Время вышло, вы не успели ответить.'}
+        </div>}
+        {poll.revealed && <div data-testid="poll-closed" style={{ fontSize: 14, color: '#555' }}>
           {grade ? <b style={{ color: grade.color === '#f1c40f' ? '#b8930a' : grade.color }}>{grade.text}. </b> : mine.length === 0 ? 'Вы не ответили. ' : ''}
           Ответили {poll.total ?? 0}.
         </div>}

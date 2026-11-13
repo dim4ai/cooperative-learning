@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react';
 import { socket } from './socket';
 import { boardPictures } from './BoardPictures';
 import type { BoardPicture } from './slides/Board';
-import { GRADE_INFO, LETTERS, MAX_OPTIONS, POLL_COLORS, type TeacherPollView } from './pollState';
+import { GRADE_INFO, LETTERS, MAX_OPTIONS, MAX_SECONDS, MIN_SECONDS, POLL_COLORS, clock, useSecondsLeft, type TeacherPollView } from './pollState';
 
 // Голосование (server/src/poll.ts): the teacher asks the class a question with options. One answer: each
 // option its colour, or one marked right (green, the rest red). Several: the right ones are marked, and
@@ -23,12 +23,18 @@ export function NewPollDialog({ running, onClose }: { running: boolean; onClose:
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [picking, setPicking] = useState(false);
+  // time to answer: off, or seconds as typed (the field may be empty while typing)
+  const [timed, setTimed] = useState(false);
+  const [seconds, setSeconds] = useState('60');
+  const sec = Math.round(Number(seconds));
 
   const filled = options.filter(o => o.text.trim());
   const anyRight = options.some(o => o.correct && o.text.trim());
   const problem = filled.length < 2 ? 'Нужно хотя бы два варианта ответа'
     : !question.trim() && !picture ? 'Напишите вопрос или вставьте картинку'
-    : multi && !anyRight ? 'Отметьте правильные варианты' : '';
+    : multi && !anyRight ? 'Отметьте правильные варианты'
+    : timed && !(sec >= MIN_SECONDS && sec <= MAX_SECONDS) ? `Время на ответ — от ${MIN_SECONDS} до ${MAX_SECONDS} секунд` : '';
+  const step = (d: number) => setSeconds(String(Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, (Number.isFinite(sec) ? sec : 60) + d))));
 
   const set = (i: number, d: Partial<Draft>) => setOptions(os => os.map((o, j) => (j === i ? { ...o, ...d } : o)));
   // one answer: one right at most
@@ -57,7 +63,7 @@ export function NewPollDialog({ running, onClose }: { running: boolean; onClose:
     if (problem) { setError(problem); return; }
     if (sending) return;
     setSending(true); setError('');
-    const poll = { question: question.trim(), multi, picture: picture ?? undefined, options: filled.map(o => ({ text: o.text.trim(), color: o.color, correct: o.correct })) };
+    const poll = { question: question.trim(), multi, picture: picture ?? undefined, seconds: timed ? sec : undefined, options: filled.map(o => ({ text: o.text.trim(), color: o.color, correct: o.correct })) };
     socket.timeout(15_000).emit('block:add', { type: 'poll', title: title.trim() || question.trim().slice(0, 60), poll, start },
       (err: unknown, res?: { ok?: boolean }) => {
         setSending(false);
@@ -121,6 +127,20 @@ export function NewPollDialog({ running, onClose }: { running: boolean; onClose:
             style={{ ...btn, alignSelf: 'flex-start', fontSize: 13 }}>＋ вариант</button>}
         </div>
 
+        <div data-testid="poll-timer-row" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button data-testid="poll-timed" onClick={() => setTimed(t => !t)} style={{
+            ...btn, ...(timed ? { background: '#4a90e2', color: '#fff', borderColor: '#4a90e2' } : {}),
+          }}>⏱ {timed ? 'Время на ответ:' : 'Ограничить время на ответ'}</button>
+          {timed && <>
+            <button data-testid="poll-seconds-minus" onClick={() => step(-10)} style={{ ...btn, padding: '9px 10px' }}>−10</button>
+            <input data-testid="poll-seconds" value={seconds} inputMode="numeric" onChange={e => setSeconds(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              style={{ ...field, width: 70, textAlign: 'center', fontSize: 16 }} />
+            <button data-testid="poll-seconds-plus" onClick={() => step(10)} style={{ ...btn, padding: '9px 10px' }}>+10</button>
+            <span style={{ fontSize: 14, color: '#555' }}>сек{sec >= 60 && sec <= MAX_SECONDS ? ` (${clock(sec)})` : ''}</span>
+          </>}
+        </div>
+        {timed && <div style={{ fontSize: 12, color: '#777', marginTop: -6 }}>Отсчёт пойдёт, когда голосование начнётся. Когда время выйдет, ответы закроются; добавить время можно и потом.</div>}
+
         {error && <div data-testid="poll-error" style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button data-testid="poll-start" onClick={() => add(true)} disabled={sending}
@@ -141,12 +161,30 @@ export function PollResults({ poll, students }: { poll: TeacherPollView; student
   const answered = Object.keys(poll.answers).length;
   const most = Math.max(1, ...poll.counts);
   const right = poll.options.some(o => o.correct);
+  const left = useSecondsLeft(poll);
+  const out = poll.timeUp || left === 0;
   const grades = poll.multi && right ? Object.values(poll.answers).reduce<Record<string, number>>((g, a) => { if (a.grade) g[a.grade] = (g[a.grade] ?? 0) + 1; return g; }, {}) : null;
   return (
     <div data-testid="poll-results" style={{ background: '#fff', borderRadius: 10, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 760 }}>
       {poll.picture && <img src={poll.picture.src} alt="" style={{ maxWidth: '100%', maxHeight: '28vh', objectFit: 'contain', alignSelf: 'center', borderRadius: 6 }} />}
       {poll.question && <div style={{ fontSize: 18, fontWeight: 'bold' }}>{poll.question}</div>}
-      <div style={{ fontSize: 12, color: '#777' }}>{poll.multi ? 'Несколько ответов' : 'Один ответ'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#777' }}>{poll.multi ? 'Несколько ответов' : 'Один ответ'}</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {left !== null && <span data-testid="poll-time-left" style={{
+            fontSize: 20, fontWeight: 'bold', fontVariantNumeric: 'tabular-nums', color: out ? '#e74c3c' : left <= 10 ? '#e67e22' : '#222',
+          }}>{out ? 'Время вышло' : `⏱ ${clock(left)}`}</span>}
+          {!poll.revealed && <>
+            {left === null
+              ? <button data-testid="poll-time-limit" onClick={() => socket.emit('poll:time', { add: 30 })} style={smallBtn}>⏱ Дать 30 с на ответ</button>
+              : <>
+                  <button data-testid="poll-time-add10" onClick={() => socket.emit('poll:time', { add: 10 })} style={smallBtn}>+10 с</button>
+                  <button data-testid="poll-time-add30" onClick={() => socket.emit('poll:time', { add: 30 })} style={smallBtn}>+30 с</button>
+                  <button data-testid="poll-time-off" onClick={() => socket.emit('poll:untimed')} title="Убрать ограничение времени" style={smallBtn}>без времени</button>
+                </>}
+          </>}
+        </span>
+      </div>
       {poll.options.map((o, i) => {
         const color = right ? (o.correct ? GRADE_INFO.right.color : poll.multi ? '#94a3b8' : GRADE_INFO.wrong.color) : o.color;
         return (
@@ -169,9 +207,10 @@ export function PollResults({ poll, students }: { poll: TeacherPollView; student
         <span data-testid="poll-answered" style={{ fontSize: 14, color: '#444' }}>Ответили {answered} из {students}</span>
         <button data-testid="poll-reveal" onClick={() => socket.emit('poll:reveal', { revealed: !poll.revealed })} style={{
           ...btn, marginLeft: 'auto', ...(poll.revealed ? {} : { background: '#4a90e2', color: '#fff', border: 'none' }),
-        }}>{poll.revealed ? 'Скрыть итоги и открыть ответы' : right ? 'Показать итоги и правильный ответ' : 'Показать итоги классу'}</button>
+        }}>{poll.revealed ? (out ? 'Скрыть итоги' : 'Скрыть итоги и открыть ответы') : right ? 'Показать итоги и правильный ответ' : 'Показать итоги классу'}</button>
       </div>
       {poll.revealed && <div style={{ fontSize: 12, color: '#777' }}>Класс видит, сколько выбрали каждый вариант, без имён. Ответы закрыты.</div>}
+      {!poll.revealed && out && <div data-testid="poll-time-out" style={{ fontSize: 12, color: '#777' }}>Время вышло — ответы закрыты. Можно показать итоги или добавить время.</div>}
     </div>
   );
 }
@@ -184,4 +223,5 @@ const dialog: CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif', boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
 };
 const field: CSSProperties = { fontSize: 14, padding: 8, borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box', width: '100%' };
+const smallBtn: CSSProperties = { padding: '4px 8px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 12, cursor: 'pointer' };
 const btn: CSSProperties = { padding: '9px 12px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 14, cursor: 'pointer' };

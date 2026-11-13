@@ -24,7 +24,7 @@ import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
 import { RecordingTap } from './recorder';
-import { parsePoll, parseChoice, teacherView, studentView, type PollRun } from './poll';
+import { parsePoll, parseChoice, teacherView, studentView, newRun, answersOpen, timeUp, POLL_MAX_SECONDS, type PollRun } from './poll';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -858,8 +858,22 @@ function currentPoll(lesson: LessonRuntime) {
   const block = lesson.stage === 'waiting' ? null : lesson.material?.blocks.find(b => b.id === lesson.block);
   if (!block?.poll) return null;
   let run = lesson.polls.get(block.id);
-  if (!run) { run = { answers: new Map(), revealed: false }; lesson.polls.set(block.id, run); }
+  if (!run) {
+    run = newRun(block.poll); lesson.polls.set(block.id, run);
+    closeOnTime(lesson, block.id, run);
+  }
   return { blockId: block.id, poll: block.poll, run };
+}
+
+/** When the time to answer runs out, everyone hears of it at once: answers close on the screens */
+const pollTimers = new WeakMap<PollRun, NodeJS.Timeout>();
+function closeOnTime(lesson: LessonRuntime, blockId: string, run: PollRun) {
+  clearTimeout(pollTimers.get(run));
+  if (run.endsAt === null) return;
+  pollTimers.set(run, setTimeout(() => {
+    pollTimers.delete(run);
+    if (lesson.polls.get(blockId) === run && currentPoll(lesson)?.run === run) sendPoll(lesson);
+  }, Math.max(0, run.endsAt - Date.now()) + 50));
 }
 
 function sendPoll(lesson: LessonRuntime, to?: Socket) {
@@ -2202,7 +2216,7 @@ io.on('connection', async (socket) => {
     socket.on('poll:answer', ({ blockId, choice }: { blockId?: unknown; choice?: unknown } = {}) => {
       const name = lesson.participants.get(socket.id)?.name;
       const cur = currentPoll(lesson);
-      if (role !== 'student' || !name || !cur || cur.blockId !== blockId || cur.run.revealed) return;
+      if (role !== 'student' || !name || !cur || cur.blockId !== blockId || !answersOpen(cur.run)) return;
       const picked = parseChoice(cur.poll, choice);
       if (!picked) return;
       cur.run.answers.set(name, picked);
@@ -2215,6 +2229,25 @@ io.on('connection', async (socket) => {
       const cur = currentPoll(lesson);
       if (role !== 'teacher' || !cur) return;
       cur.run.revealed = revealed === true;
+      sendPoll(lesson);
+    });
+
+    // more time to answer, or a limit where there was none: seconds from now, or from the end still to come
+    socket.on('poll:time', ({ add }: { add?: unknown } = {}) => {
+      const cur = currentPoll(lesson);
+      const sec = Math.round(Number(add));
+      if (role !== 'teacher' || !cur || !(sec >= 5 && sec <= POLL_MAX_SECONDS)) return;
+      const now = Date.now();
+      cur.run.endsAt = (cur.run.endsAt !== null && !timeUp(cur.run, now) ? cur.run.endsAt : now) + sec * 1000;
+      closeOnTime(lesson, cur.blockId, cur.run);
+      sendPoll(lesson);
+    });
+
+    socket.on('poll:untimed', () => {
+      const cur = currentPoll(lesson);
+      if (role !== 'teacher' || !cur) return;
+      cur.run.endsAt = null;
+      closeOnTime(lesson, cur.blockId, cur.run);
       sendPoll(lesson);
     });
 

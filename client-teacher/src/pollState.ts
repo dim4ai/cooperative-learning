@@ -14,11 +14,13 @@ export const GRADE_INFO: Record<string, { color: string; label: string }> = {
   wrong: { color: '#e74c3c', label: 'неверно' },
 };
 export const MAX_OPTIONS = 8;
+export const MIN_SECONDS = 5;
+export const MAX_SECONDS = 3600;
 
 export interface PollOption { text: string; color: string; correct: boolean }
 export interface TeacherPollView {
   blockId: string; question: string; multi: boolean; options: PollOption[]; picture?: BoardPicture;
-  revealed: boolean; counts: number[];
+  revealed: boolean; counts: number[]; seconds?: number; msLeft: number | null; timeUp: boolean;
   answers: Record<string, { choice: number[]; color: string | null; grade: string | null }>;
 }
 
@@ -39,3 +41,19 @@ export function pollMarks(poll: TeacherPollView | null): Record<string, { color:
     [name, { color: a.color ?? '#64748b', label: a.choice.map(i => LETTERS[i]).join('') }]));
 }
 
+
+/** Seconds left to answer, counting down between the server's messages; null without a time limit.
+ *  The server sends what's left rather than a clock time: the clocks of computers differ. */
+export function useSecondsLeft(poll: { msLeft: number | null } | null): number | null {
+  const [now, setNow] = useState(() => performance.now());
+  const [deadline, setDeadline] = useState<number | null>(null);
+  useEffect(() => { setDeadline(poll?.msLeft == null ? null : performance.now() + poll.msLeft); }, [poll]);
+  useEffect(() => {
+    if (deadline === null) return;
+    const t = setInterval(() => setNow(performance.now()), 250);
+    return () => clearInterval(t);
+  }, [deadline]);
+  return deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+export const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;

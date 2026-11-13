@@ -6,11 +6,15 @@
 
 export interface PollOption { text: string; color: string; correct: boolean }
 export interface PollPicture { src: string; width: number; height: number }
-export interface PollDef { question: string; multi: boolean; options: PollOption[]; picture?: PollPicture }
-export interface PollRun { answers: Map<string, number[]>; revealed: boolean }
+/** seconds: time to answer, counted from when the poll first runs; none means no limit */
+export interface PollDef { question: string; multi: boolean; options: PollOption[]; picture?: PollPicture; seconds?: number }
+/** endsAt: when answers close (ms), null without a time limit */
+export interface PollRun { answers: Map<string, number[]>; revealed: boolean; endsAt: number | null }
 
 export const POLL_MAX_OPTIONS = 8;
 export const POLL_MIN_OPTIONS = 2;
+export const POLL_MIN_SECONDS = 5;
+export const POLL_MAX_SECONDS = 3600;
 export const POLL_PICTURE_MAX_BYTES = 400_000; // as a board picture (client-teacher BoardPictures.tsx)
 const PICTURE_SRC = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -40,6 +44,11 @@ export function parsePoll(v: unknown): PollDef | null {
   // one answer: at most one is right
   if (!multi && options.filter(x => x.correct).length > 1) return null;
   const poll: PollDef = { question, multi, options };
+  if (o.seconds !== undefined && o.seconds !== null && o.seconds !== 0) {
+    const sec = Math.round(Number(o.seconds));
+    if (!(sec >= POLL_MIN_SECONDS && sec <= POLL_MAX_SECONDS)) return null;
+    poll.seconds = sec;
+  }
   if (o.picture) {
     const p = o.picture as Record<string, unknown>;
     if (typeof p.src !== 'string' || p.src.length > POLL_PICTURE_MAX_BYTES || !PICTURE_SRC.test(p.src)) return null;
@@ -50,6 +59,17 @@ export function parsePoll(v: unknown): PollDef | null {
   if (!question && !poll.picture) return null;
   return poll;
 }
+
+export function newRun(poll: PollDef, now = Date.now()): PollRun {
+  return { answers: new Map(), revealed: false, endsAt: poll.seconds ? now + poll.seconds * 1000 : null };
+}
+
+/** The time to answer has run out */
+export const timeUp = (run: PollRun, now = Date.now()) => run.endsAt !== null && now >= run.endsAt;
+/** Answers are taken until the results are shown or the time runs out */
+export const answersOpen = (run: PollRun, now = Date.now()) => !run.revealed && !timeUp(run, now);
+/** What's left of the time, in ms (clocks differ, so clients count down from this), null without a limit */
+const left = (run: PollRun, now = Date.now()) => (run.endsAt === null ? null : Math.max(0, run.endsAt - now));
 
 export const hasRight = (poll: PollDef) => poll.options.some(o => o.correct);
 
@@ -91,7 +111,7 @@ function counts(poll: PollDef, run: PollRun): number[] {
 /** The teacher sees it all: who answered what */
 export function teacherView(blockId: string, poll: PollDef, run: PollRun) {
   return {
-    blockId, ...poll, revealed: run.revealed, counts: counts(poll, run),
+    blockId, ...poll, revealed: run.revealed, counts: counts(poll, run), msLeft: left(run), timeUp: timeUp(run),
     answers: Object.fromEntries([...run.answers].filter(([, c]) => c.length).map(([name, c]) => [name, { choice: c, color: answerColor(poll, c), grade: grade(poll, c) }])),
   };
 }
@@ -102,6 +122,7 @@ export function studentView(blockId: string, poll: PollDef, run: PollRun, name: 
   const right = hasRight(poll);
   return {
     blockId, question: poll.question, multi: poll.multi, picture: poll.picture, revealed: run.revealed,
+    seconds: poll.seconds ?? null, msLeft: left(run), timeUp: timeUp(run),
     // with a right answer the colours would give it away: until shown, the options are all alike
     options: poll.options.map(o => ({ text: o.text, color: right && !run.revealed ? null : right ? (o.correct ? GRADE_COLORS.right : GRADE_COLORS.wrong) : o.color, ...(run.revealed && right ? { correct: o.correct } : {}) })),
     mine,
