@@ -12,7 +12,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_POLL, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -871,7 +871,7 @@ export default function App() {
           <>
             {/* as high as the top bar: the plan starts level with the bar's lower edge */}
             <div style={{ fontSize: 22, fontWeight: 'bold', color: '#222', height: 62, marginTop: -12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>План урока</div>
-            <LessonPlan slides={slides} stage={state.stage} />
+            <LessonPlan slides={slides} stage={state.stage} off={demo?.solo ? soloBlockOff : undefined} />
             <button onClick={() => socket.emit('setStage', 'waiting')} style={backToSeats}>← Рассадка</button>
           </>
         )}
@@ -967,7 +967,7 @@ export default function App() {
         <div data-testid="top-bar" style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)}
             demoNote={demo?.solo ? 'В демо урок уже открыт: параллелограмм. На настоящем уроке здесь открывают свой урок, закрывают вход, когда все пришли, меняют код и записывают урок.' : undefined} />
-          <TaskMenu onPick={setNewTask} />
+          <TaskMenu onPick={setNewTask} only={demo?.solo ? 'poll' : undefined} />
           {/* right after the menus, so it stays put whatever the stage's title is */}
           {state.stage !== 'waiting' && <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />}
           <div style={{ width: 1, alignSelf: 'stretch', background: '#d6c8b0', margin: '0 6px' }} />
@@ -1018,7 +1018,7 @@ export default function App() {
           )}
         </div>
         {newTask && (newTask === 'poll'
-          ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />
+          ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} draft={demo?.solo ? SOLO_POLL : undefined} />
           : <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />)}
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen' && !poll} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -1041,7 +1041,7 @@ export default function App() {
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : null} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

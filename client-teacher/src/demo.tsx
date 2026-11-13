@@ -44,6 +44,14 @@ function endText({ reason }: DemoEnd): string {
 
 const EDITOR_URL = 'https://editor.co-learn.ru';
 /** The standalone demo (client-teacher/standalone): the lesson server runs in the page, nothing else is here */
+/** The sample lesson's blocks the solo demo goes through; the rest are in the plan, pale (server/src/demoBots.ts, SOLO_LIVE_BLOCKS).
+ *  Tasks added during the lesson (a poll) run too. */
+export const SOLO_LIVE_BLOCKS = new Set(['b1', 'b2', 'b3', 'b9', 'b10', 'b12']);
+export const soloBlockOff = (b: { id: string }) => !SOLO_LIVE_BLOCKS.has(b.id) && !b.id.startsWith('live-');
+
+/** The poll the solo demo suggests, both times: the class's answers are in server/src/demoBots.ts (POLL_ANSWERS), by option */
+export const SOLO_POLL = { question: 'Свойство и признак — это одно и то же?', options: ['Да, одно и то же', 'Нет, разные вещи', 'Иногда совпадают', 'Не знаю'] };
+
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
 // from there, booking a lesson with one's own class is on the real site
 const BOOK_URL = (import.meta.env.VITE_REAL_TEACHER_URL as string | undefined) ?? 'https://teacher.co-learn.ru/?demo';

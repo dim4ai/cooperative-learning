@@ -97,10 +97,16 @@ const TASK_TYPES: { type: string; label: string; hint: string }[] = [
   { type: 'poll', label: 'Голосование', hint: 'Вопрос всему классу с вариантами ответа: один или несколько' },
 ];
 
-/** «Новое задание»: a task of any kind, right after the running one */
-export function TaskMenu({ onPick }: { onPick: (type: string) => void }) {
+/** «Новое задание»: a task of any kind, right after the running one. only: the one kind that can be added here
+ *  (the solo demo), the rest shown pale */
+export function TaskMenu({ onPick, only }: { onPick: (type: string) => void; only?: string }) {
   return (
-    <Menu label="Новое задание" testid="menu-task">{close => TASK_TYPES.map(t => (
+    <Menu label="Новое задание" testid="menu-task">{close => TASK_TYPES.map(t => only && t.type !== only ? (
+      <div key={t.type} data-testid={`task-${t.type}`} data-off style={{ padding: '6px 12px', color: '#aaa', fontSize: 13, cursor: 'default' }}>
+        <div>{t.label}</div>
+        <div style={{ fontSize: 11, color: '#bbb', whiteSpace: 'normal', maxWidth: 240, marginTop: 1 }}>{t.hint}</div>
+      </div>
+    ) : (
       <Item key={t.type} testid={`task-${t.type}`} onClick={() => { close(); onPick(t.type); }}>
         <div>{t.label}</div>
         <div style={{ fontSize: 11, color: '#888', whiteSpace: 'normal', maxWidth: 240, marginTop: 1 }}>{t.hint}</div>

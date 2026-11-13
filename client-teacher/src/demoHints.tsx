@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClassActivity, Seat } from './SeatingMap';
 import type { TeacherSlides } from './LessonSlides';
+import type { TeacherPollView } from './pollState';
+import { SOLO_LIVE_BLOCKS } from './demo';
 
 // ---------- which hint, when ----------
 
@@ -33,6 +35,10 @@ export interface HintsInput {
   quiet: boolean;
   /** who talks and writes, by student */
   activity: ClassActivity | null;
+  /** the running poll, if a poll runs */
+  poll: TeacherPollView | null;
+  /** the kind of task whose dialog is open */
+  newTask: string | null;
 }
 
 /** Desks with somebody at them, in order */
@@ -63,7 +69,23 @@ const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string |
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
 const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
-const NEXT_BLOCK = '[data-testid="plan-block"][data-current] + [data-testid="plan-block"]';
+
+/** The lesson's blocks in the server's order, the polls added during the lesson among them */
+const planBlocks = (x: HintsInput) => x.slides.material?.blocks ?? x.slides.local?.blocks ?? [];
+/** The polls added so far */
+const pollsAdded = (x: HintsInput) => planBlocks(x).filter(b => b.type === 'poll').length;
+
+/** The next block the demo goes through, past the pale ones and the polls already run */
+function nextBlock(x: HintsInput): string {
+  const blocks = planBlocks(x);
+  const at = blocks.findIndex(b => b.id === x.slides.state.block);
+  // from a poll: on from the block it was added in
+  const from = blocks[at]?.type === 'poll' ? blocks.slice(0, at).map(b => b.id).filter(id => SOLO_LIVE_BLOCKS.has(id)).pop() : null;
+  const start = from ? blocks.findIndex(b => b.id === from) : at;
+  const next = blocks.slice(start + 1).find(b => SOLO_LIVE_BLOCKS.has(b.id));
+  return `[data-block-id="${next?.id ?? ''}"]`;
+}
+const blockSel = (id: string) => `[data-block-id="${id}"]`;
 
 /** How many students the solo demo's class has (server/src/demoBots.ts) */
 const CLASS_SIZE = 8;
@@ -101,6 +123,28 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
   }
 
   if (stage === 'group') {
+    const block = slides.state.block;
+    const polls = pollsAdded(x);
+    // a poll of the teacher's own: its dialog, the answers coming in, the results
+    if (x.newTask === 'poll') return { id: 'poll-start', anchor: '[data-testid="poll-start"]', text:
+      'Вопрос и варианты уже вписаны — можно поправить. Сверху можно добавить картинку. Запускайте: голосование встанет в план сразу после текущего этапа.' };
+    if (x.poll && block === x.poll.blockId) {
+      const answered = Object.keys(x.poll.answers).length;
+      if (!x.poll.revealed) return answered < CLASS_SIZE
+        ? { id: 'poll-wait', anchor: '[data-testid="poll-results"]', text: 'Ответы приходят по одному. Вы видите, кто что выбрал; ученики не видят ни чужих ответов, ни итогов.' }
+        : { id: 'poll-reveal', anchor: '[data-testid="poll-reveal"]', text: 'Все ответили. Покажите итоги классу: ученики увидят, сколько выбрали каждый вариант, без имён.' };
+      if (polls < 2) return { id: 'poll-back', anchor: blockSel('b9'), text:
+        'Мнения разделились — значит, есть что разобрать. Вернитесь к объяснению признаков. А в конце урока спросим ещё раз.' };
+      return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Мнения сдвинулись: урок сработал. Завершите урок и расскажите, что думаете' };
+    }
+    // b9: before the explanation, a question from the class — what does everyone think?
+    if (block === 'b9' && polls === 0) return { id: 'poll-new', anchor: '[data-testid="menu-task"]', text:
+      'Ученики путают свойство и признак: одни говорят, что это одно и то же, другие — что разное. '
+      + 'Узнайте прямо сейчас, что думает весь класс: «Новое задание» → «Голосование».' };
+    // the summing up: the same question again
+    if (block === 'b12') return polls < 2
+      ? { id: 'poll-again', anchor: '[data-testid="menu-task"]', text: 'Итог урока. Задайте классу тот же вопрос ещё раз — посмотрим, изменилось ли мнение: «Новое задание» → «Голосование».' }
+      : { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Завершите урок и расскажите, что думаете' };
     const material = slides.local ?? slides.material;
     const st = slides.state;
     const scenes = (st.active && material?.blocks.find(b => b.id === st.blockId)?.slides) || [];
@@ -114,7 +158,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (asking) return null;
     if (answered) {
       return [
-        { id: 'next-block', anchor: NEXT_BLOCK, text: 'Выберите следующий блок урока.' },
+        { id: 'next-block', anchor: nextBlock(x), text: 'Выберите следующий блок урока.' },
         // under the second desk of the class, over nobody: the frames it explains are right above
         { id: 'vote-legend', anchor: `[data-group="${occupiedDesks(x.seats)[1] ?? occupiedDesks(x.seats)[0] ?? 0}"]`, prefer: { side: 'below', align: 'start' }, text:
           'Зелёная рамка вокруг ученика — он выбрал «Понятно», красная — «Не понятно», нет рамки — не проголосовал. '
@@ -167,8 +211,9 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         'Посмотрите на эту пару: говорит и пишет в основном один ученик. '
         + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
     }
-    if (stage === 'fours') return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Это весь цикл урока. Завершите урок и расскажите, что думаете' };
-    return { id: `next-block:${stage}`, anchor: NEXT_BLOCK, text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах' : 'Дальше пары объединяются в четвёрки' };
+    return { id: `next-block:${stage}`, anchor: nextBlock(x), text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах'
+      : stage === 'pairs' ? 'Этапы с 4-го по 8-й в демо пропущены — в плане они бледные, нажмите, чтобы узнать, что там. Дальше — признаки параллелограмма'
+      : 'Четвёрки разобрались. Подведите итог урока' };
   }
 
   return null;
@@ -323,7 +368,7 @@ function Bubble({ hint }: { hint: Hint }) {
         position: 'fixed', top: box.top - 4, left: box.left - 4, width: box.width + 8, height: box.height + 8,
         borderRadius: 8, border: '2px solid #f5a623', pointerEvents: 'none', zIndex: 900, animation: 'demoHintRing 1.4s ease-in-out infinite',
       }} />
-      <div ref={setBubble} role="note" data-testid="demo-hint" data-hint-id={hint.id} style={{
+      <div ref={setBubble} role="note" data-testid="demo-hint" data-hint-id={hint.id} data-anchor={hint.anchor} style={{
         position: 'fixed', top: pos.top, left: pos.left, width: BUBBLE_W, boxSizing: 'border-box', zIndex: 901,
         background: BG, color: '#fff', borderRadius: 8, padding: '10px 12px', fontFamily: 'sans-serif',
         fontSize: 13, lineHeight: 1.4, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.25)',

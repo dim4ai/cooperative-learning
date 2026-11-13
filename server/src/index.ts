@@ -20,7 +20,7 @@ import {
 import type { Block, Scene } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
-import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, scatteredSeat, BotRun } from './demoBots';
+import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, scatteredSeat, soloBlockOpen, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
@@ -637,6 +637,12 @@ function startBots(code: string, lesson: LessonRuntime) {
     say(room, clip) {
       // to the teacher wherever they are: on coming into the room mid-line they hear the rest of it
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoVoice', { room, ...clip, now: Date.now() });
+    },
+    vote(name, choice) {
+      const cur = currentPoll(lesson);
+      if (!cur || !answersOpen(cur.run) || cur.run.answers.has(name)) return;
+      cur.run.answers.set(name, [choice]);
+      sendPollToTeachers(lesson);
     },
   });
   lesson.bots = bots;
@@ -1298,6 +1304,7 @@ function keepLiveBlocks(next: Material, old: Material | null, same: boolean) {
 function resumeBlock(lesson: LessonRuntime, blockId: string) {
   const block = lesson.material?.blocks.find(b => b.id === blockId);
   if (!block) return;
+  const pollStarts = !!block.poll && block.id !== lesson.block && !lesson.polls.has(block.id);
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
@@ -1356,7 +1363,7 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   else await sendAllToMain(code, lesson);
   if (wereAtDesks) await bringTeachersToMain(code, lesson);
   broadcastState(code, lesson);
-  lesson.bots?.onStage(stage);
+  lesson.bots?.onStage(stage, lesson.block);
   soloReached(code, stage);
   sendPoll(lesson); // a poll is there only while its block runs, not on the seating
 }
@@ -1506,11 +1513,13 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (block.id !== lesson.block) resetActivity(lesson);
   // A new explanation is a new topic: last topic's marks would say nothing about it
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
+  const pollStarts = !!block.poll && block.id !== lesson.block && !lesson.polls.has(block.id);
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
   if (stage !== lesson.stage) await changeStage(code, lesson, stage);
   else broadcastState(code, lesson); // the new block's time
+  if (pollStarts && block.poll) lesson.bots?.onPoll(block.poll.options.length);
   // the same stage again: everyone stays where they are, and writes there for this block
   for (const p of lesson.participants.values()) noteRoom(lesson, p);
 }
@@ -2229,6 +2238,7 @@ io.on('connection', async (socket) => {
     // With a lesson file the teacher goes through its blocks; the stage follows the block
     socket.on('block:start', async ({ blockId }: { blockId: string }) => {
       if (role !== 'teacher') return;
+      if (lesson.bots && !soloBlockOpen(String(blockId))) return; // the solo demo skips it: pale in the plan
       await startBlock(code, lesson, blockId);
     });
 

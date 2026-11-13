@@ -206,31 +206,51 @@ const TYPE_LABELS: Record<string, string> = { group: 'объяснение', ind
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */
-export function LessonPlan({ slides, stage }: { slides: TeacherSlides; stage: string }) {
+/** off: the blocks that can't be started here (the solo demo skips some), shown pale; a press tells what happens there */
+export function LessonPlan({ slides, stage, off }: { slides: TeacherSlides; stage: string; off?: (b: MaterialBlock) => boolean }) {
   // the server's order: the tasks added during the lesson are in it too
   const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
   const current = stage === 'waiting' ? null : slides.state.block;
+  const [peek, setPeek] = useState<string | null>(null);
+  const local = slides.local?.blocks;
   return (
     // about five blocks high, the rest scrolls: the sidebar keeps room for what's under the plan
     <div data-testid="lesson-plan" style={{ flex: '0 1 auto', minHeight: 60, maxHeight: 234, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3, margin: '0 -4px', padding: '0 4px' }}>
       {blocks.map(b => {
         const on = b.id === current;
+        const pale = !on && !!off?.(b);
+        const about = pale && peek === b.id ? blockGist(local?.find(x => x.id === b.id) ?? b) : null;
         return (
-          <button key={b.id} data-testid="plan-block" data-current={on || undefined}
-            ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined} onClick={() => socket.emit('block:start', { blockId: b.id })} style={{
-            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'center',
-            background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
+          <div key={b.id} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+          <button data-testid="plan-block" data-block-id={b.id} data-current={on || undefined} data-off={pale || undefined}
+            ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+            onClick={() => pale ? setPeek(p => p === b.id ? null : b.id) : socket.emit('block:start', { blockId: b.id })} style={{
+            flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: pale ? 'help' : 'pointer', textAlign: 'center',
+            background: on ? '#4a90e2' : pale ? 'rgba(255,255,255,0.45)' : '#fff', color: on ? '#fff' : pale ? '#9a9a9a' : '#333',
           }}>
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
-            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
+            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : pale ? '#aaa' : '#777' }}>
               {isLiveBlock(b) && <span data-testid="plan-block-added" title="Добавлено по ходу урока">＋ </span>}
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
             </div>
           </button>
+          {about !== null && (
+            <div data-testid="plan-block-off" onClick={() => setPeek(null)} style={{ margin: '2px 2px 4px', padding: '6px 8px', borderRadius: 6, background: '#fff8e6', border: '1px solid #ecd9a8', fontSize: 11.5, lineHeight: 1.35, color: '#444', cursor: 'pointer' }}>
+              <b>В демо этот этап пропущен.</b>{about && <> На уроке: {about}</>}
+            </div>
+          )}
+          </div>
         );
       })}
     </div>
   );
+}
+
+/** One or two sentences of what a block is about: its task, else the note to the teacher */
+function blockGist(b: { task?: string; teacherNote?: string }): string {
+  const text = (b.task || b.teacherNote || '').replace(/\s+/g, ' ').trim();
+  const cut = text.match(/^(.{20,180}?[.!?])(\s|$)/)?.[1] ?? text.slice(0, 160);
+  return cut + (cut.length < text.length && !/[.!?]$/.test(cut) ? '…' : '');
 }
 
 /** Right panel: what this block asks of the teacher */

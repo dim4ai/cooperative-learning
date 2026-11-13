@@ -185,6 +185,25 @@ export class ClientSocket extends Emitter {
     return this;
   }
 
+  /** As socket.io's: the acknowledgement gets an error first (here, only if the server doesn't answer in time) */
+  timeout(ms: number) {
+    const withAck = (ev: string, args: unknown[], ack: (err: Error | null, ...reply: unknown[]) => void) => {
+      let done = false;
+      const t = setTimeout(() => { if (!done) { done = true; ack(new Error('operation has timed out')); } }, ms);
+      this.emit(ev, ...args, (...reply: unknown[]) => { if (done) return; done = true; clearTimeout(t); ack(null, ...reply); });
+    };
+    return {
+      emit: (ev: string, ...args: unknown[]) => {
+        const last = args[args.length - 1];
+        if (typeof last === 'function') withAck(ev, args.slice(0, -1), last as (err: Error | null, ...reply: unknown[]) => void);
+        else this.emit(ev, ...args);
+        return this;
+      },
+      emitWithAck: (ev: string, ...args: unknown[]) => new Promise<unknown>((resolve, reject) =>
+        withAck(ev, args, (err, reply) => (err ? reject(err) : resolve(reply)))),
+    };
+  }
+
   private send(ev: string, args: unknown[]) {
     const peer = this.peer;
     const { data, ack } = packed(args);

@@ -14,11 +14,14 @@ import { GRADE_INFO, LETTERS, MAX_OPTIONS, MAX_SECONDS, MIN_SECONDS, POLL_COLORS
 interface Draft { text: string; color: string; correct: boolean }
 const blank = (i: number): Draft => ({ text: '', color: POLL_COLORS[i % POLL_COLORS.length], correct: false });
 
-export function NewPollDialog({ running, onClose }: { running: boolean; onClose: () => void }) {
+/** draft: what the dialog opens with (the solo demo suggests its question) */
+export interface PollDraft { question: string; options: string[] }
+
+export function NewPollDialog({ running, onClose, draft }: { running: boolean; onClose: () => void; draft?: PollDraft }) {
   const [title, setTitle] = useState('');
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState(draft?.question ?? '');
   const [multi, setMulti] = useState(false);
-  const [options, setOptions] = useState<Draft[]>(() => [0, 1, 2, 3].map(blank));
+  const [options, setOptions] = useState<Draft[]>(() => draft ? draft.options.map((text, i) => ({ ...blank(i), text })) : [0, 1, 2, 3].map(blank));
   const [picture, setPicture] = useState<BoardPicture | null>(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);

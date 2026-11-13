@@ -86,6 +86,27 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   ],
 };
 
+/** The sample lesson's blocks the solo demo goes through; the rest are in the plan, pale and closed
+ *  (client-teacher/src/demo.tsx, SOLO_LIVE_BLOCKS). Tasks added during the lesson (live-…) run too. */
+export const SOLO_LIVE_BLOCKS = new Set(['b1', 'b2', 'b3', 'b9', 'b10', 'b12']);
+export const soloBlockOpen = (id: string) => SOLO_LIVE_BLOCKS.has(id) || id.startsWith('live-');
+
+/** A block of its own, not its stage's usual script. b10 «Точно параллелограмм?»: a stand-in until its dialogue is written */
+const BLOCK_SCRIPT: Record<string, RoomScript[]> = {
+  b10: [
+    { lines: lines(['1 — да', '2 — да', '3 — да?', '4 — да'], 5, 7), talk: [0.5, 0.45, 0.35, 0.2], call: {
+      at: 30, note: 'Карточка 3: AB ∥ CD и BC = AD. Мы положили в «Да, точно», а {2} говорит, что это может быть трапеция. Кто прав?' } },
+    { lines: lines(['1 — да', '4 — да', '5 — не обязательно', '6 — ?'], 6, 8), talk: [0.45, 0.4, 0.3, 0.3] },
+  ],
+};
+
+/** How the class answers the poll «Свойство и признак — одно и то же?» (options: да / нет, разные / иногда совпадают / не знаю),
+ *  by bot: the first time all over the place, the second time after the lesson — most moved to «разные» or «иногда» */
+const POLL_ANSWERS = [
+  { Аня: 1, Миша: 0, Лена: 2, Тимур: 0, Соня: 3, Артём: 1, Вика: 0, Глеб: 3 },
+  { Аня: 1, Миша: 2, Лена: 2, Тимур: 1, Соня: 1, Артём: 1, Вика: 2, Глеб: 3 },
+] as Record<string, number>[];
+
 /** The bots spread out as far as they can, so nobody starts next to anybody: the teacher gathers them */
 export function scatteredSeat<S extends { groupIndex: number; row: number; occupant: string | null }>(seats: S[]): S | undefined {
   const taken = seats.filter(s => s.occupant);
@@ -112,6 +133,8 @@ export interface BotHost {
   call(room: string, note: string, who?: string): void;
   /** A voiced line begins in a room: the teacher there hears it */
   say(room: string, clip: { src: string; ms: number }): void;
+  /** A bot answers the running poll */
+  vote(name: string, choice: number): void;
 }
 
 /** The bot's own voice if the clip has it, else another of the same sex, else any */
@@ -180,7 +203,7 @@ export class BotRun {
   }
 
   /** The stage changed: what was going on stops, and the bots start on the new stage's work */
-  onStage(stage: string) {
+  onStage(stage: string, blockId?: string | null) {
     for (const t of this.stageTimers) clearTimeout(t);
     this.stageTimers.clear();
     this.replies.clear();
@@ -192,7 +215,7 @@ export class BotRun {
     this.stand.clear();
     this.stageStart = Date.now();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
-    const script = SCRIPT[stage];
+    const script = (blockId && BLOCK_SCRIPT[blockId]) || SCRIPT[stage];
     const rooms = this.host.rooms();
     // a script with a lead goes to that bot's room; the rest, in turn, to the other rooms
     const parts = new Map<string, RoomScript>();
@@ -324,6 +347,17 @@ export class BotRun {
     if (!reply) return;
     this.replies.delete(room);
     this.after(VISIT_REPLY_MS, () => this.write(room, reply));
+  }
+
+  private polls = 0;
+  /** A poll began: each bot answers in its own time, a few quick, a few slow */
+  onPoll(options: number) {
+    const answers = POLL_ANSWERS[Math.min(this.polls++, POLL_ANSWERS.length - 1)];
+    const order = [...BOTS].sort(() => Math.random() - 0.5);
+    order.forEach((b, i) => {
+      const at = 2500 + i * 1800 + Math.random() * 2500 + (i === order.length - 1 ? 5000 : 0); // the last one keeps them waiting
+      this.after(at, () => this.host.vote(b.name, Math.min(answers[b.name] ?? 0, options - 1)));
+    });
   }
 
   stop() {
