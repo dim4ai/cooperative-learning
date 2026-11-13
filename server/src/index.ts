@@ -613,6 +613,7 @@ function demoEndInfo(demo: DemoRecord) {
 
 /** The simulated class comes in by itself: nothing here is connected to anybody */
 function startBots(code: string, lesson: LessonRuntime) {
+  const fast = !!demos.get(code)?.fast;
   lesson.atDesks = false; // the simulated class waits in the room, as its script expects
   createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
@@ -622,7 +623,8 @@ function startBots(code: string, lesson: LessonRuntime) {
       const id = `bot:${i}`;
       if (lesson.seats.some(s => s.occupant === name)) return;
       if (!lesson.participants.has(id)) lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: null, avatar, bot: true });
-      const seat = scatteredSeat(lesson.seats);
+      // testing (?fast): straight to the first two desks, as if the teacher had gathered them
+      const seat = fast ? lesson.seats.filter(s => !s.occupant && s.extra === undefined && s.groupIndex < 2)[0] : scatteredSeat(lesson.seats);
       if (seat) seat.occupant = name;
       broadcastSeats(code, lesson);
       broadcastState(code, lesson);
@@ -646,7 +648,7 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
   });
   lesson.bots = bots;
-  bots.seatEveryone();
+  bots.seatEveryone(fast);
 }
 
 const realBotRooms = (lesson: LessonRuntime) =>
@@ -2540,6 +2542,7 @@ app.post('/demo/solo', async (req, res) => {
   const demo: DemoRecord = {
     code: pendingKey, ipHash, videoMode: 'solo', createdAt: now, endsAt: now + DEMO_SOLO_MS, firstStudentAt: now,
     peakStudents: BOTS.length, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0, reached: 'waiting',
+    ...(req.query?.fast ? { fast: true } : {}),
   };
   demos.set(pendingKey, demo);
   try {

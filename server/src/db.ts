@@ -280,6 +280,7 @@ export interface DemoRecord {
   cooldownUntil: number;
   slotFreeAt: number;
   reached?: string | null; // solo: the furthest stage the teacher got to
+  fast?: boolean; // solo, testing: the class sits down at once, gathered at two desks
 }
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));

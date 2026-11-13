@@ -169,8 +169,9 @@ export class BotRun {
     set.add(t);
   }
 
-  seatEveryone() {
-    BOTS.forEach((_, i) => this.after(1600 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
+  /** fast (testing): all at once */
+  seatEveryone(fast = false) {
+    BOTS.forEach((_, i) => this.after(fast ? 300 + i * 100 : 1600 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
   }
 
   /** The teacher sent someone from their seat: as in a real class, they find another one */

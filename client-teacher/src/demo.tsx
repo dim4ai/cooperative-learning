@@ -52,6 +52,9 @@ export const soloBlockOff = (b: { id: string }) => !SOLO_LIVE_BLOCKS.has(b.id) &
 /** The poll the solo demo suggests, both times: the class's answers are in server/src/demoBots.ts (POLL_ANSWERS), by option */
 export const SOLO_POLL = { question: 'Свойство и признак — это одно и то же?', options: ['Да, одно и то же', 'Нет, разные вещи', 'Иногда совпадают', 'Не знаю'] };
 
+/** ?fast=<block>: testing — the lesson starts on that block as soon as the class is in */
+export const FAST_BLOCK = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('fast') || null;
+
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
 // from there, booking a lesson with one's own class is on the real site
 const BOOK_URL = (import.meta.env.VITE_REAL_TEACHER_URL as string | undefined) ?? 'https://teacher.co-learn.ru/?demo';
@@ -192,7 +195,9 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
 
 export async function startSolo(): Promise<{ code: string; token: string } | { error: string }> {
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo`, { method: 'POST' });
+    // ?fast (testing): the class sits down at once, at two desks; ?fast=b9 also starts the lesson on that block
+    const fast = new URLSearchParams(location.search).has('fast') ? '?fast=1' : '';
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo${fast}`, { method: 'POST' });
     const body = await res.json().catch(() => ({}));
     if (res.ok && body.token) return { code: body.code, token: body.token };
     if (body.error === 'slow down') return { error: 'Слишком много попыток, подождите немного' };

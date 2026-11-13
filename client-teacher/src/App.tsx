@@ -12,7 +12,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_POLL, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -629,6 +629,16 @@ export default function App() {
       .then(blob => slides.open(new File([blob], 'parallelogram.colesson')))
       .catch(e => console.error('sample lesson not loaded:', e));
   }, [demo, confirmed, lessonCode, slides]);
+
+  // testing (?fast=b9): once the class is in, the lesson starts right on that block
+  const fastStarted = useRef(false);
+  useEffect(() => {
+    if (!demo?.solo || !FAST_BLOCK || fastStarted.current || state.stage !== 'waiting') return;
+    const inClass = state.participants.filter(p => p.role === 'student').length;
+    if (!slides.material?.blocks.some(b => b.id === FAST_BLOCK) || inClass < 8) return;
+    fastStarted.current = true;
+    socket.emit('block:start', { blockId: FAST_BLOCK });
+  }, [demo, state.stage, state.participants, slides.material]);
 
   /** The demo is over, whoever or whatever ended it: on to the feedback form */
   function finishDemo(info?: { reason?: string | null }) {
