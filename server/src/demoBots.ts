@@ -48,6 +48,8 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
 const LINE_GAP_MS = 1100;
+const GREET_GAP_MS = 300; // the teacher came in: hello straight after the line going on
+const ARRIVE_MS = 1500; // the teacher comes into a room: their page is there about this much later
 const EARLY_CALL_MS = 10_000; // the individual stage: the second call comes 10 s into the teacher's visit to the first
 const TALK_START_MS = 10_000; // the first seconds of a stage are quiet: the teacher looks round first
 const RECALL_MS = 15_000; // the teacher left without answering: they call again
@@ -471,7 +473,7 @@ export class BotRun {
       if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
       // asked: the teacher may answer once the question is out
       if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
-      this.after(LINE_GAP_MS, () => this.step(room));
+      this.after(t.insert[0]?.id === 'p1-34' ? GREET_GAP_MS : LINE_GAP_MS, () => this.step(room));
     });
   }
 
@@ -497,17 +499,16 @@ export class BotRun {
     t.present = true;
     if (t.phase === 'a' && !t.greeted) {
       t.greeted = true;
-      // they break off to say hello, then say again what the teacher came in on
-      const cut = t.busy && t.saying && t.saying.who !== 'T' && t.saying.id !== 'p1-34' ? [t.saying] : [];
-      t.insert.push(this.id1(t, 'p1-34'), ...cut);
-      if (cut.length) { t.gen++; t.busy = false; } // the greeting cuts in at once
+      // the line going on is finished, then hello at once
+      t.insert.push(this.id1(t, 'p1-34'));
     }
     else if (t.phase === 'calling') {
       // came on the call: «Какой у вас вопрос?» — and the partner asks it
       t.phase = 'asked';
       t.insert.push(this.id1(t, 'p1-tq'), this.id1(t, 'p1-19'));
     }
-    this.step(room);
+    // a moment for the teacher's page to get into the room: what's said for them is heard from its start
+    this.after(ARRIVE_MS, () => this.step(room));
   }
 
   private talkLeft(room: string) {
