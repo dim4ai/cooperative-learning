@@ -648,6 +648,7 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
     write: (room, obj, author) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, ''),
+    erase: (room, uid, author) => applyBoardOp(lesson, room, { t: 'del', uid }, author ?? 'Ученик', false, ''),
     talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
     call(room, note, who) {

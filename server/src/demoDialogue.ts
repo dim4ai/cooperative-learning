@@ -6,9 +6,9 @@
 
 export interface SpokenLine { id: string; who: 1 | 2; pause: number; write: string | null; ms: Record<string, number>; after?: boolean }
 
-export const FEMALE_VOICES = new Set(['dasha', 'lera', 'masha', 'julia']);
+export const FEMALE_VOICES = new Set(['dasha', 'lera', 'masha', 'julia', 'jane']);
 
-export const VOICE_OF: Record<string, string> = {"Миша": "kirill", "Тимур": "anton", "Артём": "alexander", "Глеб": "ermil", "Аня": "dasha", "Лена": "lera", "Соня": "masha", "Вика": "julia"};
+export const VOICE_OF: Record<string, string> = {"Миша": "kirill", "Тимур": "anton", "Артём": "alexander", "Глеб": "ermil", "Аня": "dasha", "Лена": "lera", "Соня": "masha", "Вика": "jane"};
 
 export const LOPSIDED_PAIR: SpokenLine[] = [
   {"id": "lp01", "who": 1, "pause": 3000, "write": "AD = BC", "ms": {"kirill": 4128, "anton": 4008, "alexander": 3936, "ermil": 3936, "dasha": 4104, "lera": 4176, "masha": 4200, "julia": 3912}},
@@ -122,7 +122,8 @@ export const CHOCOLATE: DialogueLine[] = [
 export type Pt = [number, number];
 /** Drawn while a line is said, `at` that part of the way through it: a broken line, a right-angle mark
  *  (corner, then a point on each side), a filled triangle, a number */
-export interface Draw { at: number; path?: Pt[]; angle?: [Pt, Pt, Pt]; fill?: Pt[]; label?: { at: Pt; text: string } }
+/** ticks: equal segments marked, [from, to, how many strokes] */
+export interface Draw { at: number; path?: Pt[]; angle?: [Pt, Pt, Pt]; fill?: Pt[]; label?: { at: Pt; text: string }; ticks?: [Pt, Pt, number][] }
 
 /** П2: the triangles and heights they talk about, drawn on their board as they say it */
 export const EXPLAIN_DRAW: Record<string, Draw[]> = {
@@ -137,8 +138,17 @@ export const EXPLAIN_DRAW: Record<string, Draw[]> = {
   'p2-17': [{ at: 0.2, angle: [[0, 4], [0, 0], [2, 4]] }, { at: 0.35, angle: [[10, 0], [10, 4], [8, 0]] }],
   // «такие же треугольники к диагонали а-цэ. Вот один, а вот второй»
   'p2-21': [{ at: 0.6, path: [[0, 0], [5, 0], [5, 2]] }, { at: 0.82, path: [[5, 2], [5, 4], [10, 4]] }],
-  // the other one: «дорисовываю треугольники»
-  'p2-26': [{ at: 0.12, path: [[2, 4], [2, 2], [5, 2]] }, { at: 0.3, path: [[5, 2], [8, 2], [8, 0]] }],
+  // «и то же самое»: the equal sides marked with strokes, the right angles
+  'p2-23': [
+    { at: 0.1, ticks: [[[0, 0], [5, 0], 1], [[5, 4], [10, 4], 1]] }, { at: 0.25, ticks: [[[5, 0], [5, 2], 2], [[5, 2], [5, 4], 2]] },
+    { at: 0.4, angle: [[5, 0], [0, 0], [5, 2]] }, { at: 0.45, angle: [[5, 4], [10, 4], [5, 2]] },
+  ],
+  // the other one: «дорисовываю треугольники. Эти стороны равны, эти равны, угол прямой»
+  'p2-26': [
+    { at: 0.12, path: [[2, 4], [2, 2], [5, 2]] }, { at: 0.3, path: [[5, 2], [8, 2], [8, 0]] },
+    { at: 0.44, ticks: [[[2, 2], [5, 2], 1], [[5, 2], [8, 2], 1]] }, { at: 0.53, ticks: [[[2, 4], [2, 2], 2], [[8, 2], [8, 0], 2]] },
+    { at: 0.62, angle: [[2, 2], [2, 4], [5, 2]] }, { at: 0.66, angle: [[8, 2], [8, 0], [5, 2]] },
+  ],
   // «эту высоту из бэ и эту из дэ»
   'p2-31': [{ at: 0.45, path: [[2, 4], [2, 0]] }, { at: 0.75, path: [[8, 0], [8, 4]] }],
   // «вот этот и вот этот треугольники»
@@ -150,45 +160,45 @@ export const EXPLAIN_DRAW: Record<string, Draw[]> = {
  *  Text: ~/temp/П2-объясню.txt */
 export const EXPLAIN: DialogueLine[] = [
   {"id": "p2-01", "who": 1, "write": null, "ms": {"kirill": 1567, "anton": 1515, "alexander": 1672, "ermil": 1384, "dasha": 1646, "lera": 1620, "masha": 1724, "julia": 1437}, "text": "Ну что, сверяемся?"},
-  {"id": "p2-02", "who": 2, "write": null, "ms": {"kirill": 4989, "anton": 4885, "alexander": 4807, "ermil": 4728, "dasha": 4989, "lera": 5120, "masha": 5251, "julia": 4754}, "text": "Давай. Только сразу скажу: я вообще не очень понял, как тут равное искать."},
-  {"id": "p2-03", "who": 2, "write": null, "ms": {"kirill": 7027, "anton": 6687, "alexander": 6661, "ermil": 6687, "dasha": 6818, "lera": 6818, "masha": 6818, "julia": 6583}, "text": "Одну пару сторон нашёл, и всё. Остальные наискосок идут. Вроде похожи, а может, и нет."},
-  {"id": "p2-04", "who": 2, "write": null, "ms": {"kirill": 3004, "anton": 2795, "alexander": 2821, "ermil": 2821, "dasha": 2795, "lera": 2847, "masha": 3004, "julia": 2717}, "text": "А как равные углы искать — совсем не понимаю."},
+  {"id": "p2-02", "who": 2, "write": null, "ms": {"kirill": 4989, "anton": 4885, "alexander": 4493, "ermil": 4728, "dasha": 4989, "lera": 5120, "masha": 5251, "julia": 4493, "jane": 4545}, "text": "Давай. Только сразу скажу я вообще не очень понял как тут равное искать."},
+  {"id": "p2-03", "who": 2, "write": null, "ms": {"kirill": 7027, "anton": 6687, "alexander": 6426, "ermil": 6687, "dasha": 6818, "lera": 6818, "masha": 6818, "julia": 6374, "jane": 6661}, "text": "Одну пару сторон нашёл и всё. Остальные наискосок идут. Вроде похожи а может и нет."},
+  {"id": "p2-04", "who": 2, "write": null, "ms": {"kirill": 3004, "anton": 2795, "alexander": 2873, "ermil": 2821, "dasha": 2795, "lera": 2847, "masha": 3004, "julia": 2743, "jane": 2873}, "text": "А как равные углы искать совсем не понимаю."},
   {"id": "p2-05", "who": 1, "write": null, "ms": {"kirill": 3527, "anton": 3474, "alexander": 3396, "ermil": 3527, "dasha": 3370, "lera": 3553, "masha": 3579, "julia": 3318}, "text": "Да, вижу. А-дэ равно бэ-цэ. Это правильно."},
-  {"id": "p2-06", "who": 2, "write": null, "ms": {"kirill": 2011, "anton": 1907, "alexander": 1881, "ermil": 1829, "dasha": 1907, "lera": 2090, "masha": 2038, "julia": 1933}, "text": "Ого, а у тебя сколько всего."},
-  {"id": "p2-07", "who": 1, "write": null, "ms": {"kirill": 6766, "anton": 6348, "alexander": 6243, "ermil": 6217, "dasha": 6557, "lera": 6609, "masha": 6949, "julia": 6269}, "text": "Да тут не очень сложно, давай быстро объясню. Нам ведь обоим нужно понимать. Спросить могут любого."},
-  {"id": "p2-08", "who": 2, "write": null, "ms": {"kirill": 1855, "anton": 1881, "alexander": 1750, "ermil": 1724, "dasha": 1829, "lera": 1881, "masha": 1907, "julia": 1829}, "text": "Давай. Только не быстро."},
-  {"id": "p2-09", "who": 1, "write": null, "ms": {"kirill": 4206, "anton": 3840, "alexander": 4023, "ermil": 3396, "dasha": 4284, "lera": 4153, "masha": 4232, "julia": 3736}, "text": "Хорошо, не быстро. Смотри, ты помнишь теорему Пифагора?"},
-  {"id": "p2-10", "who": 2, "write": null, "ms": {"kirill": 4545, "anton": 4284, "alexander": 4310, "ermil": 4336, "dasha": 4493, "lera": 4650, "masha": 4833, "julia": 4336}, "text": "Ну так, не очень. Там как-то стороны треугольника между собой связаны."},
-  {"id": "p2-11", "who": 1, "write": null, "ms": {"kirill": 6400, "anton": 6139, "alexander": 5721, "ermil": 5982, "dasha": 6165, "lera": 6165, "masha": 6452, "julia": 5773}, "text": "Да, прямоугольного… О, придумал проще! Помнишь первый признак равенства треугольников?"},
-  {"id": "p2-12", "who": 2, "write": null, "ms": {"kirill": 3265, "anton": 3135, "alexander": 3109, "ermil": 3056, "dasha": 3161, "lera": 3265, "masha": 3396, "julia": 3030}, "text": "Конечно. По двум сторонам и углу между ними."},
+  {"id": "p2-06", "who": 2, "write": null, "ms": {"kirill": 2011, "anton": 1907, "alexander": 1802, "ermil": 1829, "dasha": 1907, "lera": 2090, "masha": 2038, "julia": 1750, "jane": 1776}, "text": "Ого а у тебя сколько всего."},
+  {"id": "p2-07", "who": 1, "write": null, "ms": {"kirill": 6687, "anton": 6348, "alexander": 6243, "ermil": 6217, "dasha": 6557, "lera": 6400, "masha": 6949, "julia": 6269}, "text": "Да тут не очень сложно давай быстро объясню. Нам ведь обоим нужно понимать. Спросить могут любого."},
+  {"id": "p2-08", "who": 2, "write": null, "ms": {"kirill": 1855, "anton": 1881, "alexander": 1750, "ermil": 1724, "dasha": 1829, "lera": 1881, "masha": 1907, "julia": 1776, "jane": 1724}, "text": "Давай. Только не быстро."},
+  {"id": "p2-09", "who": 1, "write": null, "ms": {"kirill": 3866, "anton": 3840, "alexander": 4023, "ermil": 3396, "dasha": 4284, "lera": 3866, "masha": 4232, "julia": 3736}, "text": "Хорошо не быстро. Смотри. ты помнишь теорему Пифаг+ора?"},
+  {"id": "p2-10", "who": 2, "write": null, "ms": {"kirill": 4545, "anton": 4284, "alexander": 4023, "ermil": 4336, "dasha": 4493, "lera": 4650, "masha": 4833, "julia": 4049, "jane": 4180}, "text": "Ну так не очень. Там как-то стороны треугольника между собой связаны."},
+  {"id": "p2-11", "who": 1, "write": null, "ms": {"kirill": 7600, "anton": 7339, "alexander": 6921, "ermil": 7182, "dasha": 7365, "lera": 7391, "masha": 7652, "julia": 6973}, "text": "Да, прямоугольного… О, придумал проще! Помнишь первый признак равенства треугольников?"},
+  {"id": "p2-12", "who": 2, "write": null, "ms": {"kirill": 3265, "anton": 3135, "alexander": 3109, "ermil": 3056, "dasha": 3161, "lera": 3265, "masha": 3396, "julia": 3030, "jane": 3161}, "text": "Конечно. По двум сторонам и углу между ними."},
   {"id": "p2-13", "who": 1, "write": null, "ms": {"kirill": 8934, "anton": 8046, "alexander": 8333, "ermil": 8411, "dasha": 8176, "lera": 8307, "masha": 8882, "julia": 7863}, "text": "Он самый. Теперь смотри на а-бэ и цэ-дэ. Давай вот такой треугольник построим к а-бэ и вот такой к цэ-дэ."},
-  {"id": "p2-14", "who": 2, "write": null, "ms": {"kirill": 1280, "anton": 1228, "alexander": 1254, "ermil": 1123, "dasha": 1254, "lera": 1306, "masha": 1280, "julia": 1176}, "text": "Ага, вижу."},
-  {"id": "p2-15", "who": 1, "write": null, "ms": {"kirill": 3997, "anton": 3840, "alexander": 3892, "ermil": 3683, "dasha": 3997, "lera": 4023, "masha": 4336, "julia": 3788}, "text": "Вот эти стороны у них по четыре клетки, а эти — по две."},
-  {"id": "p2-16", "who": 2, "write": null, "ms": {"kirill": 549, "anton": 522, "alexander": 575, "ermil": 470, "dasha": 575, "lera": 601, "masha": 575, "julia": 470}, "text": "Да."},
-  {"id": "p2-17", "who": 1, "write": null, "ms": {"kirill": 5094, "anton": 4911, "alexander": 4859, "ermil": 5042, "dasha": 5042, "lera": 5094, "masha": 5224, "julia": 4911}, "text": "А вот эти углы прямые, по девяносто градусов. Значит, равны между собой."},
-  {"id": "p2-18", "who": 2, "write": null, "ms": {"kirill": 967, "anton": 914, "alexander": 914, "ermil": 888, "dasha": 914, "lera": 993, "masha": 993, "julia": 967}, "text": "Есть такое."},
-  {"id": "p2-19", "who": 1, "write": null, "ms": {"kirill": 8255, "anton": 7628, "alexander": 7784, "ermil": 7706, "dasha": 7811, "lera": 8072, "masha": 8333, "julia": 7471}, "text": "Ну и всё. Значит, треугольники равны, и оставшиеся стороны у них тоже равны. То есть а-бэ равно цэ-дэ."},
-  {"id": "p2-20", "who": 2, "write": null, "ms": {"kirill": 4153, "anton": 4023, "alexander": 4101, "ermil": 3840, "dasha": 4180, "lera": 4362, "masha": 4362, "julia": 3918}, "text": "Ага, точно. Крутяк! Так просто, оказывается!"},
-  {"id": "p2-21", "who": 1, "write": null, "ms": {"kirill": 7314, "anton": 6766, "alexander": 6922, "ermil": 6713, "dasha": 6975, "lera": 7079, "masha": 7471, "julia": 6713}, "text": "Да. А теперь такие же треугольники можно дорисовать к диагонали а-цэ. Вот один, а вот второй."},
-  {"id": "p2-22", "who": 2, "write": null, "ms": {"kirill": 470, "anton": 444, "alexander": 444, "ermil": 627, "dasha": 470, "lera": 470, "masha": 470, "julia": 418}, "text": "Так."},
-  {"id": "p2-23", "who": 1, "write": null, "ms": {"kirill": 3605, "anton": 3396, "alexander": 3474, "ermil": 3448, "dasha": 3396, "lera": 3579, "masha": 3762, "julia": 3318}, "text": "И то же самое. Получаем, что а-о равно о-цэ."},
-  {"id": "p2-24", "who": 2, "write": null, "ms": {"kirill": 5277, "anton": 4911, "alexander": 4780, "ermil": 4937, "dasha": 4963, "lera": 5172, "masha": 5486, "julia": 4807}, "text": "Гениально! Кажется, я уловил идею. Так ведь и про вторую диагональ можно."},
+  {"id": "p2-14", "who": 2, "write": null, "ms": {"kirill": 1280, "anton": 1228, "alexander": 1254, "ermil": 1123, "dasha": 1254, "lera": 1306, "masha": 1280, "julia": 888, "jane": 1149}, "text": "Ага, вижу."},
+  {"id": "p2-15", "who": 1, "write": null, "ms": {"kirill": 3448, "anton": 3840, "alexander": 3892, "ermil": 3683, "dasha": 3997, "lera": 3370, "masha": 4336, "julia": 3788}, "text": "Вот эти стороны у них по четыре клетки а эти по две."},
+  {"id": "p2-16", "who": 2, "write": null, "ms": {"kirill": 549, "anton": 522, "alexander": 575, "ermil": 470, "dasha": 575, "lera": 601, "masha": 575, "julia": 470, "jane": 522}, "text": "Да."},
+  {"id": "p2-17", "who": 1, "write": null, "ms": {"kirill": 4702, "anton": 4911, "alexander": 4859, "ermil": 5042, "dasha": 5042, "lera": 4545, "masha": 5224, "julia": 4911}, "text": "А вот эти углы прямые по девяносто градусов. Значит равны между собой."},
+  {"id": "p2-18", "who": 2, "write": null, "ms": {"kirill": 967, "anton": 914, "alexander": 914, "ermil": 888, "dasha": 914, "lera": 993, "masha": 993, "julia": 940, "jane": 914}, "text": "Есть такое."},
+  {"id": "p2-19", "who": 1, "write": null, "ms": {"kirill": 7967, "anton": 7628, "alexander": 7784, "ermil": 7706, "dasha": 7811, "lera": 7732, "masha": 8333, "julia": 7471}, "text": "Ну и всё. Значит треугольники равны и оставшиеся стороны у них тоже равны. То есть а-бэ равно цэ-дэ."},
+  {"id": "p2-20", "who": 2, "write": null, "ms": {"kirill": 4153, "anton": 4023, "alexander": 3683, "ermil": 3840, "dasha": 4180, "lera": 4362, "masha": 4362, "julia": 3318, "jane": 3605}, "text": "Ага, точно. Крутяк! Так просто оказывается!"},
+  {"id": "p2-21", "who": 1, "write": null, "ms": {"kirill": 7340, "anton": 6766, "alexander": 6922, "ermil": 6713, "dasha": 6975, "lera": 7053, "masha": 7471, "julia": 6713}, "text": "Да. А теперь такие же треугольники можно дорисовать к диагонали а-цэ. Вот один а вот второй."},
+  {"id": "p2-22", "who": 2, "write": null, "ms": {"kirill": 470, "anton": 444, "alexander": 444, "ermil": 627, "dasha": 470, "lera": 470, "masha": 470, "julia": 418, "jane": 496}, "text": "Так."},
+  {"id": "p2-23", "who": 1, "write": null, "ms": {"kirill": 3318, "anton": 3396, "alexander": 3474, "ermil": 3448, "dasha": 3396, "lera": 3396, "masha": 3762, "julia": 3318}, "text": "И то же самое. Получаем что а-о равно о-цэ."},
+  {"id": "p2-24", "who": 2, "write": null, "ms": {"kirill": 5277, "anton": 4911, "alexander": 4833, "ermil": 4937, "dasha": 4963, "lera": 5172, "masha": 5486, "julia": 4859, "jane": 4989}, "text": "Гениально! Кажется я уловил идею. Так ведь и про вторую диагональ можно."},
   {"id": "p2-25", "who": 1, "write": null, "ms": {"kirill": 2560, "anton": 2429, "alexander": 2508, "ermil": 2403, "dasha": 2560, "lera": 2586, "masha": 2586, "julia": 2429}, "text": "Да, то же самое. Попробуй сам."},
   {"id": "p2-25f", "who": 1, "write": null, "ms": {"kirill": 2612, "anton": 2534, "alexander": 2508, "ermil": 2482, "dasha": 2560, "lera": 2638, "masha": 2664, "julia": 2456}, "text": "Да, то же самое. Попробуй сама."},
-  {"id": "p2-26", "who": 2, "write": null, "ms": {"kirill": 8411, "anton": 7811, "alexander": 7811, "ermil": 7680, "dasha": 7889, "lera": 8150, "masha": 8438, "julia": 7602}, "text": "Так… дорисовываю треугольники. Эти стороны равны, эти равны, угол прямой. Значит, бэ-о равно о-дэ."},
+  {"id": "p2-26", "who": 2, "write": null, "ms": {"kirill": 8411, "anton": 7811, "alexander": 7497, "ermil": 7680, "dasha": 7889, "lera": 8150, "masha": 8438, "julia": 7236, "jane": 7732}, "text": "Так… дорисовываю треугольники. Эти стороны равны эти равны угол прямой. Значит бэ-о равно о-дэ."},
   {"id": "p2-27", "who": 1, "write": null, "ms": {"kirill": 4127, "anton": 3840, "alexander": 3866, "ermil": 3971, "dasha": 3866, "lera": 4075, "masha": 4101, "julia": 3840}, "text": "Да, всё правильно. Таким же образом можно и про углы."},
-  {"id": "p2-28", "who": 2, "write": null, "ms": {"kirill": 967, "anton": 1019, "alexander": 993, "ermil": 967, "dasha": 1045, "lera": 1097, "masha": 1123, "julia": 1071}, "text": "Это про какие?"},
-  {"id": "p2-29", "who": 1, "write": null, "ms": {"kirill": 5695, "anton": 5590, "alexander": 5433, "ermil": 5198, "dasha": 5512, "lera": 5669, "masha": 5878, "julia": 5224}, "text": "Про противоположные. Что угол а равен углу цэ. Видишь, одинаковые?"},
-  {"id": "p2-30", "who": 2, "write": null, "ms": {"kirill": 4571, "anton": 4284, "alexander": 4415, "ermil": 4258, "dasha": 4467, "lera": 4545, "masha": 4702, "julia": 4284}, "text": "Да, похожи. Нет, не соображу, какие треугольники взять."},
+  {"id": "p2-28", "who": 2, "write": null, "ms": {"kirill": 967, "anton": 1019, "alexander": 993, "ermil": 967, "dasha": 1045, "lera": 1097, "masha": 1123, "julia": 1045, "jane": 940}, "text": "Это про какие?"},
+  {"id": "p2-29", "who": 1, "write": null, "ms": {"kirill": 5512, "anton": 5590, "alexander": 5433, "ermil": 5198, "dasha": 5512, "lera": 5329, "masha": 5878, "julia": 5224}, "text": "Про противоположные. Что угол а равен углу цэ. Видишь одинаковые?"},
+  {"id": "p2-30", "who": 2, "write": null, "ms": {"kirill": 4571, "anton": 4284, "alexander": 5310, "ermil": 4258, "dasha": 4467, "lera": 4545, "masha": 4702, "julia": 3579, "jane": 5153}, "text": "Да, похожи. Нет… не соображу какие треугольники взять."},
   {"id": "p2-31", "who": 1, "write": null, "ms": {"kirill": 4859, "anton": 4467, "alexander": 4519, "ermil": 4441, "dasha": 4571, "lera": 4519, "masha": 4885, "julia": 4336}, "text": "Смотри. Давай проведём эту высоту из бэ и эту из дэ."},
-  {"id": "p2-32", "who": 2, "write": null, "ms": {"kirill": 627, "anton": 575, "alexander": 601, "ermil": 549, "dasha": 601, "lera": 653, "masha": 627, "julia": 601}, "text": "Вижу."},
+  {"id": "p2-32", "who": 2, "write": null, "ms": {"kirill": 627, "anton": 575, "alexander": 601, "ermil": 549, "dasha": 601, "lera": 653, "masha": 627, "julia": 601, "jane": 627}, "text": "Вижу."},
   {"id": "p2-33", "who": 1, "write": null, "ms": {"kirill": 2664, "anton": 2482, "alexander": 2560, "ermil": 2534, "dasha": 2586, "lera": 2612, "masha": 2717, "julia": 2482}, "text": "Теперь вот этот и вот этот треугольники."},
-  {"id": "p2-34", "who": 2, "write": null, "ms": {"kirill": 6374, "anton": 5982, "alexander": 6008, "ermil": 5799, "dasha": 6060, "lera": 6348, "masha": 6478, "julia": 5799}, "text": "Точно! Снова две стороны и угол между ними. Значит, угол а равен углу цэ."},
-  {"id": "p2-35", "who": 1, "write": null, "ms": {"kirill": 6008, "anton": 5669, "alexander": 5799, "ermil": 5381, "dasha": 5773, "lera": 6060, "masha": 6296, "julia": 5616}, "text": "Да. Когда по клеткам считаешь, это самый простой способ — пристраивать такие треугольники."},
-  {"id": "p2-36", "who": 2, "write": null, "ms": {"kirill": 3239, "anton": 3161, "alexander": 3161, "ermil": 2978, "dasha": 3344, "lera": 3396, "masha": 3553, "julia": 3213}, "text": "Спасибо, классный способ! Теперь всё понятно."},
-  {"id": "p2-37", "who": 2, "write": null, "ms": {"kirill": 7680, "anton": 7393, "alexander": 7340, "ermil": 7210, "dasha": 7576, "lera": 7811, "masha": 8307, "julia": 7340}, "text": "Здравствуйте, Татьяна Алексеевна. Мне сначала вообще было непонятно. А сейчас объясняют — и вроде ясно становится."},
-  {"id": "p2-38", "who": 1, "write": null, "ms": {"kirill": 3944, "anton": 3605, "alexander": 3683, "ermil": 3657, "dasha": 3814, "lera": 3762, "masha": 4101, "julia": 3631}, "text": "Достраиваем треугольники по клеткам и смотрим первый признак."},
-  {"id": "p2-39", "who": 2, "write": null, "ms": {"kirill": 2090, "anton": 1959, "alexander": 1959, "ermil": 2011, "dasha": 2038, "lera": 2142, "masha": 2142, "julia": 1802}, "text": "Так. На чём мы остановились?"},
+  {"id": "p2-34", "who": 2, "write": null, "ms": {"kirill": 6374, "anton": 5982, "alexander": 5747, "ermil": 5799, "dasha": 6060, "lera": 6348, "masha": 6478, "julia": 5669, "jane": 5904}, "text": "Точно! Снова две стороны и угол между ними. Значит угол а равен углу цэ."},
+  {"id": "p2-35", "who": 1, "write": null, "ms": {"kirill": 5486, "anton": 5669, "alexander": 5799, "ermil": 5381, "dasha": 5773, "lera": 5433, "masha": 6296, "julia": 5616}, "text": "Да. Когда по клеткам считаешь это самый простой способ пристраивать такие треугольники."},
+  {"id": "p2-36", "who": 2, "write": null, "ms": {"kirill": 3239, "anton": 3161, "alexander": 2847, "ermil": 2978, "dasha": 3344, "lera": 3396, "masha": 3553, "julia": 2900, "jane": 2821}, "text": "Спасибо классный способ! Теперь всё понятно."},
+  {"id": "p2-37", "who": 2, "write": null, "ms": {"kirill": 7680, "anton": 7393, "alexander": 6975, "ermil": 7210, "dasha": 7576, "lera": 7811, "masha": 8307, "julia": 7053, "jane": 7602}, "text": "Здравствуйте Татьяна Алексеевна. Мне сначала вообще было непонятно. А сейчас объясняют и вроде ясно становится."},
+  {"id": "p2-38", "who": 1, "write": null, "ms": {"kirill": 3892, "anton": 3605, "alexander": 3683, "ermil": 3657, "dasha": 3814, "lera": 3762, "masha": 4101, "julia": 3631}, "text": "Достраиваем треугольники по клеткам и смотрим первый признак."},
+  {"id": "p2-39", "who": 2, "write": null, "ms": {"kirill": 2090, "anton": 1959, "alexander": 1959, "ermil": 2011, "dasha": 2038, "lera": 2142, "masha": 2142, "julia": 1829, "jane": 1881}, "text": "Так. На чём мы остановились?"},
   {"id": "p2-tq", "who": "T", "write": null, "ms": {"alena": 1620, "filipp": 1567}, "text": "Как вы тут? Как дела?"},
   {"id": "p2-tb", "who": "T", "write": null, "ms": {"alena": 2926, "filipp": 3056}, "text": "Отлично. Разбирайтесь, не буду мешать."},
 ];

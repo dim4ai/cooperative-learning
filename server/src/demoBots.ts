@@ -76,8 +76,12 @@ interface Explain {
   insert: DialogueLine[];
   lastStrong: DialogueLine | null; // the strong one's last line: said again after the teacher's visit
   drawn: Set<string>;              // lines whose drawing is on the board already: not drawn again on repeating
+  onBoard: string[];               // uids of what they drew: wiped bit by bit when the talk moves on
 }
 const SEGMENT_MS = 300; // a drawn line goes on the board one segment after another
+const ERASE_MS = 200;   // and is wiped one object after another
+/** Lines that move on to something new: what was drawn before goes away as they begin */
+const ERASE_BEFORE = new Set(['p2-21', 'p2-31']);
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -168,6 +172,8 @@ export interface BotHost {
   /** The rooms of this stage, in a stable order */
   rooms(): string[];
   write(room: string, obj: Record<string, unknown> & { uid: string; type: string }, author?: string): void;
+  /** Takes a bot's drawing off the board */
+  erase(room: string, uid: string, author?: string): void;
   /** A bot talked this long: counted as a real student's microphone would be */
   talk(name: string, ms: number): void;
   /** Names of the bots in a room */
@@ -316,7 +322,7 @@ export class BotRun {
       } else if (part.explain) {
         this.quietRooms.add(room);
         this.chatter(room, part, [lead, partner]);
-        this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set() });
+        this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set(), onBoard: [] });
         this.after(TALK_START_MS, () => this.explainStep(room));
       } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
@@ -479,7 +485,7 @@ export class BotRun {
         } else { line = cur; t.next++; }
       } else if (t.phase === 'b') {
         line = t.lines[t.next];
-        if (!line || !/^p1-(2\d|3[0-3])$/.test(line.id)) { t.phase = 'done'; this.quietRooms.delete(room); return; }
+        if (!line || !/^p1-(2\d|3[0-3])$/.test(line.id)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
         t.next++;
       } else return;
     }
@@ -509,7 +515,7 @@ export class BotRun {
       line = e.lines[e.next];
       // «Попробуй сам/сама»: as the partner is
       while (line?.id.endsWith('f')) line = e.lines[++e.next];
-      if (!line || !/^p2-([012]\d|3[0-6])f?$/.test(line.id)) { this.quietRooms.delete(room); return; }
+      if (!line || !/^p2-([012]\d|3[0-6])f?$/.test(line.id)) return; // the dialogue is over: they stay quiet
       e.next++;
       if (line.id === 'p2-25' && this.female(this.names.get(room)?.[1] ?? '')) line = e.lines.find(l => l.id === 'p2-25f') ?? line;
     }
@@ -520,6 +526,10 @@ export class BotRun {
     const draws = EXPLAIN_DRAW[said.id.replace(/f$/, '')];
     if (draws && !e.drawn.has(said.id)) {
       e.drawn.add(said.id);
+      if (ERASE_BEFORE.has(said.id.replace(/f$/, ''))) {
+        const author = this.names.get(room)?.[0] || undefined;
+        e.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, author)));
+      }
       const by = said.who === 'T' ? 1 : said.who;
       for (const d of draws) this.after(d.at * ms, () => this.draw(room, d, by));
     }
@@ -553,11 +563,13 @@ export class BotRun {
 
   /** A drawing on the pair's board, in the colour of who draws it */
   private draw(room: string, d: Draw, by: 1 | 2) {
+    const onBoard = this.explains.get(room)?.onBoard;
+    const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard?.push(u); return u; };
     const author = this.names.get(room)?.[by - 1] || undefined;
     const color = COLORS[by - 1];
     const px = ([x, y]: Pt) => ({ x: 116 + 56 * x, y: 568 - 56 * y }); // the figure's cells: A is (0, 0), a cell is 56
     const line = (a: { x: number; y: number }, b: { x: number; y: number }, w = 5) => this.host.write(room, {
-      uid: `bot-${room}-${this.uid++}`, type: 'Line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, left: (a.x + b.x) / 2, top: (a.y + b.y) / 2,
+      uid: uid(), type: 'Line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, left: (a.x + b.x) / 2, top: (a.y + b.y) / 2,
       originX: 'center', originY: 'center', stroke: color, strokeWidth: w, strokeLineCap: 'round',
     }, author);
     if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => line(px(d.path![i]), px(p))));
@@ -569,18 +581,29 @@ export class BotRun {
       const p1 = { x: c.x + ua.x, y: c.y + ua.y }, p2 = { x: c.x + ua.x + ub.x, y: c.y + ua.y + ub.y }, p3 = { x: c.x + ub.x, y: c.y + ub.y };
       line(p1, p2, 3); line(p2, p3, 3);
     }
+    if (d.ticks) {
+      // equal segments: short strokes across the middle, one or two
+      for (const [from, to, n] of d.ticks) {
+        const a = px(from), b = px(to), l = Math.hypot(b.x - a.x, b.y - a.y);
+        const ux = (b.x - a.x) / l, uy = (b.y - a.y) / l, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, h = 11;
+        for (let k = 0; k < n; k++) {
+          const off = (k - (n - 1) / 2) * 9, c = { x: m.x + ux * off, y: m.y + uy * off };
+          line({ x: c.x - uy * h, y: c.y + ux * h }, { x: c.x + uy * h, y: c.y - ux * h }, 3);
+        }
+      }
+    }
     if (d.fill) {
       const pts = d.fill.map(px);
       const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
       this.host.write(room, {
-        uid: `bot-${room}-${this.uid++}`, type: 'Polygon', points: pts, left: (Math.min(...xs) + Math.max(...xs)) / 2, top: (Math.min(...ys) + Math.max(...ys)) / 2,
+        uid: uid(), type: 'Polygon', points: pts, left: (Math.min(...xs) + Math.max(...xs)) / 2, top: (Math.min(...ys) + Math.max(...ys)) / 2,
         originX: 'center', originY: 'center', fill: color + '40', stroke: color, strokeWidth: 3,
       }, author);
     }
     if (d.label) {
       const p = px(d.label.at);
       this.host.write(room, {
-        uid: `bot-${room}-${this.uid++}`, type: 'IText', text: d.label.text, left: p.x, top: p.y,
+        uid: uid(), type: 'IText', text: d.label.text, left: p.x, top: p.y,
         originX: 'center', originY: 'center', fontSize: 30, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
       }, author);
     }
