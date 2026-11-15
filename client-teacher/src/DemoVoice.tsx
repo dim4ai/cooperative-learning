@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // The solo demo's voiced dialogues: the server says when a line begins in a room; the teacher hears it only
 // at that room's board, coming in mid-line as into a real conversation
@@ -34,13 +34,14 @@ export function demoVoiceReset() {
 
 let lastStage: string | null = null;
 
+// One player for the page: the lesson screen is rebuilt now and then (coming into a room openly), the line goes on
+const player: { audio: HTMLAudioElement | null; playing: Clip | null; stopLater?: ReturnType<typeof setTimeout> } = { audio: null, playing: null };
+const stopPlayer = () => { player.audio?.pause(); player.audio = null; player.playing = null; };
+
 export function DemoVoice({ room, stage }: { room: string | null; stage: string }) {
   const [, setTick] = useState(0);
   // a new stage starts its talk from scratch (not a remount: coming into a room openly rebuilds the screen)
   useEffect(() => { if (lastStage !== null && lastStage !== stage) demoVoiceReset(); lastStage = stage; }, [stage]);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const playing = useRef<Clip | null>(null);
-  const stopLater = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     const f = () => setTick(n => n + 1);
@@ -50,23 +51,23 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
 
   const clip = room ? latest.get(room) ?? null : null;
   useEffect(() => {
-    const stop = () => { audio.current?.pause(); audio.current = null; playing.current = null; };
-    clearTimeout(stopLater.current);
-    // no room for a moment: the page reconnects (coming in openly, say) — the line goes on unless they stay away
-    if (!clip) { if (playing.current) stopLater.current = setTimeout(stop, 2500); return; }
-    if (playing.current === clip) return;
+    clearTimeout(player.stopLater);
+    // no room for a moment: the page reconnects — the line goes on unless the teacher stays away
+    if (!clip) { if (player.playing) player.stopLater = setTimeout(stopPlayer, 2500); return; }
+    if (player.playing === clip) return;
     const offset = Date.now() - clip.startedAt;
-    if (offset >= clip.ms - 150) { stop(); return; } // over already: silence till the next line
-    stop();
+    if (offset >= clip.ms - 150) { stopPlayer(); return; } // over already: silence till the next line
+    stopPlayer();
     const a = new Audio(clip.src.startsWith('/') ? import.meta.env.BASE_URL + clip.src.slice(1) : clip.src);
-    audio.current = a;
-    playing.current = clip;
+    player.audio = a;
+    player.playing = clip;
     // coming in mid-line: from where it is now; a line just begun plays from its start (loading takes a moment,
     // and skipping it would swallow the first sounds)
     if (offset > 1000) a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); }, { once: true });
     a.play().catch(() => { /* no sound allowed yet: the next line will try again */ });
   }, [clip]);
 
-  useEffect(() => () => { audio.current?.pause(); }, []);
+  // gone (the screen rebuilt, or the demo over): silence, unless a new player picks the line up at once
+  useEffect(() => () => { clearTimeout(player.stopLater); player.stopLater = setTimeout(stopPlayer, 1500); }, []);
   return null;
 }
