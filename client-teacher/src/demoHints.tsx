@@ -41,6 +41,8 @@ export interface HintsInput {
   newTask: string | null;
   /** the class journal is open */
   journalOpen: boolean;
+  /** the «Завершить урок» dialog is open */
+  endOpen: boolean;
 }
 
 /** Desks with somebody at them, in order */
@@ -95,6 +97,11 @@ const CLASS_SIZE = 8;
 /** Mostly one hint; a few moments need two at once */
 function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | null {
   const { stage, seats, students, waiting, slides } = x;
+
+  // the end: the class can be let go at once, or after a few minutes' talk in their fours
+  if (x.endOpen) return { id: 'end-chat', anchor: '[data-testid="end-chat"]', text:
+    'После урока можно дать ребятам несколько минут поболтать в своих четвёрках: вы выйдете и их не услышите. '
+    + 'В демо они болтать не станут — урок просто закончится. Выберите любой вариант.' };
 
   if (stage === 'waiting') {
     const seated = seats.filter(s => s.occupant);

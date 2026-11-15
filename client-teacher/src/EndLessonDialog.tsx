@@ -47,7 +47,7 @@ export function EndLessonDialog({ noChat = false, onEnd, onCancel }: {
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={withChat} disabled={!valid} style={{ ...btn, flex: 1, background: '#27ae60', opacity: valid ? 1 : 0.5 }}>
+          <button data-testid="end-chat" onClick={withChat} disabled={!valid} style={{ ...btn, flex: 1, background: '#27ae60', opacity: valid ? 1 : 0.5 }}>
             Дать поговорить
           </button>
           <input
@@ -62,7 +62,7 @@ export function EndLessonDialog({ noChat = false, onEnd, onCancel }: {
         {!valid && <div style={{ fontSize: 12, color: '#e74c3c' }}>От 1 до {MAX_MINUTES} минут</div>}
         </>}
 
-        <button onClick={() => onEnd(0)} style={{ ...btn, background: '#e74c3c' }}>Завершить для всех сразу</button>
+        <button data-testid="end-now" onClick={() => onEnd(0)} style={{ ...btn, background: '#e74c3c' }}>Завершить для всех сразу</button>
         <button onClick={onCancel} style={{ ...btn, background: 'transparent', color: '#666', border: '1px solid #ccc' }}>Отмена</button>
       </div>
     </div>

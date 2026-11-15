@@ -975,7 +975,7 @@ export default function App() {
           onStart={() => { setStartWarning(false); startLesson(); }}
           onCancel={() => setStartWarning(false)}
         />}
-        {endDialog && <EndLessonDialog noChat={!!demo} onEnd={endLesson} onCancel={() => setEndDialog(false)} />}
+        {endDialog && <EndLessonDialog noChat={!!demo && !demo.solo} onEnd={m => endLesson(demo?.solo ? 0 : m)} onCancel={() => setEndDialog(false)} />}
       </div>
 
       {/* Main area */}
@@ -1058,7 +1058,7 @@ export default function App() {
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : null} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{
