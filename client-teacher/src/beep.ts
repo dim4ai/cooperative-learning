@@ -38,3 +38,12 @@ export function playStageBeep(kind: 'soon' | 'end') {
   if (kind === 'soon') tone(ac, 880, t, 0.5, 0.25);
   else [660, 830, 990].forEach((f, i) => tone(ac, f, t + i * 0.22, 0.9, 0.3));
 }
+
+/** Someone calls the teacher: two soft high notes, like a small bell */
+export function playCallBell() {
+  const ac = audio();
+  if (!ac) return;
+  const t = ac.currentTime + 0.05;
+  tone(ac, 1320, t, 0.6, 0.18);
+  tone(ac, 1760, t + 0.15, 0.8, 0.14);
+}

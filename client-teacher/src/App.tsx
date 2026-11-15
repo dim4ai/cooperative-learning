@@ -31,7 +31,7 @@ import { setRecordingNames, stopRecording } from './recording';
 import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
-import { playStageBeep } from './beep';
+import { playCallBell, playStageBeep } from './beep';
 import { DemoVoice, demoVoiceHeard } from './DemoVoice';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
@@ -175,11 +175,13 @@ function SpeechBubble({ text }: { text: string }) {
 
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
-function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply }: {
+function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo }: {
   onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
   quiet?: boolean; onReveal?: () => void;
   /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
   reply?: { text: string; onAnswer: (ready: boolean) => void } | null;
+  /** other groups calling the teacher meanwhile: who, and how to get there */
+  elsewhere?: { room: string; names: string[] }[]; onGo?: (room: string) => void;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -206,6 +208,17 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             fontSize: 15, lineHeight: 1.4, color: '#222', background: '#f1f5fb', borderRadius: 6, textAlign: 'left',
           }}>{task}</div>
         )}
+        {elsewhere?.map(c => (
+          <div key={c.room} data-testid="call-elsewhere" style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, margin: '6px 6px 0', padding: '6px 12px',
+            background: '#fdecea', border: '1px solid #f3b3ab', borderRadius: 6, fontSize: 14, color: '#7a2318',
+          }}>
+            <span>🔔 Вас зовут: {c.names.join(' и ') || 'другая группа'}</span>
+            <button data-testid="call-elsewhere-go" onClick={() => onGo?.(c.room)} style={{
+              marginLeft: 'auto', padding: '4px 12px', borderRadius: 5, border: 'none', background: '#e74c3c', color: '#fff', cursor: 'pointer', fontSize: 13,
+            }}>Перейти</button>
+          </div>
+        ))}
         {reply && (
           <div data-testid="demo-reply" style={{
             flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '6px 6px 0', padding: '8px 12px',
@@ -556,6 +569,9 @@ export default function App() {
   const classCams = useClassCamsRoom(camsInfo);
   const [groupMode, setGroupMode] = useState<GroupMode>('board');
   const [callingRooms, setCallingRooms] = useState<Set<string>>(new Set());
+  const callingNow = useRef(callingRooms); // for the bell: rings only for a new call
+  callingNow.current = callingRooms;
+  const roomNow = useRef<string | null>(null); // where the teacher is: asked in person there, no bell
   // the solo demo's calls of this stage, kept after the teacher answers: the hints show what to do in the room
   const [calls, setCalls] = useState<Record<string, { note: string; who?: string }>>({});
   const [activity, setActivity] = useState<ClassActivity | null>(null); // who talks and writes at work, by student
@@ -734,6 +750,7 @@ export default function App() {
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
     socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
     socket.on('callTeacher', ({ room, calling, note, who }: { room: string; calling: boolean; note?: string; who?: string }) => {
+      if (calling && !callingNow.current.has(room) && room !== roomNow.current) playCallBell();
       if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));
       setCallingRooms(prev => {
         const next = new Set(prev);
@@ -814,6 +831,7 @@ export default function App() {
   const currentLabel = LESSON_STAGES.find(s => s.value === state.stage)?.label ?? 'Рассадка';
   // room names are "<lessonCode>:<base>" — check the base, not the full string
   const roomBase = livekit?.room.split(':')[1] ?? '';
+  roomNow.current = livekit?.room ?? null;
   const inSmallRoom = roomBase.startsWith('pair-') || roomBase.startsWith('fours-') || roomBase.startsWith('individual-');
   const workStage = state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours';
   // the solo demo: who called this room and what about — said by their tile at the board
@@ -1064,6 +1082,8 @@ export default function App() {
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
               ask={roomAsk}
+              elsewhere={[...callingRooms].filter(r => r !== livekit?.room).map(r => ({ room: r, names: students.filter(p => p.livekitRoom === r).map(p => p.name) }))}
+              onGo={room => socket.emit('joinPair', { room })}
               reply={demoReply && demoReply.room === livekit?.room ? { text: demoReply.text, onAnswer: ready => { socket.emit('demoReply', { room: demoReply.room, ready }); setDemoReply(null); } } : null} />
             : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
                 room,

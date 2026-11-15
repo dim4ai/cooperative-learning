@@ -48,6 +48,7 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
 const LINE_GAP_MS = 600;
+const EARLY_CALL_MS = 10_000; // the individual stage: the second call comes 10 s into the teacher's visit to the first
 const TALK_START_MS = 10_000; // the first seconds of a stage are quiet: the teacher looks round first
 const RECALL_MS = 15_000; // the teacher left without answering: they call again
 
@@ -207,6 +208,8 @@ export class BotRun {
   private uid = 0;
   private talks = new Map<string, Talk>();
   private callPending = false; // the next call is timed already
+  private stage = '';
+  private earlyCalled = false;
 
   constructor(private host: BotHost) {}
 
@@ -262,6 +265,8 @@ export class BotRun {
     this.stand.clear();
     this.talks.clear();
     this.callPending = false;
+    this.stage = stage;
+    this.earlyCalled = false;
     this.stageStart = Date.now();
     this.raiseHands(stage, blockId);
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
@@ -391,7 +396,14 @@ export class BotRun {
 
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
-    if (this.calling?.room === room) this.calling.visited = true;
+    if (this.calling?.room === room && !this.calling.visited) {
+      this.calling.visited = true;
+      // on the individual stage the next one calls while the teacher is still busy here, once: someone else needs help too
+      if (this.stage === 'individual' && !this.earlyCalled) {
+        this.earlyCalled = true;
+        this.after(EARLY_CALL_MS, () => { if (this.calling?.room === room && this.callQueue.length) this.nextCall(0); });
+      }
+    }
     this.talkVisited(room);
     const rest = this.afterAnswer.get(room);
     if (rest) {
