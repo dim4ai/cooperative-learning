@@ -222,6 +222,11 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         'Вас зовут ещё в одну группу — кому-то нужна помощь. Договорите здесь и переходите: «Перейти».' };
       if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
         'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
+      if (call && /а-бэ/.test(call.note)) return [
+        { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', text:
+          'Пока звучит ответ, можно подрисовать катеты к отрезкам AB и AO прямо на их доске — так нагляднее. Это не обязательно.' },
+        { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
+      ];
       if (call) {
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it

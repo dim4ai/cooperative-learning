@@ -32,7 +32,7 @@ import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 import { playCallBell, playStageBeep } from './beep';
-import { DemoVoice, demoVoiceHeard } from './DemoVoice';
+import { DemoVoice, demoVoiceHeard, useDemoSpeaker } from './DemoVoice';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
 
@@ -175,16 +175,20 @@ function SpeechBubble({ text }: { text: string }) {
 
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
-function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo }: {
+function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo, roomKey }: {
   onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
   quiet?: boolean; onReveal?: () => void;
   /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
   reply?: { text: string; onAnswer: (ready: boolean) => void } | null;
   /** other groups calling the teacher meanwhile: who, and how to get there */
   elsewhere?: { room: string; names: string[] }[]; onGo?: (room: string) => void;
+  /** this room, as the server names it */
+  roomKey?: string;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
+  const speaker = useDemoSpeaker(roomKey ?? null); // the solo demo: whose voiced line is on
+  const lit = (on: boolean): CSSProperties => (on ? { boxShadow: '0 0 0 3px #2ecc71, 0 0 14px rgba(46,204,113,0.8)' } : {});
 
   return (
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden', position: 'relative' }}>
@@ -215,7 +219,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
           }}>
             <span>🔔 Вас зовут: {c.names.join(' и ') || 'другая группа'}</span>
             <button data-testid="call-elsewhere-go" onClick={() => onGo?.(c.room)} style={{
-              marginLeft: 'auto', padding: '4px 12px', borderRadius: 5, border: 'none', background: '#e74c3c', color: '#fff', cursor: 'pointer', fontSize: 13,
+              padding: '4px 12px', borderRadius: 5, border: 'none', background: '#e74c3c', color: '#fff', cursor: 'pointer', fontSize: 13,
             }}>Перейти</button>
           </div>
         ))}
@@ -239,7 +243,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
       {/* Right column: cameras + back button */}
       <div style={{ width: 180, display: 'flex', flexDirection: 'column', gap: 8, padding: 8, background: '#1a1a1a', justifyContent: 'center' }}>
         {cameraTracks.map(t => (
-          <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
+          <div key={t.participant.identity} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3', ...lit(t.participant.isLocal && speaker === 'Teacher') }}>
             {quiet && t.participant.isLocal
               ? <DetectiveCard />
               : isTrackReference(t) && !t.publication.isMuted
@@ -251,7 +255,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
         ))}
         {others.map(name => (
           <div key={name} style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3' }}>
+            <div style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3', transition: 'box-shadow 0.2s', ...lit(speaker === name) }}>
               <NameCard name={name} identity={name} />
             </div>
             {ask?.who === name && <SpeechBubble text={ask.text} />}
@@ -401,6 +405,8 @@ function loadSavedToken(): string | null {
 }
 
 function loadSavedDemo(): DemoStart | null {
+  // the standalone demo's lesson server lives in the page: after a reload it's a new one, the old lesson is gone
+  if (STANDALONE) return null;
   try {
     const raw = localStorage.getItem(DEMO_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -1081,7 +1087,7 @@ export default function App() {
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
-              ask={roomAsk}
+              ask={roomAsk} roomKey={livekit?.room}
               elsewhere={[...callingRooms].filter(r => r !== livekit?.room).map(r => ({ room: r, names: students.filter(p => p.livekitRoom === r).map(p => p.name) }))}
               onGo={room => socket.emit('joinPair', { room })}
               reply={demoReply && demoReply.room === livekit?.room ? { text: demoReply.text, onAnswer: ready => { socket.emit('demoReply', { room: demoReply.room, ready }); setDemoReply(null); } } : null} />

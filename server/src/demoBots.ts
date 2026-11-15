@@ -47,7 +47,7 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
-const LINE_GAP_MS = 600;
+const LINE_GAP_MS = 1100;
 const EARLY_CALL_MS = 10_000; // the individual stage: the second call comes 10 s into the teacher's visit to the first
 const TALK_START_MS = 10_000; // the first seconds of a stage are quiet: the teacher looks round first
 const RECALL_MS = 15_000; // the teacher left without answering: they call again
@@ -157,7 +157,7 @@ export interface BotHost {
   members(room: string): string[];
   call(room: string, note: string, who?: string): void;
   /** A voiced line begins in a room: the teacher there hears it */
-  say(room: string, clip: { src: string; ms: number }): void;
+  say(room: string, clip: { src: string; ms: number; who?: string }): void;
   /** A bot raises a hand in the explanation */
   raise(name: string): void;
   /** Given the word, a bot says its line to the class */
@@ -349,7 +349,7 @@ export class BotRun {
   private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
     const v = voiceFor(who, lengths, this.stand);
     const ms = lengths[v];
-    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms });
+    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who });
     for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
     return ms;
   }
@@ -465,7 +465,7 @@ export class BotRun {
       t.busy = false;
       if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
       // asked: the teacher may answer once the question is out
-      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) this.host.offerReply(room, this.id1(t, 'p1-ta').text);
+      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
       this.after(LINE_GAP_MS, () => this.step(room));
     });
   }
@@ -474,7 +474,7 @@ export class BotRun {
   private sayLine(room: string, line: DialogueLine): number {
     if (line.who === 'T') {
       const v = line.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(line.ms)[0];
-      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v] });
+      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher' });
       return line.ms[v];
     }
     const who = this.names.get(room)?.[line.who - 1] ?? '';

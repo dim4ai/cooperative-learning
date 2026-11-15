@@ -3,15 +3,28 @@ import { useEffect, useRef, useState } from 'react';
 // The solo demo's voiced dialogues: the server says when a line begins in a room; the teacher hears it only
 // at that room's board, coming in mid-line as into a real conversation
 
-interface Clip { room: string; src: string; ms: number; startedAt: number } // startedAt: on this computer's clock
+interface Clip { room: string; src: string; ms: number; startedAt: number; who?: string } // startedAt: on this computer's clock
 
 const latest = new Map<string, Clip>();
 const listeners = new Set<() => void>();
 
 /** From the socket: { room, src, ms, now } with now on the server's clock */
-export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number }) {
-  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now() });
+export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string }) {
+  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who });
   listeners.forEach(f => f());
+}
+
+/** Who is saying a line in this room right now (a bot's name, or 'Teacher'): their tile lights up */
+export function useDemoSpeaker(room: string | null): string | null {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const f = () => setTick(n => n + 1);
+    listeners.add(f);
+    const t = setInterval(f, 300);
+    return () => { listeners.delete(f); clearInterval(t); };
+  }, []);
+  const c = room ? latest.get(room) : undefined;
+  return c?.who && Date.now() - c.startedAt < c.ms ? c.who : null;
 }
 
 export function demoVoiceReset() {
