@@ -456,6 +456,8 @@ interface LessonRuntime {
   block: string | null;            // the lesson block running now (null: no lesson file, or not started)
   marks: Map<string, UnderstoodMark>; // the last "всем понятно?": student name → their answer
   vote: NodeJS.Timeout | null;     // while the question is on the students' screens
+  hands: string[];                 // raised hands in the explanation, in the order raised
+  floor: { name: string; text?: string; until: number } | null; // whom the teacher gave the word last (a bot's line comes with its text)
   relay: MediaRelay;
   emptySince: number | null;
   visited: boolean; // someone has been in: from then on it holds its place until it's over
@@ -655,6 +657,12 @@ function startBots(code: string, lesson: LessonRuntime) {
       // to the teacher wherever they are: on coming into the room mid-line they hear the rest of it
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoVoice', { room, ...clip, now: Date.now() });
     },
+    raise: name => { if (lesson.stage === 'group') setHand(lesson, name, true); },
+    speak(name, text, clip) {
+      lesson.floor = { name, text, until: Date.now() + clip.ms };
+      sendHands(lesson);
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoVoice', { room: 'class', ...clip, now: Date.now() });
+    },
     vote(name, choice) {
       const cur = currentPoll(lesson);
       if (!cur || !answersOpen(cur.run) || cur.run.answers.has(name)) return;
@@ -759,6 +767,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     block: null,
     marks: new Map(),
     vote: null,
+    hands: [],
+    floor: null,
     relay: new MediaRelay(io, code),
     emptySince: Date.now(),
     visited: false,
@@ -1371,6 +1381,7 @@ async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   if (stage !== lesson.stage) resetActivity(lesson); // who talked and wrote is counted for each stage anew
   lesson.stage = stage;
   lesson.atDesks = false;
+  clearHands(lesson); // hands are for the explanation going on
   if (stage === 'waiting') setStageTimer(lesson, null); // back to the seating: no block runs
   console.log(`[${code}] stage -> ${stage}`);
   if (stage !== 'waiting' && lesson.startedAt === null) { lesson.startedAt = Date.now(); updateRecording(code, lesson); }
@@ -1593,6 +1604,30 @@ function finishVote(lesson: LessonRuntime) {
   if (lesson.bots) botAnswers(lesson);
   for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('understood:closed');
   sendMarks(lesson);
+}
+
+// ---------- raised hands in the explanation ----------
+// A student raises a hand; the teacher sees who, in the order raised, and gives one the word: that hand goes down
+// and the student is told to speak (their microphone in the class is theirs to switch on, as always).
+
+function sendHands(lesson: LessonRuntime, to?: Socket) {
+  const payload = { up: lesson.hands, floor: lesson.floor };
+  if (to) { to.emit('hands', payload); return; }
+  for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('hands', payload);
+}
+
+function setHand(lesson: LessonRuntime, name: string, up: boolean) {
+  if (up === lesson.hands.includes(name)) return;
+  lesson.hands = up ? [...lesson.hands, name] : lesson.hands.filter(n => n !== name);
+  sendHands(lesson);
+}
+
+function clearHands(lesson: LessonRuntime) {
+  if (!lesson.hands.length && !lesson.floor) return;
+  lesson.hands = [];
+  lesson.floor = null;
+  for (const id of socketsOf(lesson, 'student')) io.sockets.sockets.get(id)?.emit('hand:down');
+  sendHands(lesson);
 }
 
 // ---------- shared board ----------
@@ -2114,6 +2149,7 @@ io.on('connection', async (socket) => {
       socket.emit('slides:material', teacherMaterial(lesson));
       socket.emit('slides:state', teacherSlidesState(lesson));
       sendMarks(lesson, socket);
+      sendHands(lesson, socket);
       sendEntry(code, lesson, socket);
       sendActivity(lesson, socket);
     } else {
@@ -2300,6 +2336,21 @@ io.on('connection', async (socket) => {
       const name = lesson.participants.get(socket.id)?.name;
       if (role !== 'student' || !lesson.vote || !name || lesson.marks.has(name)) return;
       if (answer === 'yes' || answer === 'no') lesson.marks.set(name, answer);
+    });
+
+    socket.on('hand', (up: unknown) => {
+      const name = lesson.participants.get(socket.id)?.name;
+      if (role !== 'student' || !name || typeof up !== 'boolean' || (up && lesson.stage !== 'group')) return;
+      setHand(lesson, name, up);
+    });
+
+    socket.on('hand:give', (name: unknown) => {
+      if (role !== 'teacher' || typeof name !== 'string' || !lesson.hands.includes(name)) return;
+      lesson.floor = { name, until: Date.now() + 30_000 };
+      for (const [id, p] of lesson.participants) if (p.name === name && p.role === 'student') io.sockets.sockets.get(id)?.emit('hand:given');
+      setHand(lesson, name, false);
+      lesson.bots?.onFloor(name);
+      sendHands(lesson);
     });
 
     socket.on('understood:clear', () => {

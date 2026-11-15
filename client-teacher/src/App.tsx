@@ -34,6 +34,7 @@ import type { MediaPrefs } from './mediaCheck';
 import { playStageBeep } from './beep';
 import { DemoVoice, demoVoiceHeard } from './DemoVoice';
 import { DemoOff } from './DemoOff';
+import { HandsPanel, useHands } from './HandsPanel';
 
 interface LivekitInfo {
   url: string;
@@ -613,6 +614,7 @@ export default function App() {
   useEffect(() => { if (!Object.keys(slides.understood.marks).length && !slides.understood.asking) setMapOpen(false); }, [slides.understood]);
 
   const [endDialog, setEndDialog] = useState(false);
+  const hands = useHands();
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
   const poll = usePoll();
   const [recordAsk, setRecordAsk] = useState(0);
@@ -1055,10 +1057,10 @@ export default function App() {
         </div>
       </div>
 
-      {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : null} />}
+      {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : 'class'} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{
@@ -1069,6 +1071,7 @@ export default function App() {
             {demo?.solo && <SoloGuide stage={state.stage} />}
             {state.stage !== 'waiting' && <BlockNotes slides={slides} />}
           </div>
+          {state.stage === 'group' && <HandsPanel hands={hands} />}
           {state.stage !== 'waiting' && !poll && (
             <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} askReady={!demo?.solo || onLastSlide(slides)} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
           )}

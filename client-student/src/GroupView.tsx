@@ -51,6 +51,45 @@ function UnderstoodAsk() {
   );
 }
 
+/** ✋ in the explanation: the teacher sees who and in what order, and gives one the word */
+function RaiseHand() {
+  const [up, setUp] = useState(false);
+  const [given, setGiven] = useState(false);
+
+  useEffect(() => {
+    const down = () => setUp(false);
+    const word = () => { setUp(false); setGiven(true); };
+    socket.on('hand:down', down);
+    socket.on('hand:given', word);
+    return () => { socket.off('hand:down', down); socket.off('hand:given', word); socket.emit('hand', false); };
+  }, []);
+
+  useEffect(() => {
+    if (!given) return;
+    const t = setTimeout(() => setGiven(false), 8000);
+    return () => clearTimeout(t);
+  }, [given]);
+
+  function toggle() {
+    socket.emit('hand', !up);
+    setUp(!up);
+    setGiven(false);
+  }
+
+  return (
+    <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button data-testid="raise-hand" onClick={toggle} title={up ? 'Опустить руку' : 'Поднять руку'} style={{
+        width: 56, height: 56, borderRadius: '50%', fontSize: 28, cursor: 'pointer',
+        border: up ? '3px solid #f5a623' : '1px solid #ccc', background: up ? '#fff6dd' : '#fff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+      }}>✋</button>
+      {given && <div data-testid="hand-given" style={{ padding: '8px 12px', borderRadius: 8, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', fontSize: 15 }}>
+        Учитель даёт вам слово — включите микрофон 🎤
+      </div>}
+    </div>
+  );
+}
+
 const askBox: React.CSSProperties = {
   position: 'absolute', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 20,
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '14px 20px',
@@ -84,6 +123,7 @@ export function GroupView({ slides }: { slides: StudentSlides }) {
       </div>
 
       <UnderstoodAsk />
+      <RaiseHand />
 
       {/* Teacher camera — top right */}
       {teacherCamera && (

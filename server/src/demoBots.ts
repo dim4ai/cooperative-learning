@@ -140,6 +140,10 @@ export interface BotHost {
   call(room: string, note: string, who?: string): void;
   /** A voiced line begins in a room: the teacher there hears it */
   say(room: string, clip: { src: string; ms: number }): void;
+  /** A bot raises a hand in the explanation */
+  raise(name: string): void;
+  /** Given the word, a bot says its line to the class */
+  speak(name: string, text: string, clip: { src: string; ms: number }): void;
   /** A bot answers the running poll */
   vote(name: string, choice: number): void;
 }
@@ -152,7 +156,19 @@ function voiceFor(who: string, lengths: Record<string, number>, stand?: Map<stri
   return voices.find(v => FEMALE_VOICES.has(v) === FEMALE_VOICES.has(own)) ?? voices[0];
 }
 
+/** Hands raised in an explanation and what each says when given the word.
+ *  The lines are stand-ins: the dialogues come from the lessons session; no voice yet (the clip is silent) */
+const HANDS: Record<string, { who: string; id: string; text: string; ms: number }[]> = {
+  b9: [
+    { who: 'Тимур', id: 'hand-b9-1', ms: 6000, text: 'А разве свойство и признак — не одно и то же? Диагонали делятся пополам — вот и признак.' },
+    { who: 'Соня', id: 'hand-b9-2', ms: 6000, text: 'По-моему, разное: свойство — когда уже знаем, что это параллелограмм, а признак — чтобы это доказать.' },
+  ],
+};
+const HAND_FIRST_MS = 5000;
+const HAND_GAP_MS = 2500;
+
 export class BotRun {
+  private handsRaised = new Set<string>();
   private timers = new Set<NodeJS.Timeout>();
   private stageTimers = new Set<NodeJS.Timeout>();
   private written = new Map<string, { n: number; top: number }>();
@@ -222,6 +238,7 @@ export class BotRun {
     this.afterAnswer.clear();
     this.stand.clear();
     this.stageStart = Date.now();
+    this.raiseHands(stage, blockId);
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
     const script = (blockId && BLOCK_SCRIPT[blockId]) || SCRIPT[stage];
     const rooms = this.host.rooms();
@@ -359,6 +376,24 @@ export class BotRun {
 
   private polls = 0;
   /** A poll began: each bot answers in its own time, a few quick, a few slow */
+  /** The explanation of b9: two raise hands, a moment after it starts (raised once: not again on coming back) */
+  private raiseHands(stage: string, blockId?: string | null) {
+    if (stage !== 'group' || this.handsRaised.has(blockId ?? '')) return;
+    const lines = HANDS[blockId ?? ''];
+    if (!lines) return;
+    this.handsRaised.add(blockId!);
+    lines.forEach((l, i) => this.after(HAND_FIRST_MS + i * HAND_GAP_MS, () => this.host.raise(l.who), this.stageTimers));
+  }
+
+  /** The teacher gave the word: a bot with a line says it */
+  onFloor(name: string) {
+    const line = Object.values(HANDS).flat().find(l => l.who === name);
+    if (!line) return;
+    const v = voiceFor(name, { [VOICE_OF[name] ?? 'kirill']: line.ms });
+    this.host.speak(name, line.text, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms });
+    for (let d = 0; d < line.ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(name, Math.min(TALK_TICK_MS, line.ms - d)));
+  }
+
   onPoll(options: number) {
     const answers = POLL_ANSWERS[Math.min(this.polls++, POLL_ANSWERS.length - 1)];
     const order = [...BOTS].sort(() => Math.random() - 0.5);

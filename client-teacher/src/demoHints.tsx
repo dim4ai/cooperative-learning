@@ -7,6 +7,7 @@ import type { ClassActivity, Seat } from './SeatingMap';
 import type { TeacherSlides } from './LessonSlides';
 import type { TeacherPollView } from './pollState';
 import { SOLO_LIVE_BLOCKS } from './demo';
+import type { Hands } from './HandsPanel';
 
 // ---------- which hint, when ----------
 
@@ -43,6 +44,8 @@ export interface HintsInput {
   journalOpen: boolean;
   /** the «Завершить урок» dialog is open */
   endOpen: boolean;
+  /** raised hands, and who has the word */
+  hands: Hands;
 }
 
 /** Desks with somebody at them, in order */
@@ -159,9 +162,14 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         'Мнения разделились — значит, есть что разобрать. Вернитесь к объяснению признаков. А в конце урока спросим ещё раз.' };
       return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Мнения сдвинулись: урок сработал. Завершите урок и расскажите, что думаете' };
     }
-    // b9: before the explanation, a question from the class — what does everyone think?
+    // b9: hands go up — the teacher hears both, then asks the class what it thinks
+    if (block === 'b9' && polls === 0 && x.hands.up.length) return { id: 'hand', anchor: '[data-testid="hand-give"]', text: done.has('hand')
+      ? 'Ещё одна рука — дайте слово.'
+      : 'Ученики подняли руки — у них вопрос. Дайте слово: нажмите на имя.' };
+    if (block === 'b9' && polls === 0 && x.hands.floor) return null; // listening
+    if (block === 'b9' && polls === 0 && !done.has('hand')) return null; // the hands are about to go up
     if (block === 'b9' && polls === 0) return { id: 'poll-new', anchor: '[data-testid="menu-task"]', text:
-      'Ученики путают свойство и признак: одни говорят, что это одно и то же, другие — что разное. '
+      'Ученики путают свойство и признак: один считает, что это одно и то же, другая — что разное. '
       + 'Узнайте прямо сейчас, что думает весь класс: «Новое задание» → «Голосование».' };
     // the summing up: the same question again
     if (block === 'b12') return polls < 2
@@ -294,6 +302,7 @@ export function DemoHints(props: HintsInput) {
   const now = new Set<string>();
   if (previewOpen) now.add('preview');
   if (slides.state.revealed.length) now.add('reveal');
+  if (props.hands.floor) now.add('hand'); // gave someone the word
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
   // incognito doesn't answer a call: only an open visit does
   if (props.room && props.quiet) { if (props.stage === 'pairs') now.add('spy'); } // the detective's scene is the pairs'
