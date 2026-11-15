@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHATTER, CHOCOLATE, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type SpokenLine } from './demoDialogue';
+import { CHATTER, CHOCOLATE, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -42,8 +42,8 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
  *  on (seconds) the room keeps silent — the teacher's map shows it */
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
-/** dialogue: a voiced one that goes by what the teacher does (see Talk below) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[] }
+/** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[] }
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
@@ -67,6 +67,17 @@ interface Talk {
   gen: number;                  // bumped when a line is broken off: its end is not waited for
   insert: DialogueLine[];       // said before the course goes on
 }
+
+/** A dialogue that goes on its own: a teacher coming in openly is greeted, asks how it goes and leaves them to it,
+ *  then they pick up where they were, the strong one saying their last line again */
+interface Explain {
+  lines: DialogueLine[]; next: number;
+  greeted: boolean; busy: boolean; gen: number;
+  insert: DialogueLine[];
+  lastStrong: DialogueLine | null; // the strong one's last line: said again after the teacher's visit
+  drawn: Set<string>;              // lines whose drawing is on the board already: not drawn again on repeating
+}
+const SEGMENT_MS = 300; // a drawn line goes on the board one segment after another
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -92,10 +103,10 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
     { lines: lines(OBSERVATIONS.slice(1, 4), 5, 9) },
   ],
   pairs: [
-    { lines: lines(OBSERVATIONS, 4, 6), talk: [0.55, 0.5] },
-    // what the pair said before calling, written down at once: only so the teacher feels how it comes to a call
     // П1 «Спорим на шоколадку?»: they check their lists, argue about AB = AO and call
     { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, talk: [0.55, 0.5] },
+    // П2 «Давай я быстро объясню»: Лена explains with triangles drawn on the cells, the other one gets it
+    { lead: 'Лена', lines: [], explain: EXPLAIN, talk: [0.6, 0.45] },
     // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
     { lines: [], spoken: LOPSIDED_PAIR, later: true },
     { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
@@ -213,6 +224,7 @@ export class BotRun {
   private stand = new Map<string, string>(); // what a room that called says once answered
   private uid = 0;
   private talks = new Map<string, Talk>();
+  private explains = new Map<string, Explain>();
   private callPending = false; // the next call is timed already
   private stage = '';
   private earlyCalled = false;
@@ -270,6 +282,7 @@ export class BotRun {
     this.afterAnswer.clear();
     this.stand.clear();
     this.talks.clear();
+    this.explains.clear();
     this.callPending = false;
     this.stage = stage;
     this.earlyCalled = false;
@@ -300,6 +313,11 @@ export class BotRun {
         this.chatter(room, part, [lead, partner]);
         this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, saying: null, gen: 0, insert: [] });
         this.after(TALK_START_MS, () => this.step(room));
+      } else if (part.explain) {
+        this.quietRooms.add(room);
+        this.chatter(room, part, [lead, partner]);
+        this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set() });
+        this.after(TALK_START_MS, () => this.explainStep(room));
       } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
         this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
@@ -395,6 +413,7 @@ export class BotRun {
   /** The teacher left a room: if it was the one that called, the next one may call after a breath */
   onLeave(room: string) {
     this.talkLeft(room);
+    this.explainLeft(room);
     if (!this.calling || this.calling.room !== room || !this.calling.visited) return;
     this.calling = null;
     this.nextCall(NEXT_CALL_GAP_MS);
@@ -411,6 +430,7 @@ export class BotRun {
       }
     }
     this.talkVisited(room);
+    this.explainVisited(room);
     const rest = this.afterAnswer.get(room);
     if (rest) {
       this.afterAnswer.delete(room);
@@ -478,6 +498,92 @@ export class BotRun {
       const next = t.insert[0]?.id;
       this.after(next === 'p1-34' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
     });
+  }
+
+  // ---------- a dialogue that goes on its own (Explain) ----------
+  private explainStep(room: string) {
+    const e = this.explains.get(room);
+    if (!e || e.busy) return;
+    let line = e.insert.shift();
+    if (!line) {
+      line = e.lines[e.next];
+      // «Попробуй сам/сама»: as the partner is
+      while (line?.id.endsWith('f')) line = e.lines[++e.next];
+      if (!line || !/^p2-([012]\d|3[0-6])f?$/.test(line.id)) { this.quietRooms.delete(room); return; }
+      e.next++;
+      if (line.id === 'p2-25' && this.female(this.names.get(room)?.[1] ?? '')) line = e.lines.find(l => l.id === 'p2-25f') ?? line;
+    }
+    const said = line;
+    if (said.who === 1 && /^p2-([012]\d|3[0-6])f?$/.test(said.id)) e.lastStrong = said;
+    e.busy = true;
+    const ms = this.sayLine(room, said);
+    const draws = EXPLAIN_DRAW[said.id.replace(/f$/, '')];
+    if (draws && !e.drawn.has(said.id)) {
+      e.drawn.add(said.id);
+      const by = said.who === 'T' ? 1 : said.who;
+      for (const d of draws) this.after(d.at * ms, () => this.draw(room, d, by));
+    }
+    const gen = e.gen;
+    this.after(ms, () => {
+      if (e.gen !== gen) return;
+      e.busy = false;
+      this.after(LINE_GAP_MS, () => this.explainStep(room));
+    });
+  }
+
+  private female(who: string) { return FEMALE_VOICES.has(this.stand.get(who) ?? VOICE_OF[who] ?? ''); }
+
+  private explainVisited(room: string) {
+    const e = this.explains.get(room);
+    if (!e || e.greeted || e.next >= e.lines.length) return;
+    e.greeted = true;
+    // the line going on is finished, then: «Как вы тут?» — they tell, the teacher leaves them to it, and on they go
+    const ids = ['p2-tq', 'p2-37', 'p2-38', 'p2-tb', 'p2-39'];
+    e.insert.push(...ids.map(id => e.lines.find(l => l.id === id)!));
+    if (e.lastStrong) e.insert.push(e.lastStrong); // (none yet: nothing to repeat)
+    this.after(ARRIVE_MS, () => this.explainStep(room));
+  }
+
+  private explainLeft(room: string) {
+    const e = this.explains.get(room);
+    if (!e) return;
+    // gone before the talk with the teacher was over: what's left of it is not for the empty room
+    if (e.insert.some(l => l.who === 'T')) e.insert = e.insert.filter(l => !['p2-tq', 'p2-37', 'p2-38', 'p2-tb'].includes(l.id));
+  }
+
+  /** A drawing on the pair's board, in the colour of who draws it */
+  private draw(room: string, d: Draw, by: 1 | 2) {
+    const author = this.names.get(room)?.[by - 1] || undefined;
+    const color = COLORS[by - 1];
+    const px = ([x, y]: Pt) => ({ x: 116 + 56 * x, y: 568 - 56 * y }); // the figure's cells: A is (0, 0), a cell is 56
+    const line = (a: { x: number; y: number }, b: { x: number; y: number }, w = 5) => this.host.write(room, {
+      uid: `bot-${room}-${this.uid++}`, type: 'Line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, left: (a.x + b.x) / 2, top: (a.y + b.y) / 2,
+      originX: 'center', originY: 'center', stroke: color, strokeWidth: w, strokeLineCap: 'round',
+    }, author);
+    if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => line(px(d.path![i]), px(p))));
+    if (d.angle) {
+      // a right-angle mark: a small square in the corner
+      const [c, a, b] = d.angle.map(px), s = 16;
+      const u = (p: { x: number; y: number }) => { const l = Math.hypot(p.x - c.x, p.y - c.y); return { x: (p.x - c.x) / l * s, y: (p.y - c.y) / l * s }; };
+      const ua = u(a), ub = u(b);
+      const p1 = { x: c.x + ua.x, y: c.y + ua.y }, p2 = { x: c.x + ua.x + ub.x, y: c.y + ua.y + ub.y }, p3 = { x: c.x + ub.x, y: c.y + ub.y };
+      line(p1, p2, 3); line(p2, p3, 3);
+    }
+    if (d.fill) {
+      const pts = d.fill.map(px);
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      this.host.write(room, {
+        uid: `bot-${room}-${this.uid++}`, type: 'Polygon', points: pts, left: (Math.min(...xs) + Math.max(...xs)) / 2, top: (Math.min(...ys) + Math.max(...ys)) / 2,
+        originX: 'center', originY: 'center', fill: color + '40', stroke: color, strokeWidth: 3,
+      }, author);
+    }
+    if (d.label) {
+      const p = px(d.label.at);
+      this.host.write(room, {
+        uid: `bot-${room}-${this.uid++}`, type: 'IText', text: d.label.text, left: p.x, top: p.y,
+        originX: 'center', originY: 'center', fontSize: 30, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
+      }, author);
+    }
   }
 
   /** One line out loud: a student's counted as talk; how long it takes */
