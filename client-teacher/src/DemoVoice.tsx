@@ -32,12 +32,15 @@ export function demoVoiceReset() {
   listeners.forEach(f => f());
 }
 
+let lastStage: string | null = null;
+
 export function DemoVoice({ room, stage }: { room: string | null; stage: string }) {
   const [, setTick] = useState(0);
-  // a new stage starts its talk from scratch
-  useEffect(() => demoVoiceReset(), [stage]);
+  // a new stage starts its talk from scratch (not a remount: coming into a room openly rebuilds the screen)
+  useEffect(() => { if (lastStage !== null && lastStage !== stage) demoVoiceReset(); lastStage = stage; }, [stage]);
   const audio = useRef<HTMLAudioElement | null>(null);
   const playing = useRef<Clip | null>(null);
+  const stopLater = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     const f = () => setTick(n => n + 1);
@@ -48,7 +51,9 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
   const clip = room ? latest.get(room) ?? null : null;
   useEffect(() => {
     const stop = () => { audio.current?.pause(); audio.current = null; playing.current = null; };
-    if (!clip) { stop(); return; }
+    clearTimeout(stopLater.current);
+    // no room for a moment: the page reconnects (coming in openly, say) — the line goes on unless they stay away
+    if (!clip) { if (playing.current) stopLater.current = setTimeout(stop, 2500); return; }
     if (playing.current === clip) return;
     const offset = Date.now() - clip.startedAt;
     if (offset >= clip.ms - 150) { stop(); return; } // over already: silence till the next line
