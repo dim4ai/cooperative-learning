@@ -52,8 +52,7 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
   const clip = room ? latest.get(room) ?? null : null;
   useEffect(() => {
     clearTimeout(player.stopLater);
-    // no room for a moment: the page reconnects — the line goes on unless the teacher stays away
-    if (!clip) { if (player.playing) player.stopLater = setTimeout(stopPlayer, 2500); return; }
+    if (!clip) { stopPlayer(); return; } // left the room: its talk is not heard any more
     if (player.playing === clip) return;
     const offset = Date.now() - clip.startedAt;
     if (offset >= clip.ms - 150) { stopPlayer(); return; } // over already: silence till the next line
