@@ -56,7 +56,9 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
     const a = new Audio(clip.src.startsWith('/') ? import.meta.env.BASE_URL + clip.src.slice(1) : clip.src);
     audio.current = a;
     playing.current = clip;
-    a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); }, { once: true });
+    // coming in mid-line: from where it is now; a line just begun plays from its start (loading takes a moment,
+    // and skipping it would swallow the first sounds)
+    if (offset > 1000) a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); }, { once: true });
     a.play().catch(() => { /* no sound allowed yet: the next line will try again */ });
   }, [clip]);
 

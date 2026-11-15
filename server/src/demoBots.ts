@@ -59,6 +59,8 @@ interface Talk {
   next: number;                 // index of the next line of the course
   phase: 'a' | 'calling' | 'asked' | 'b' | 'done';
   present: boolean; greeted: boolean; busy: boolean;
+  saying: DialogueLine | null;  // the line being said now
+  gen: number;                  // bumped when a line is broken off: its end is not waited for
   insert: DialogueLine[];       // said before the course goes on
 }
 
@@ -292,7 +294,7 @@ export class BotRun {
       if (part.dialogue) {
         this.quietRooms.add(room);
         this.chatter(room, part, [lead, partner]);
-        this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, insert: [] });
+        this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, saying: null, gen: 0, insert: [] });
         this.after(TALK_START_MS, () => this.step(room));
       } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
@@ -460,8 +462,11 @@ export class BotRun {
     if (!line) return;
     const said = line;
     t.busy = true;
+    t.saying = said;
     const ms = this.sayLine(room, said);
+    const gen = t.gen;
     this.after(ms, () => {
+      if (t.gen !== gen) return; // broken off
       t.busy = false;
       if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
       // asked: the teacher may answer once the question is out
@@ -490,7 +495,13 @@ export class BotRun {
     const t = this.talks.get(room);
     if (!t) return;
     t.present = true;
-    if (t.phase === 'a' && !t.greeted) { t.greeted = true; t.insert.push(this.id1(t, 'p1-34')); }
+    if (t.phase === 'a' && !t.greeted) {
+      t.greeted = true;
+      // they break off to say hello, then say again what the teacher came in on
+      const cut = t.busy && t.saying && t.saying.who !== 'T' && t.saying.id !== 'p1-34' ? [t.saying] : [];
+      t.insert.push(this.id1(t, 'p1-34'), ...cut);
+      if (cut.length) { t.gen++; t.busy = false; } // the greeting cuts in at once
+    }
     else if (t.phase === 'calling') {
       // came on the call: «Какой у вас вопрос?» — and the partner asks it
       t.phase = 'asked';
