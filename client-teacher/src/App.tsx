@@ -32,7 +32,8 @@ import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 import { playCallBell, playStageBeep } from './beep';
-import { DemoVoice, demoVoiceHeard, useDemoSpeaker } from './DemoVoice';
+import { DemoVoice, demoVoiceHeard, useDemoLegs, useDemoSpeaker } from './DemoVoice';
+import { LegsGhost } from './demoLegs';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
 
@@ -175,7 +176,7 @@ function SpeechBubble({ text }: { text: string }) {
 
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
-function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo, roomKey }: {
+function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo, roomKey, legs }: {
   onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
   quiet?: boolean; onReveal?: () => void;
   /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
@@ -184,6 +185,8 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
   elsewhere?: { room: string; names: string[] }[]; onGo?: (room: string) => void;
   /** this room, as the server names it */
   roomKey?: string;
+  /** the solo demo: pale blinking legs over the board (Pythagoras for AB and AO) */
+  legs?: boolean;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -237,7 +240,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             }}>Я ответил(а) сам(а)</button>
           </div>
         )}
-        <div style={{ flex: 1, minHeight: 0 }}>{sheet}</div>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>{sheet}{legs && <LegsGhost />}</div>
       </div>
 
       {/* Right column: cameras + back button */}
@@ -653,6 +656,7 @@ export default function App() {
 
   const [endDialog, setEndDialog] = useState(false);
   const hands = useHands();
+  const legs = useDemoLegs(demo?.solo ? livekit?.room ?? null : null); // Миша's pair: pale legs after the teacher's answer
   const [demoReply, setDemoReply] = useState<{ room: string; text: string } | null>(null); // the solo demo: a group waits for an answer
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
   const poll = usePoll();
@@ -1087,7 +1091,7 @@ export default function App() {
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
-              ask={roomAsk} roomKey={livekit?.room}
+              ask={roomAsk} roomKey={livekit?.room} legs={legs}
               elsewhere={[...callingRooms].filter(r => r !== livekit?.room).map(r => ({ room: r, names: students.filter(p => p.livekitRoom === r).map(p => p.name) }))}
               onGo={room => socket.emit('joinPair', { room })}
               reply={demoReply && demoReply.room === livekit?.room ? { text: demoReply.text, onAnswer: ready => { socket.emit('demoReply', { room: demoReply.room, ready }); setDemoReply(null); } } : null} />
@@ -1105,7 +1109,7 @@ export default function App() {
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : 'class'} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={legs} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

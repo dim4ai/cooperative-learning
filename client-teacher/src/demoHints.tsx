@@ -48,6 +48,8 @@ export interface HintsInput {
   hands: Hands;
   /** the group in this room waits for the teacher's answer */
   replyWaits: boolean;
+  /** Миша's pair has the answer about Pythagoras: pale legs blink on their board */
+  legs?: boolean;
 }
 
 /** Desks with somebody at them, in order */
@@ -218,15 +220,17 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     if (x.room) {
       const call = x.calls[x.room];
+      if (x.legs) return [
+        { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', text:
+          'Помогите применить теорему Пифагора: нарисуйте ручкой два катета — как бледные линии на доске. '
+          + 'К AO — 5 клеток вправо и 2 вверх, к AB — 4 вверх и 2 вправо. Это не обязательно.' },
+        { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
+      ];
       if ([...x.calling].some(r => r !== x.room)) return { id: 'call-elsewhere', anchor: '[data-testid="call-elsewhere-go"]', text:
         'Вас зовут ещё в одну группу — кому-то нужна помощь. Договорите здесь и переходите: «Перейти».' };
       if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
         'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
-      if (call && /а-бэ/.test(call.note)) return [
-        { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', text:
-          'Пока звучит ответ, можно подрисовать катеты к отрезкам AB и AO прямо на их доске — так нагляднее. Это не обязательно.' },
-        { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
-      ];
+      if (call && /а-бэ/.test(call.note)) return { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' };
       if (call) {
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it

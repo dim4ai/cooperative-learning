@@ -48,6 +48,7 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
 const LINE_GAP_MS = 1100;
+const PONDER_MS = 5000; // after the teacher's answer: a pause, the teacher may draw the legs, then they count
 const THINK_MS = 2500; // asked a question, the teacher thinks a moment before answering
 const GREET_GAP_MS = 300; // the teacher came in: hello straight after the line going on
 const ARRIVE_MS = 1500; // the teacher comes into a room: their page is there about this much later
@@ -475,7 +476,7 @@ export class BotRun {
       // asked: the teacher may answer once the question is out
       if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
       const next = t.insert[0]?.id;
-      this.after(next === 'p1-34' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : LINE_GAP_MS, () => this.step(room));
+      this.after(next === 'p1-34' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
     });
   }
 

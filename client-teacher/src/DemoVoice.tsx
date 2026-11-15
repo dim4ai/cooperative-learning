@@ -27,6 +27,19 @@ export function useDemoSpeaker(room: string | null): string | null {
   return c?.who && Date.now() - c.startedAt < c.ms ? c.who : null;
 }
 
+/** Миша's pair, from the teacher's answer till they've counted: pale legs on their board for AB and AO */
+export function useDemoLegs(room: string | null): boolean {
+  const calc = () => !!room && /\/p1-(ta|20|21)-/.test(latest.get(room)?.src ?? '');
+  const [on, setOn] = useState(calc);
+  useEffect(() => {
+    const f = () => setOn(calc());
+    f();
+    listeners.add(f);
+    return () => { listeners.delete(f); };
+  }, [room]); // eslint-disable-line react-hooks/exhaustive-deps
+  return on;
+}
+
 export function demoVoiceReset() {
   latest.clear();
   listeners.forEach(f => f());
