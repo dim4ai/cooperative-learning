@@ -48,6 +48,7 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
 const LINE_GAP_MS = 600;
+const TALK_START_MS = 10_000; // the first seconds of a stage are quiet: the teacher looks round first
 const RECALL_MS = 15_000; // the teacher left without answering: they call again
 
 /** A dialogue that listens: the teacher coming in openly is greeted, one still there when they'd call is asked
@@ -287,7 +288,7 @@ export class BotRun {
         this.quietRooms.add(room);
         this.chatter(room, part, [lead, partner]);
         this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, insert: [] });
-        this.after(2000, () => this.step(room));
+        this.after(TALK_START_MS, () => this.step(room));
       } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
         this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
@@ -336,7 +337,7 @@ export class BotRun {
       const ms = this.voice(room, name, phrase.id, phrase.ms);
       this.after(ms + 800 + Math.random() * 3000, tick);
     };
-    this.after(1500 + Math.random() * 2000, tick);
+    this.after(TALK_START_MS + Math.random() * 2000, tick);
   }
 
   /** One says a clip: heard by the teacher in the room, counted as talk while it lasts; how long it is */
