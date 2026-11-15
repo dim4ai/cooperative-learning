@@ -12,8 +12,10 @@ const FORGOT_WARNING = 'В профиле — журналы классов, в�
 /** Someone in the lesson now, as the journal needs them */
 export interface LessonStudent { name: string; uuid: string | null; seat: string | null }
 
-export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
+export function JournalDialog({ email, classId, onClassId, lesson, onClose, inMemory }: {
   email: string;
+  /** the solo demo's made-up journal: no password, no recovery code */
+  inMemory?: boolean;
   classId: string | null;
   onClassId: (id: string | null) => void;
   lesson?: { students: LessonStudent[]; capacity: number };
@@ -45,10 +47,10 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose }: {
         {status === 'locked' && <Unlock email={email} />}
         {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} />}
         {saveError && <div style={errorText}>{saveError}</div>}
-        {(status === 'none' || status === 'open') && (passwordOpen
+        {!inMemory && (status === 'none' || status === 'open') && (passwordOpen
           ? <ChangePassword email={email} onDone={() => setPasswordOpen(false)} />
           : <button onClick={() => setPasswordOpen(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Сменить пароль</button>)}
-        {status === 'open' && <RecoverySection hasRecovery={hasRecovery} onMade={setRecoveryCode} />}
+        {!inMemory && status === 'open' && <RecoverySection hasRecovery={hasRecovery} onMade={setRecoveryCode} />}
         {status === 'open' && data && (
           <button data-testid="journal-choose" onClick={() => { onClassId(draftId); onClose(); }} style={mainBtn}>Выбрать</button>
         )}

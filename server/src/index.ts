@@ -20,7 +20,7 @@ import {
 import type { Block, Scene } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
-import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, scatteredSeat, soloBlockOpen, BotRun } from './demoBots';
+import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, SOLO_NEWCOMER, NEWCOMER_UUID, botUuid, scatteredSeat, soloBlockOpen, BotRun } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
@@ -612,8 +612,12 @@ function demoEndInfo(demo: DemoRecord) {
 }
 
 /** The simulated class comes in by itself: nothing here is connected to anybody */
+/** How long the bots wait for the teacher's journal (its seating) before they sit wherever they like */
+const BOT_PLAN_WAIT_MS = 5000;
+
 function startBots(code: string, lesson: LessonRuntime) {
-  const fast = !!demos.get(code)?.fast;
+  const fast = demos.get(code)?.fast;
+  const startedAt = Date.now();
   lesson.atDesks = false; // the simulated class waits in the room, as its script expects
   createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
@@ -622,10 +626,21 @@ function startBots(code: string, lesson: LessonRuntime) {
       const { name, avatar } = BOTS[i];
       const id = `bot:${i}`;
       if (lesson.seats.some(s => s.occupant === name)) return;
-      if (!lesson.participants.has(id)) lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: null, avatar, bot: true });
-      // testing (?fast): straight to the first two desks, as if the teacher had gathered them
-      const seat = fast ? lesson.seats.filter(s => !s.occupant && s.extra === undefined && s.groupIndex < 2)[0] : scatteredSeat(lesson.seats);
-      if (seat) seat.occupant = name;
+      // the class sits by the teacher's journal: wait a moment for it to come
+      if (!lesson.seatPlan.size && Date.now() - startedAt < BOT_PLAN_WAIT_MS) { setTimeout(() => this.seat(i), 300); return; }
+      // one comes in from someone else's device, unless the test starts the lesson right away (?fast=<block>)
+      const elsewhere = name === SOLO_NEWCOMER && !(fast && fast !== '1');
+      if (!lesson.participants.has(id)) {
+        lesson.participants.set(id, { id, name, role: 'student', livekitRoom: null, uuid: elsewhere ? NEWCOMER_UUID : botUuid(i), avatar, bot: true });
+      }
+      const p = lesson.participants.get(id)!;
+      if (!lesson.seatPlan.size) {
+        const seat = scatteredSeat(lesson.seats); // no journal: anywhere, the teacher gathers them
+        if (seat) seat.occupant = name;
+      } else if (!seatByPlan(lesson, p)) {
+        const seat = freeExtraSeat(lesson); // not known by the journal: a desk apart until the teacher sorts it out
+        if (seat) seat.occupant = name;
+      }
       broadcastSeats(code, lesson);
       broadcastState(code, lesson);
     },
@@ -648,7 +663,7 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
   });
   lesson.bots = bots;
-  bots.seatEveryone(fast);
+  bots.seatEveryone(!!fast);
 }
 
 const realBotRooms = (lesson: LessonRuntime) =>
@@ -2542,7 +2557,7 @@ app.post('/demo/solo', async (req, res) => {
   const demo: DemoRecord = {
     code: pendingKey, ipHash, videoMode: 'solo', createdAt: now, endsAt: now + DEMO_SOLO_MS, firstStudentAt: now,
     peakStudents: BOTS.length, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0, reached: 'waiting',
-    ...(req.query?.fast ? { fast: true } : {}),
+    ...(typeof req.query?.fast === 'string' && req.query.fast ? { fast: req.query.fast.slice(0, 20) } : {}),
   };
   demos.set(pendingKey, demo);
   try {

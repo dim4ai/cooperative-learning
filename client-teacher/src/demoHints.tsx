@@ -39,6 +39,8 @@ export interface HintsInput {
   poll: TeacherPollView | null;
   /** the kind of task whose dialog is open */
   newTask: string | null;
+  /** the class journal is open */
+  journalOpen: boolean;
 }
 
 /** Desks with somebody at them, in order */
@@ -97,6 +99,19 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
   if (stage === 'waiting') {
     const seated = seats.filter(s => s.occupant);
     const allIn = students.length >= CLASS_SIZE && waiting.length === 0 && seated.length >= CLASS_SIZE;
+    // one came in from someone else's device: a desk apart, until the teacher has talked to him and told the journal who he is
+    const newcomer = seats.find(s => s.extra !== undefined && s.occupant)?.occupant ?? null;
+    if (newcomer && !x.previewOpen) {
+      const room = `${x.lesson}:individual-${newcomer}`;
+      if (x.room === room) return { id: 'newcomer-in', anchor: '[data-hint="room-back"]', text:
+        'Это Миша: он зашёл с телефона тёти, поэтому система его не узнала. Вернитесь в класс и отметьте в журнале, кто это.' };
+      if (!done.has(`visit:${room}`)) return { id: 'newcomer', anchor: '[data-testid="newcomer-talk"]', text:
+        'Кто-то зашёл с незнакомого устройства — его посадили за отдельную парту. Поговорите с ним: 💬' };
+      return x.journalOpen
+        ? { id: 'journal-link', anchor: '[data-testid="unmatched"] select', text: 'Укажите, кто это — Миша. Он сразу сядет на своё место из журнала.' }
+        : { id: 'journal', anchor: '[data-testid="journal-open"]', text: 'Откройте журнал класса и отметьте, кто это.' };
+    }
+    if (x.journalOpen) return allIn ? { id: 'journal-close', anchor: '[data-testid="journal-choose"]', text: 'Миша на своём месте. Закройте журнал' } : null;
     if (x.previewOpen) {
       if (allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
       return done.has('preview-nav') ? null
@@ -119,7 +134,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         prefer: { side: stray.row === 0 ? 'below' : 'above', align: stray.col === 0 ? 'start' : 'end' },
       };
     }
-    return { id: 'start', anchor: '[data-hint="start-lesson"]', text: 'Все за двумя партами. Можете начинать урок' };
+    return { id: 'start', anchor: '[data-hint="start-lesson"]', text: 'Все на своих местах. Можете начинать урок' };
   }
 
   if (stage === 'group') {
@@ -366,10 +381,10 @@ function Bubble({ hint }: { hint: Hint }) {
     <>
       <div aria-hidden style={{
         position: 'fixed', top: box.top - 4, left: box.left - 4, width: box.width + 8, height: box.height + 8,
-        borderRadius: 8, border: '2px solid #f5a623', pointerEvents: 'none', zIndex: 900, animation: 'demoHintRing 1.4s ease-in-out infinite',
+        borderRadius: 8, border: '2px solid #f5a623', pointerEvents: 'none', zIndex: 1900, animation: 'demoHintRing 1.4s ease-in-out infinite',
       }} />
       <div ref={setBubble} role="note" data-testid="demo-hint" data-hint-id={hint.id} data-anchor={hint.anchor} style={{
-        position: 'fixed', top: pos.top, left: pos.left, width: BUBBLE_W, boxSizing: 'border-box', zIndex: 901,
+        position: 'fixed', top: pos.top, left: pos.left, width: BUBBLE_W, boxSizing: 'border-box', zIndex: 1901,
         background: BG, color: '#fff', borderRadius: 8, padding: '10px 12px', fontFamily: 'sans-serif',
         fontSize: 13, lineHeight: 1.4, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
       }}>

@@ -51,8 +51,10 @@ interface State {
 }
 
 let state: State = { status: 'loading', data: null, saveError: '', hasRecovery: false };
+let inMemory = false; // the solo demo's made-up journal (openJournalInMemory): the real one stays out
 const listeners = new Set<() => void>();
 function set(patch: Partial<State>) {
+  if (inMemory && patch.status && patch.status !== 'open') return;
   state = { ...state, ...patch };
   listeners.forEach(l => l());
 }
@@ -184,10 +186,17 @@ export async function newRecoveryCode(): Promise<string> {
 // Saves go one at a time: each is made from the version the previous one produced
 let queue: Promise<void> = Promise.resolve();
 
+// The solo demo's journal: made up in the page, changed there and never saved
+export function openJournalInMemory(data: JournalData) {
+  inMemory = true;
+  set({ status: 'open', data, saveError: '', hasRecovery: false });
+}
+
 export function updateJournal(change: (data: JournalData) => JournalData) {
-  if (!state.data || !journalKey) return;
+  if (!state.data || (!journalKey && !inMemory)) return;
   const data = change(state.data);
   set({ data });
+  if (inMemory || !journalKey) return;
   const key = journalKey;
   queue = queue.then(async () => {
     if (journalKey !== key || !envelope) return; // locked in the meantime

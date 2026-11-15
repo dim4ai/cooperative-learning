@@ -12,7 +12,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_CLASS_ID, SOLO_JOURNAL, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -20,7 +20,7 @@ import { StartLessonDialog } from './StartLessonDialog';
 import { JournalDialog } from './JournalDialog';
 import { PasswordInput } from './PasswordInput';
 import { StudentName, StudentNames, useStudentName } from './studentNames';
-import { forgetJournal, loadJournal, lockJournal, seatPlanOf, updateJournal, useJournal } from './journal';
+import { forgetJournal, loadJournal, lockJournal, openJournalInMemory, seatPlanOf, updateJournal, useJournal } from './journal';
 import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
 import { RecordButton, RecordingFinished } from './RecordingUI';
@@ -585,7 +585,7 @@ export default function App() {
   const planJson = journal.status === 'open' ? JSON.stringify(currentClass ? seatPlanOf(currentClass) : { seats: {} }) : '';
   const [joins, setJoins] = useState(0); // the server is ready for the plan after each (re)join
   useEffect(() => {
-    if (joins && planJson && !demo) socket.emit('seatPlan', JSON.parse(planJson));
+    if (joins && planJson && (!demo || demo.solo)) socket.emit('seatPlan', JSON.parse(planJson));
   }, [joins, planJson, demo]);
 
   // The class remembers the code it came in by: next time the same code opens the lesson
@@ -629,6 +629,13 @@ export default function App() {
       .then(blob => slides.open(new File([blob], 'parallelogram.colesson')))
       .catch(e => console.error('sample lesson not loaded:', e));
   }, [demo, confirmed, lessonCode, slides]);
+
+  // the solo demo's class is in a journal made up in the page: its seating seats the bots
+  useEffect(() => {
+    if (!demo?.solo) return;
+    openJournalInMemory(SOLO_JOURNAL);
+    setClassId(SOLO_CLASS_ID);
+  }, [demo?.solo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // testing (?fast=b9): once the class is in, the lesson starts right on that block
   const fastStarted = useRef(false);
@@ -837,18 +844,18 @@ export default function App() {
 
         {(state.stage === 'waiting' || !slides.local) && !demo?.solo && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} /></div>}
 
-        {!demo && state.stage === 'waiting' && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
+        {(!demo || demo.solo) && state.stage === 'waiting' && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
           marginTop: GROUP_GAP, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer',
           background: '#fff', color: journal.status === 'locked' ? '#b07800' : '#222', fontSize: 12, textAlign: 'center',
         }}>
           {journalLabel(journal.status, currentClass?.name)}{notInJournal > 0 && <><br />новых: {notInJournal}</>}
         </button>}
-        {demo && state.stage === 'waiting' && (
+        {demo && !demo.solo && state.stage === 'waiting' && (
           <DemoOff style={{ marginTop: GROUP_GAP }} note="Журнал класса: кто пришёл, кого нет, а рассадка и число мест запоминаются до следующего урока.">
             <button tabIndex={-1} style={{ width: '100%', padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#222', fontSize: 12 }}>Журнал класса</button>
           </DemoOff>
         )}
-        {journalOpen && teacher && !demo && <JournalDialog email={teacher.email} classId={classId} onClassId={setClassId}
+        {journalOpen && (teacher && !demo || demo?.solo) && <JournalDialog email={teacher?.email ?? ''} classId={classId} onClassId={setClassId} inMemory={!!demo?.solo}
           lesson={{ students: lessonStudents, capacity: seats.filter(s => s.extra === undefined).length }} onClose={() => setJournalOpen(false)} />}
 
         {state.stage === 'waiting' && (
@@ -1051,7 +1058,7 @@ export default function App() {
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : null} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

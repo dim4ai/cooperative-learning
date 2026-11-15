@@ -12,6 +12,13 @@ export const BOTS = [
   { name: 'Вика', avatar: 'cat' }, { name: 'Глеб', avatar: 'hedgehog' },
 ];
 
+/** Each bot's own device, as the teacher's journal knows it (client-teacher/src/demo.tsx makes the same journal) */
+export const botUuid = (i: number) => `00000000-0000-4000-8000-${(0x100 + i).toString(16).padStart(12, '0')}`;
+/** The one who comes in from someone else's device (an aunt's phone): the journal doesn't know it, so he sits apart
+ *  until the teacher has talked to him and told the journal who he is */
+export const SOLO_NEWCOMER = 'Миша';
+export const NEWCOMER_UUID = '00000000-0000-4000-8000-0000000000a1';
+
 /** Twice the class: there is room to move people around, and four desks to gather them from */
 export const SOLO_SEATS = 16;
 /** The teacher may change the number of seats, but every bot needs one */

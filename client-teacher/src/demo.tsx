@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import type { JournalData } from './journal';
 
 export interface DemoTimes { endsAt: number; noStudentsAt: number | null; solo?: boolean }
 export interface DemoEnd { token: string; reason: string | null; solo?: boolean }
@@ -54,6 +55,22 @@ export const SOLO_POLL = { question: 'Свойство и признак — э�
 
 /** ?fast=<block>: testing — the lesson starts on that block as soon as the class is in */
 export const FAST_BLOCK = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('fast') || null;
+
+/** The solo demo's class in the teacher's journal: names, the device each comes in from, the seat each has.
+ *  The devices are the bots' own (server/src/demoBots.ts, botUuid); Миша comes in from another one and sits apart */
+const SOLO_SEATING: [string, string][] = [
+  ['Аня', 'g0r0c0'], ['Тимур', 'g0r0c1'], ['Глеб', 'g0r1c0'], ['Соня', 'g0r1c1'],
+  ['Миша', 'g1r0c0'], ['Артём', 'g1r0c1'], ['Лена', 'g1r1c0'], ['Вика', 'g1r1c1'],
+];
+const SOLO_BOTS = ['Аня', 'Миша', 'Лена', 'Тимур', 'Соня', 'Артём', 'Вика', 'Глеб']; // server/src/demoBots.ts, BOTS
+const botUuid = (i: number) => `00000000-0000-4000-8000-${(0x100 + i).toString(16).padStart(12, '0')}`;
+export const SOLO_CLASS_ID = 'demo-class';
+export const SOLO_JOURNAL: JournalData = {
+  classes: [{
+    id: SOLO_CLASS_ID, name: '8 «Б»', capacity: 16,
+    students: SOLO_SEATING.map(([name, seat], i) => ({ id: `demo-${i}`, name, uuids: [botUuid(SOLO_BOTS.indexOf(name))], seat })),
+  }],
+};
 
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
 // from there, booking a lesson with one's own class is on the real site
@@ -196,7 +213,8 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
 export async function startSolo(): Promise<{ code: string; token: string } | { error: string }> {
   try {
     // ?fast (testing): the class sits down at once, at two desks; ?fast=b9 also starts the lesson on that block
-    const fast = new URLSearchParams(location.search).has('fast') ? '?fast=1' : '';
+    const f = new URLSearchParams(location.search).get('fast');
+    const fast = f === null ? '' : `?fast=${encodeURIComponent(f || '1')}`;
     const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo${fast}`, { method: 'POST' });
     const body = await res.json().catch(() => ({}));
     if (res.ok && body.token) return { code: body.code, token: body.token };
@@ -212,15 +230,14 @@ export async function startSolo(): Promise<{ code: string; token: string } | { e
 /** short: the steps when the hints beside the buttons are on and say where to press */
 const GUIDE: Record<string, { title: string; steps: string[]; short?: string[] }> = {
   waiting: { title: 'Рассадка', steps: [
-    'Ученики заходят и садятся как попало. Ряд за партой — это пара, вся парта — четвёрка.',
-    'Соберите их за две парты: кликните по ученику, потом по свободному месту или по другому ученику, и они поменяются местами.',
-    'Крестик поднимает ученика с места, и он сам садится на другое.',
-    'Мест в классе можно поменять слева: от 8 до 32.',
-    'Пока ученики рассаживаются, пролистайте урок во вкладке «Просмотр урока» наверху.',
+    'Рассадка класса хранится в журнале: ученики заходят и сами садятся на свои места. Ряд за партой — это пара, вся парта — четвёрка.',
+    'Кто зашёл с незнакомого устройства, садится за отдельную парту «Новые ученики». Поговорите с ним (💬) и отметьте в журнале, кто это — он сядет на своё место.',
+    'Учеников можно и пересаживать: кликните по ученику, потом по свободному месту или по другому ученику.',
+    'Пока ученики заходят, пролистайте урок во вкладке «Просмотр урока» наверху.',
     'Когда все будут на местах, нажмите слева «Начать урок».',
   ], short: [
-    'Ученики заходят и садятся как попало. Ряд за партой — это пара, вся парта — четвёрка.',
-    'Ваша задача — собрать класс за две парты и начать урок.',
+    'Ученики заходят и садятся на свои места из журнала. Ряд за партой — это пара, вся парта — четвёрка.',
+    'Кто зашёл с чужого устройства, сидит отдельно, пока вы не отметите в журнале, кто это.',
   ] },
   group: { title: 'Объяснение', steps: [
     'Это этап, на котором вы объясняете материал сразу всему классу. Ученики слышат вас, видят слайды, которые вы показываете.',
