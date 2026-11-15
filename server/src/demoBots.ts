@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHATTER, DISPUTE_PAIR, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type SpokenLine } from './demoDialogue';
+import { CHATTER, CHOCOLATE, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -42,7 +42,23 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
  *  on (seconds) the room keeps silent — the teacher's map shows it */
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean }
+/** dialogue: a voiced one that goes by what the teacher does (see Talk below) */
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[] }
+
+/** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
+const TEACHER_VOICE = 'alena';
+const LINE_GAP_MS = 600;
+const RECALL_MS = 15_000; // the teacher left without answering: they call again
+
+/** A dialogue that listens: the teacher coming in openly is greeted, one still there when they'd call is asked
+ *  straight away, the call waits its turn among the others', and the second part begins once the teacher answered */
+interface Talk {
+  room: string; lines: DialogueLine[];
+  next: number;                 // index of the next line of the course
+  phase: 'a' | 'calling' | 'asked' | 'b' | 'done';
+  present: boolean; greeted: boolean; busy: boolean;
+  insert: DialogueLine[];       // said before the course goes on
+}
 
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
@@ -70,8 +86,8 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   pairs: [
     { lines: lines(OBSERVATIONS, 4, 6), talk: [0.55, 0.5] },
     // what the pair said before calling, written down at once: only so the teacher feels how it comes to a call
-    { lead: 'Миша', partner: 'Артём', lines: [], spoken: DISPUTE_PAIR, talk: [0.55, 0.5], call: {
-      at: 0, by: 2, note: 'Мы спорим: я думаю, что AB = AO — на чертеже они похожи, а {1} говорит, что не равны. Кто прав?' } },
+    // П1 «Спорим на шоколадку?»: they check their lists, argue about AB = AO and call
+    { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, talk: [0.55, 0.5] },
     // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
     { lines: [], spoken: LOPSIDED_PAIR, later: true },
     { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
@@ -144,6 +160,10 @@ export interface BotHost {
   raise(name: string): void;
   /** Given the word, a bot says its line to the class */
   speak(name: string, text: string, clip: { src: string; ms: number }): void;
+  /** The call is over without a visit: the teacher is in the room already */
+  callOff(room: string): void;
+  /** The teacher may answer now: with the ready answer (its text) or in their own words; null: not any more */
+  offerReply(room: string, text: string | null): void;
   /** A bot answers the running poll */
   vote(name: string, choice: number): void;
 }
@@ -184,6 +204,8 @@ export class BotRun {
   // a dialogue not voiced in someone's own voice: they keep the voice it gave them all the stage, chatter too
   private stand = new Map<string, string>(); // what a room that called says once answered
   private uid = 0;
+  private talks = new Map<string, Talk>();
+  private callPending = false; // the next call is timed already
 
   constructor(private host: BotHost) {}
 
@@ -237,6 +259,8 @@ export class BotRun {
     this.quietRooms.clear();
     this.afterAnswer.clear();
     this.stand.clear();
+    this.talks.clear();
+    this.callPending = false;
     this.stageStart = Date.now();
     this.raiseHands(stage, blockId);
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
@@ -259,7 +283,12 @@ export class BotRun {
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
       let callAt = part.call?.at;
-      if (part.spoken?.length && part.later) {
+      if (part.dialogue) {
+        this.quietRooms.add(room);
+        this.chatter(room, part, [lead, partner]);
+        this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, insert: [] });
+        this.after(2000, () => this.step(room));
+      } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
         this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
         this.spoken = { room, lines: part.spoken };
@@ -347,11 +376,13 @@ export class BotRun {
     const next = this.callQueue.shift();
     if (!next) { if (gap !== undefined) this.after(SPOKEN_AFTER_CALLS_MS, () => this.speakNow()); return; }
     const due = gap ?? Math.max(next.at - (Date.now() - this.stageStart), 0);
-    this.after(due, () => { this.calling = { room: next.room, visited: false }; next.fire(); });
+    this.callPending = true;
+    this.after(due, () => { this.callPending = false; this.calling = { room: next.room, visited: false }; next.fire(); });
   }
 
   /** The teacher left a room: if it was the one that called, the next one may call after a breath */
   onLeave(room: string) {
+    this.talkLeft(room);
     if (!this.calling || this.calling.room !== room || !this.calling.visited) return;
     this.calling = null;
     this.nextCall(NEXT_CALL_GAP_MS);
@@ -360,6 +391,7 @@ export class BotRun {
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
     if (this.calling?.room === room) this.calling.visited = true;
+    this.talkVisited(room);
     const rest = this.afterAnswer.get(room);
     if (rest) {
       this.afterAnswer.delete(room);
@@ -372,6 +404,108 @@ export class BotRun {
     if (!reply) return;
     this.replies.delete(room);
     this.after(VISIT_REPLY_MS, () => this.write(room, reply));
+  }
+
+  // ---------- a dialogue that listens (Talk) ----------
+  private id1(t: Talk, id: string) { return t.lines.find(l => l.id === id)!; }
+
+  /** Says the next line if none is being said */
+  private step(room: string) {
+    const t = this.talks.get(room);
+    if (!t || t.busy) return;
+    let line = t.insert.shift();
+    if (!line) {
+      if (t.phase === 'a') {
+        const cur = t.lines[t.next];
+        if (cur?.id === 'p1-17' && t.present) {
+          // the teacher is here: asked straight away, no call
+          t.next = t.lines.findIndex(l => l.id === 'p1-20');
+          t.phase = 'asked';
+          line = this.id1(t, 'p1-35');
+          this.host.call(room, line.text, this.names.get(room)?.[0]);
+          this.host.callOff(room);
+        } else if (cur?.id === 'p1-19' && t.present) {
+          // came in just as they were about to call: they ask right away
+          t.next++;
+          t.phase = 'asked';
+          line = cur;
+          this.host.call(room, cur.text, this.names.get(room)?.[1]);
+          this.host.callOff(room);
+        } else if (cur?.id === 'p1-19') {
+          // they call: the bell waits its turn among the other rooms'
+          t.next = t.lines.findIndex(l => l.id === 'p1-20');
+          t.phase = 'calling';
+          this.requestCall(room, this.id1(t, 'p1-19').text, 2);
+          return;
+        } else { line = cur; t.next++; }
+      } else if (t.phase === 'b') {
+        line = t.lines[t.next];
+        if (!line || !/^p1-(2\d|3[0-3])$/.test(line.id)) { t.phase = 'done'; this.quietRooms.delete(room); return; }
+        t.next++;
+      } else return;
+    }
+    if (!line) return;
+    const said = line;
+    t.busy = true;
+    const ms = this.sayLine(room, said);
+    this.after(ms, () => {
+      t.busy = false;
+      if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
+      // asked: the teacher may answer once the question is out
+      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) this.host.offerReply(room, this.id1(t, 'p1-ta').text);
+      this.after(LINE_GAP_MS, () => this.step(room));
+    });
+  }
+
+  /** One line out loud: a student's counted as talk; how long it takes */
+  private sayLine(room: string, line: DialogueLine): number {
+    if (line.who === 'T') {
+      const v = line.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(line.ms)[0];
+      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v] });
+      return line.ms[v];
+    }
+    const who = this.names.get(room)?.[line.who - 1] ?? '';
+    return this.voice(room, who, line.id, line.ms);
+  }
+
+  private requestCall(room: string, note: string, by: 1 | 2) {
+    this.callQueue.push({ room, at: Date.now() - this.stageStart, fire: () => this.host.call(room, note, this.names.get(room)?.[by - 1]) });
+    if (!this.calling && !this.callPending) this.nextCall();
+  }
+
+  private talkVisited(room: string) {
+    const t = this.talks.get(room);
+    if (!t) return;
+    t.present = true;
+    if (t.phase === 'a' && !t.greeted) { t.greeted = true; t.insert.push(this.id1(t, 'p1-34')); }
+    else if (t.phase === 'calling') {
+      // came on the call: «Какой у вас вопрос?» — and the partner asks it
+      t.phase = 'asked';
+      t.insert.push(this.id1(t, 'p1-tq'), this.id1(t, 'p1-19'));
+    }
+    this.step(room);
+  }
+
+  private talkLeft(room: string) {
+    const t = this.talks.get(room);
+    if (!t) return;
+    t.present = false;
+    if (t.phase !== 'asked') return;
+    // gone without an answer: they call again a little later
+    this.host.offerReply(room, null);
+    t.insert = [];
+    t.phase = 'calling';
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.id1(t, 'p1-19').text, 2); });
+  }
+
+  /** The teacher answered: with the ready answer, said in the teacher's voice, or in their own words */
+  onReply(room: string, ready: boolean) {
+    const t = this.talks.get(room);
+    if (!t || t.phase !== 'asked') return;
+    this.host.offerReply(room, null);
+    t.phase = 'b';
+    if (ready) t.insert.push(this.id1(t, 'p1-ta'));
+    this.after(ready ? 300 : 1500, () => this.step(room));
   }
 
   private polls = 0;

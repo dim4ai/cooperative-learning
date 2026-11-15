@@ -657,6 +657,12 @@ function startBots(code: string, lesson: LessonRuntime) {
       // to the teacher wherever they are: on coming into the room mid-line they hear the rest of it
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoVoice', { room, ...clip, now: Date.now() });
     },
+    callOff(room) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false });
+    },
+    offerReply(room, text) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoReply', { room, text });
+    },
     raise: name => { if (lesson.stage === 'group') setHand(lesson, name, true); },
     speak(name, text, clip) {
       lesson.floor = { name, text, until: Date.now() + clip.ms };
@@ -2336,6 +2342,11 @@ io.on('connection', async (socket) => {
       const name = lesson.participants.get(socket.id)?.name;
       if (role !== 'student' || !lesson.vote || !name || lesson.marks.has(name)) return;
       if (answer === 'yes' || answer === 'no') lesson.marks.set(name, answer);
+    });
+
+    // the solo demo: the teacher answered a group's question (with the ready answer or in their own words)
+    socket.on('demoReply', ({ room, ready }: { room?: unknown; ready?: unknown } = {}) => {
+      if (role === 'teacher' && typeof room === 'string') lesson.bots?.onReply(room, !!ready);
     });
 
     socket.on('hand', (up: unknown) => {

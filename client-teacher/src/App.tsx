@@ -175,9 +175,11 @@ function SpeechBubble({ text }: { text: string }) {
 
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
-function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal }: {
+function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply }: {
   onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
   quiet?: boolean; onReveal?: () => void;
+  /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
+  reply?: { text: string; onAnswer: (ready: boolean) => void } | null;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -203,6 +205,20 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             flexShrink: 0, maxHeight: '30%', overflowY: 'auto', padding: '8px 12px', whiteSpace: 'pre-wrap', margin: '6px 6px 0',
             fontSize: 15, lineHeight: 1.4, color: '#222', background: '#f1f5fb', borderRadius: 6, textAlign: 'left',
           }}>{task}</div>
+        )}
+        {reply && (
+          <div data-testid="demo-reply" style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '6px 6px 0', padding: '8px 12px',
+            background: '#fff6dd', border: '1px solid #f1d58a', borderRadius: 6, fontSize: 14, color: '#333',
+          }}>
+            <span style={{ flex: '1 1 260px' }}>Ответ: «{reply.text}»</span>
+            <button data-testid="demo-reply-ready" onClick={() => reply.onAnswer(true)} style={{
+              padding: '6px 12px', borderRadius: 5, border: 'none', background: '#27ae60', color: '#fff', cursor: 'pointer', fontSize: 13,
+            }}>Сказать этот ответ</button>
+            <button data-testid="demo-reply-own" onClick={() => reply.onAnswer(false)} style={{
+              padding: '6px 12px', borderRadius: 5, border: '1px solid #ccc', background: '#fff', color: '#333', cursor: 'pointer', fontSize: 13,
+            }}>Я ответил(а) сам(а)</button>
+          </div>
         )}
         <div style={{ flex: 1, minHeight: 0 }}>{sheet}</div>
       </div>
@@ -615,6 +631,7 @@ export default function App() {
 
   const [endDialog, setEndDialog] = useState(false);
   const hands = useHands();
+  const [demoReply, setDemoReply] = useState<{ room: string; text: string } | null>(null); // the solo demo: a group waits for an answer
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
   const poll = usePoll();
   const [recordAsk, setRecordAsk] = useState(0);
@@ -715,6 +732,7 @@ export default function App() {
     socket.on('livekit', (info: LivekitInfo) => setLivekit(info));
     socket.on('teacherVoice', (info: LivekitInfo) => setVoice(info));
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
+    socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
     socket.on('callTeacher', ({ room, calling, note, who }: { room: string; calling: boolean; note?: string; who?: string }) => {
       if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));
       setCallingRooms(prev => {
@@ -1045,7 +1063,8 @@ export default function App() {
             ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
-              ask={roomAsk} />
+              ask={roomAsk}
+              reply={demoReply && demoReply.room === livekit?.room ? { text: demoReply.text, onAnswer: ready => { socket.emit('demoReply', { room: demoReply.room, ready }); setDemoReply(null); } } : null} />
             : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
                 room,
                 // a group at work isn't disturbed: the teacher comes in unseen and unheard unless called
@@ -1060,7 +1079,7 @@ export default function App() {
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : 'class'} />}
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

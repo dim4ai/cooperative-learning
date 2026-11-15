@@ -73,3 +73,47 @@ export const CHATTER: { id: string; ms: Record<string, number> }[] = [
   {"id": "ch24", "ms": {"kirill": 840, "anton": 840, "alexander": 840, "ermil": 744, "dasha": 792, "lera": 840, "masha": 840, "julia": 768}},
   {"id": "ch25", "ms": {"kirill": 2016, "anton": 2016, "alexander": 1968, "ermil": 1920, "dasha": 1992, "lera": 2088, "masha": 2160, "julia": 1944}},
 ];
+
+/** П1 «Спорим на шоколадку?»: Миша (1) and his partner (2) check their lists against each other; T is the teacher.
+ *  Lines p1-01…p1-33 in order; p1-34 Миша greets a teacher who came in openly, p1-35 asks them instead of the call (17–19);
+ *  p1-tq the teacher asks what the question is, p1-ta the ready answer. Text: ~/temp/П1-шоколадка.txt */
+export interface DialogueLine { id: string; who: 1 | 2 | 'T'; write: string | null; ms: Record<string, number>; text: string }
+export const CHOCOLATE: DialogueLine[] = [
+  {"id": "p1-01", "who": 2, "write": null, "ms": {"alexander": 2184}, "text": "Привет. Ну что, сверяемся?"},
+  {"id": "p1-02", "who": 1, "write": null, "ms": {"kirill": 1488}, "text": "Давай. У тебя сколько?"},
+  {"id": "p1-03", "who": 2, "write": null, "ms": {"alexander": 7080}, "text": "Пять. Стороны, диагонали, угол. А у тебя… Ты чего так написал? Как курица лапкой."},
+  {"id": "p1-04", "who": 1, "write": null, "ms": {"kirill": 5160}, "text": "Да я без планшета сегодня. К тёте в гости приехали, с её компа мышкой рисую."},
+  {"id": "p1-05", "who": 2, "write": null, "ms": {"alexander": 1968}, "text": "Понятно, ладно, разберу."},
+  {"id": "p1-06", "who": 2, "write": null, "ms": {"alexander": 8304}, "text": "Так. А-дэ равно бэ-цэ — есть. А-бэ равно цэ-дэ — есть. Углы есть… А это что? А-бэ равно а-о?"},
+  {"id": "p1-07", "who": 1, "write": null, "ms": {"kirill": 2760}, "text": "Ну да. Посмотри на чертёж — одинаковые."},
+  {"id": "p1-08", "who": 2, "write": null, "ms": {"alexander": 3144}, "text": "Хм, похожи, конечно. Но мне кажется, что они не равны."},
+  {"id": "p1-09", "who": 1, "write": null, "ms": {"kirill": 3096}, "text": "Почему не равны? Палец приложи — одинаковые."},
+  {"id": "p1-10", "who": 2, "write": null, "ms": {"alexander": 9648}, "text": "Да как я его тут приложу? Я ещё вот по клеткам смотрю. А-бэ — это два вправо, четыре вверх. А-о — пять вправо, два вверх. Разные."},
+  {"id": "p1-11", "who": 1, "write": null, "ms": {"kirill": 9576}, "text": "Как ты так сравниваешь? У тебя и вправо, и вверх разное количество каждый раз. А длина может быть одна и та же. Наискосок ведь."},
+  {"id": "p1-12", "who": 2, "write": null, "ms": {"alexander": 3792}, "text": "Нет. Так не бывает. Да и видно, что разные немного."},
+  {"id": "p1-13", "who": 1, "write": null, "ms": {"kirill": 1584}, "text": "Одинаковые. Спорим?"},
+  {"id": "p1-14", "who": 2, "write": null, "ms": {"alexander": 1296}, "text": "Спорим. На что?"},
+  {"id": "p1-15", "who": 1, "write": null, "ms": {"kirill": 864}, "text": "На шоколадку."},
+  {"id": "p1-16", "who": 2, "write": null, "ms": {"alexander": 408}, "text": "Идёт."},
+  {"id": "p1-17", "who": 2, "write": null, "ms": {"alexander": 2640}, "text": "Давай учителя позовём тогда, как ещё узнать?"},
+  {"id": "p1-18", "who": 1, "write": null, "ms": {"kirill": 528}, "text": "Давай."},
+  {"id": "p1-19", "who": 2, "write": null, "ms": {"alexander": 9864}, "text": "Мы сверяемся: у Миши записано, что а-бэ равно а-о, а я думаю, что не равны, раз по клеткам вправо и вверх не совпадают. Как правильно?"},
+  {"id": "p1-20", "who": 2, "write": null, "ms": {"alexander": 3312}, "text": "Два в квадрате плюс четыре в квадрате… двадцать."},
+  {"id": "p1-21", "who": 1, "write": null, "ms": {"kirill": 9024}, "text": "А пять в квадрате плюс два в квадрате — двадцать девять. Да, точно, не равны. Ладно, теперь понятно. Вычёркиваю."},
+  {"id": "p1-22", "who": 2, "write": null, "ms": {"alexander": 1032}, "text": "С тебя шоколадка."},
+  {"id": "p1-23", "who": 1, "write": null, "ms": {"kirill": 3336}, "text": "Подожди. Ты говорил «так не бывает». А бывает."},
+  {"id": "p1-24", "who": 2, "write": null, "ms": {"alexander": 2328}, "text": "Ну… ладно. Половина шоколадки."},
+  {"id": "p1-25", "who": 1, "write": null, "ms": {"kirill": 6624}, "text": "Половина. Давай теперь общий список. По очереди: кто сказал, тот и пишет. Начинай."},
+  {"id": "p1-26", "who": 2, "write": "AD = BC", "ms": {"alexander": 1176}, "text": "А-дэ равно бэ-цэ."},
+  {"id": "p1-27", "who": 1, "write": "AB = CD", "ms": {"kirill": 1104}, "text": "А-бэ равно цэ-дэ."},
+  {"id": "p1-28", "who": 2, "write": "AO = OC", "ms": {"alexander": 3816}, "text": "А-о равно о-цэ. Пять и два, пять и два — тут не поспоришь."},
+  {"id": "p1-29", "who": 1, "write": "BO = OD", "ms": {"kirill": 4728}, "text": "Бэ-о равно о-дэ. Три и два, три и два. Этого у меня не было."},
+  {"id": "p1-30", "who": 2, "write": "∠A = ∠C", "ms": {"alexander": 1704}, "text": "Угол а равен углу цэ."},
+  {"id": "p1-31", "who": 1, "write": "∠B = ∠D", "ms": {"kirill": 3696}, "text": "И угол бэ равен углу дэ. А этого не было у тебя."},
+  {"id": "p1-32", "who": 2, "write": null, "ms": {"alexander": 1320}, "text": "Всё равно шесть получилось."},
+  {"id": "p1-33", "who": 1, "write": null, "ms": {"kirill": 1368}, "text": "Только теперь все честные."},
+  {"id": "p1-34", "who": 1, "write": null, "ms": {"kirill": 2352}, "text": "Ой, здравствуйте, Татьяна Алексеевна."},
+  {"id": "p1-35", "who": 1, "write": null, "ms": {"kirill": 8568}, "text": "Татьяна Алексеевна, а у меня записано, что а-бэ равно а-о. На глаз одинаковые, а по клеткам разные. Как правильно?"},
+  {"id": "p1-tq", "who": "T", "write": null, "ms": {"alena": 1008, "filipp": 1080}, "text": "Какой у вас вопрос?"},
+  {"id": "p1-ta", "who": "T", "write": null, "ms": {"alena": 11976, "filipp": 12648}, "text": "Глаз обманывает, это правда. Но и по клеткам сразу не скажешь, тут Миша прав. Вспомните Пифагора: клетки — это катеты, а ваши отрезки — гипотенузы. Посчитайте."},
+];

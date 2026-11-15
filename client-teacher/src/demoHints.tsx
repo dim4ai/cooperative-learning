@@ -46,6 +46,8 @@ export interface HintsInput {
   endOpen: boolean;
   /** raised hands, and who has the word */
   hands: Hands;
+  /** the group in this room waits for the teacher's answer */
+  replyWaits: boolean;
 }
 
 /** Desks with somebody at them, in order */
@@ -216,6 +218,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     if (x.room) {
       const call = x.calls[x.room];
+      if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
+        'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
       if (call) {
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it
