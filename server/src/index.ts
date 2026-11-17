@@ -654,6 +654,7 @@ function startBots(code: string, lesson: LessonRuntime) {
     move: (room, uid, left, top) => moveInRoom(lesson, room, uid, left, top, ''),
     five: (room, name) => startFive(lesson, room, name),
     fiveTap: (room, name) => tapFive(lesson, room, name),
+    teacherWrite: (room, obj) => applyBoardOp(lesson, room, { t: 'add', obj }, 'Учитель', true, ''),
     talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
     call(room, note, who) {

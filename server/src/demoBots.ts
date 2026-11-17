@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHAT, CHATTER, CHOCOLATE, SIXTH, type FourLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { CHAT, CHATTER, CHOCOLATE, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -43,7 +43,7 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[] }
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[]; trap?: TrapLine[] }
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
@@ -96,7 +96,7 @@ const FOUR_MOVES: Record<string, [number, number[]]> = {
 };
 type XY = [number, number];
 /** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line */
-interface FourDraw { at: number; path?: XY[]; thin?: boolean; label?: { text: string; at: XY }; text?: { text: string; at: XY } }
+interface FourDraw { at: number; path?: XY[]; thin?: boolean; label?: { text: string; at: XY }; text?: { text: string; at: XY }; dot?: XY }
 const FOUR_DRAW: Record<string, FourDraw[]> = {
   // card 3: two parallel lines, AB on one, CD as long on the other — a parallelogram…
   'c2-06': [
@@ -129,9 +129,37 @@ const FOUR_DRAW: Record<string, FourDraw[]> = {
   'c2-22': [{ at: 0.95, text: { text: '∠A + ∠B = 180°', at: [70, 575] } }],
   'c2-24': [{ at: 0.95, text: { text: 'AD ∥ BC', at: [470, 575] } }],
 };
+/** Ч1: the cards, the attempt at card 3, the teacher's hint drawn as they speak, the trapezoid, the kite and its tail */
+const KITE: FourDraw[] = FOUR_DRAW['c2-12'];
+Object.assign(FOUR_MOVES, {
+  'c1-06': [1, YES[0]], 'c1-07': [2, YES[1]], 'c1-09': [3, YES[2]], 'c1-22': [3, NO[0]], 'c1-23': [4, YES[2]],
+  'c1-27': [5, NO[1]], 'c1-35': [6, YES[3]],
+});
+Object.assign(FOUR_DRAW, {
+  'c1-14': [{ at: 0.15, path: [[900, 590], [1080, 590], [1160, 430], [980, 430], [900, 590]] }],
+  'c1-ta2': [{ at: 0.45, path: [[850, 590], [1300, 590]] }, { at: 0.65, path: [[850, 430], [1300, 430]] }],
+  'c1-ta3': [{ at: 0.45, dot: [900, 590], label: { text: 'A', at: [900, 618] } }, { at: 0.6, dot: [1100, 590], label: { text: 'B', at: [1100, 618] } }],
+  'c1-ta4': [{ at: 0.5, dot: [1160, 430], label: { text: 'C', at: [1160, 402] } }],
+  'c1-20': [
+    { at: 0.2, dot: [960, 430], label: { text: 'D', at: [960, 402] } }, { at: 0.3, dot: [840, 430], label: { text: 'D', at: [840, 402] } },
+    { at: 0.5, path: [[840, 430], [900, 590], [1100, 590], [1160, 430], [840, 430]] },
+  ],
+  'c1-27': KITE.map(d => ({ ...d, at: d.at * 0.6 })),
+  'c1-29': [{ at: 0.3, path: [[1000, 668], [985, 698], [1015, 728], [990, 758], [1010, 788]] }],
+  'c1-33': [{ at: 0.15, path: [[1290, 440], [1230, 610], [1500, 610], [1480, 420], [1290, 440]] }],
+});
 /** Lines that start on something new: what was drawn before goes away */
-const FOUR_ERASE = new Set(['c2-12', 'c2-17']);
+const FOUR_ERASE = new Set(['c2-12', 'c2-17', 'c1-ta2', 'c1-27']);
+const TEACHER_COLOR = '#c92a2a';
 const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
+
+/** Ч1: a four that calls; the teacher's ready answer is said and drawn, then they go on (the teacher coming in openly
+ *  before is not greeted: still there as they'd call, they ask straight away) */
+interface Trap {
+  lines: TrapLine[]; next: number; names: string[]; onBoard: string[];
+  phase: 'a' | 'calling' | 'asked' | 'b';
+  present: boolean; busy: boolean; insert: TrapLine[];
+}
 
 /** A four going through the cards by itself (Ч2): no teacher in it, no call */
 interface Four { lines: FourLine[]; next: number; names: string[]; onBoard: string[] }
@@ -189,8 +217,8 @@ export const soloBlockOpen = (id: string) => SOLO_LIVE_BLOCKS.has(id) || id.star
 /** A block of its own, not its stage's usual script. b10 «Точно параллелограмм?»: a stand-in until its dialogue is written */
 const BLOCK_SCRIPT: Record<string, RoomScript[]> = {
   b10: [
-    { lines: lines(['1 — да', '2 — да', '3 — да?', '4 — да'], 5, 7), talk: [0.5, 0.45, 0.35, 0.2], call: {
-      at: 30, note: 'Карточка 3: AB ∥ CD и BC = AD. Мы положили в «Да, точно», а {2} говорит, что это может быть трапеция. Кто прав?' } },
+    // Ч1 «Ловушка трапеции»: the four where Миша sits falls into card 3's trap and calls the teacher
+    { lead: 'Миша', lines: [], trap: TRAP, talk: [0.5, 0.45, 0.35, 0.3] },
     // Ч2 «Шестая — самая коварная»: the four where Аня sits goes through the cards by itself
     { lead: 'Аня', lines: [], four: SIXTH, talk: [0.45, 0.4, 0.4, 0.1] },
   ],
@@ -229,6 +257,8 @@ export interface BotHost {
   /** «Дай пять»: a bot puts the hand up in its room, a bot taps it */
   five(room: string, name: string): void;
   fiveTap(room: string, name: string): void;
+  /** The teacher's drawing on a group's board (the ready answer drawn as it is said) */
+  teacherWrite(room: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
   /** A bot talked this long: counted as a real student's microphone would be */
   talk(name: string, ms: number): void;
   /** Names of the bots in a room */
@@ -288,6 +318,7 @@ export class BotRun {
   private explains = new Map<string, Explain>();
   private chats = new Map<string, Chat>();
   private fours = new Map<string, Four>();
+  private traps = new Map<string, Trap>();
   private callPending = false; // the next call is timed already
   private stage = '';
   private earlyCalled = false;
@@ -348,6 +379,7 @@ export class BotRun {
     this.explains.clear();
     this.chats.clear();
     this.fours.clear();
+    this.traps.clear();
     this.callPending = false;
     this.stage = stage;
     this.earlyCalled = false;
@@ -383,6 +415,11 @@ export class BotRun {
         this.chatter(room, part, [lead, partner]);
         this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set(), onBoard: [] });
         this.after(TALK_START_MS, () => this.explainStep(room));
+      } else if (part.trap) {
+        this.quietRooms.add(room);
+        const lines = part.trap;
+        this.traps.set(room, { lines, next: 0, names: this.fourNames(lines.filter((l): l is FourLine => l.who !== 'T'), members, ''), onBoard: [], phase: 'a', present: false, busy: false, insert: [] });
+        this.after(TALK_START_MS, () => this.trapStep(room));
       } else if (part.four) {
         this.quietRooms.add(room);
         this.fours.set(room, { lines: part.four, next: 0, names: this.fourNames(part.four, members), onBoard: [] });
@@ -499,6 +536,7 @@ export class BotRun {
   /** The teacher left a room: if it was the one that called, the next one may call after a breath */
   onLeave(room: string) {
     this.talkLeft(room);
+    this.trapLeft(room);
     this.explainLeft(room);
     if (!this.calling || this.calling.room !== room || !this.calling.visited) return;
     this.calling = null;
@@ -518,6 +556,7 @@ export class BotRun {
     this.talkVisited(room);
     this.explainVisited(room);
     this.chatVisited(room);
+    this.trapVisited(room);
     const rest = this.afterAnswer.get(room);
     if (rest) {
       this.afterAnswer.delete(room);
@@ -624,9 +663,18 @@ export class BotRun {
 
   // ---------- a four by itself (Four) ----------
   /** Who says {1}…{4}: Аня is 4; the others by whose own voice the lines were said in, then whoever is left */
-  private fourNames(lines: FourLine[], members: string[]): string[] {
+  private fourNames(lines: FourLine[], members: string[], fourth = 'Аня'): string[] {
     const voiceOf = (who: number) => Object.keys(lines.find(l => l.who === who)?.ms ?? {})[0];
-    const names = ['', '', '', members.includes('Аня') ? 'Аня' : ''];
+    const names = ['', '', '', fourth && members.includes(fourth) ? fourth : ''];
+    if (!fourth) { // all four by voice
+      let left = [...members];
+      for (const who of [1, 2, 3, 4]) {
+        const m = left.find(n => VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
+        names[who - 1] = m;
+        left = left.filter(n => n !== m);
+      }
+      return names;
+    }
     let left = members.filter(m => m !== names[3]);
     for (const who of [1, 2, 3]) {
       const m = left.find(n => VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
@@ -644,7 +692,7 @@ export class BotRun {
     const who = f.names[line.who - 1];
     const ms = this.voice(room, who, line.id, line.ms);
     if (FOUR_ERASE.has(line.id)) f.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who)));
-    for (const d of FOUR_DRAW[line.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, f, d, line.who, who));
+    for (const d of FOUR_DRAW[line.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, f.onBoard, d, COLORS[(line.who - 1) % COLORS.length], who));
     const move = FOUR_MOVES[line.id];
     if (move) this.after(ms * 0.8, () => this.host.move(room, CARD_UID[move[0] - 1], move[1][0], move[1][1]));
     if (line.id === 'c2-29') {
@@ -656,23 +704,111 @@ export class BotRun {
     this.after(ms + gap, () => this.fourStep(room));
   }
 
-  private fourDraw(room: string, f: Four, d: FourDraw, by: number, author: string) {
-    const color = COLORS[(by - 1) % COLORS.length];
-    const uid = () => { const u = `bot-${room}-${this.uid++}`; f.onBoard.push(u); return u; };
+  /** author '' — the teacher draws it */
+  private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string) {
+    const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard.push(u); return u; };
+    const put = (obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj);
+    if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
     if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => {
       const [a, b] = [d.path![i], p];
-      this.host.write(room, {
+      put({
         uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,
         originX: 'center', originY: 'center', stroke: d.thin ? '#adb5bd' : color, strokeWidth: d.thin ? 2 : 5, strokeLineCap: 'round',
-      }, author);
+      });
     }));
     for (const t of [d.label && { ...d.label, size: 28 }, d.text && { ...d.text, size: 34 }]) {
       if (!t) continue;
-      this.host.write(room, {
+      put({
         uid: uid(), type: 'IText', text: t.text, left: t.at[0], top: t.at[1], originX: t.size === 28 ? 'center' : 'left', originY: 'center',
         fontSize: t.size, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
-      }, author);
+      });
     }
+  }
+
+  // ---------- a four that calls (Trap, Ч1) ----------
+  private trapLine(t: Trap, id: string) { return t.lines.find(l => l.id === id)!; }
+
+  private trapStep(room: string) {
+    const t = this.traps.get(room);
+    if (!t || t.busy) return;
+    let line = t.insert.shift();
+    if (!line) {
+      const cur = t.lines[t.next];
+      if (!cur || cur.id === 'c1-38') return; // over (38 on are said only instead of 18–19): they stay quiet
+      if (t.phase === 'a' && cur.id === 'c1-18' && t.present) {
+        // the teacher is here as they'd call: they ask straight away
+        t.phase = 'asked';
+        t.insert.push(this.trapLine(t, 'c1-t0'), this.trapLine(t, 'c1-39'));
+        line = this.trapLine(t, 'c1-38');
+        t.next = t.lines.findIndex(l => l.id === 'c1-ta1');
+      } else if (t.phase === 'a' || t.phase === 'b') { line = cur; t.next++; }
+      else return;
+    }
+    const said = line;
+    t.busy = true;
+    const who = said.who === 'T' ? '' : t.names[said.who - 1];
+    let ms: number;
+    if (said.who === 'T') {
+      const v = said.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(said.ms)[0];
+      ms = said.ms[v];
+      this.host.say(room, { src: `/demo/voice/${said.id}-${v}.mp3`, ms, who: 'Teacher' });
+    } else ms = this.voice(room, who, said.id, said.ms);
+    if (said.id === 'c1-39') {
+      // asked in the room: the question shows in the teacher's panel as a call would
+      this.host.call(room, said.text, t.names[0]);
+      this.host.callOff(room);
+    }
+    if (FOUR_ERASE.has(said.id)) t.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who || t.names[0])));
+    const color = said.who === 'T' ? TEACHER_COLOR : COLORS[(said.who - 1) % COLORS.length];
+    for (const d of FOUR_DRAW[said.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, t.onBoard, d, color, who));
+    const move = FOUR_MOVES[said.id];
+    if (move) this.after(ms * 0.8, () => this.host.move(room, CARD_UID[move[0] - 1], move[1][0], move[1][1]));
+    this.after(ms, () => {
+      t.busy = false;
+      if (said.id === 'c1-18' && t.phase === 'a') {
+        t.next = t.lines.findIndex(l => l.id === 'c1-ta1');
+        if (t.present) { // came in while it was said: no bell, the question straight away
+          t.phase = 'asked';
+          t.insert.push(this.trapLine(t, 'c1-t0'), this.trapLine(t, 'c1-39'));
+          this.after(LINE_GAP_MS, () => this.trapStep(room));
+          return;
+        }
+        // they call: the bell waits its turn among the other rooms'
+        t.phase = 'calling';
+        this.requestCall(room, this.trapLine(t, 'c1-19').text, 1);
+        return;
+      }
+      if (t.phase === 'asked' && (said.id === 'c1-19' || said.id === 'c1-39')) {
+        // asked: the teacher's ready answer, drawn as it is said, and on they go
+        t.phase = 'b';
+        this.after(THINK_MS, () => this.trapStep(room));
+        return;
+      }
+      if (said.id === 'c1-37') return;
+      this.after(LINE_GAP_MS, () => this.trapStep(room));
+    });
+  }
+
+  private trapVisited(room: string) {
+    const t = this.traps.get(room);
+    if (!t) return;
+    t.present = true;
+    if (t.phase !== 'calling') return; // coming in before: not greeted
+    // came on the call: «Да. Какие у вас вопросы?» — and the question
+    t.phase = 'asked';
+    t.insert.push(this.trapLine(t, 'c1-t0'), this.trapLine(t, 'c1-19'));
+    this.after(ARRIVE_MS, () => this.trapStep(room));
+  }
+
+  private trapLeft(room: string) {
+    const t = this.traps.get(room);
+    if (!t) return;
+    t.present = false;
+    if (t.phase !== 'asked') return;
+    // gone before the answer: they call again a little later
+    t.insert = [];
+    t.phase = 'calling';
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.trapLine(t, 'c1-19').text, 1); });
   }
 
   // ---------- a dialogue that drifts (Chat) ----------
