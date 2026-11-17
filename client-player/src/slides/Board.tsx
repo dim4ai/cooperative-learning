@@ -167,7 +167,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
 
     const style = (o: FabricObject) => {
       const { tool, readOnly } = live.current
-      const sel = tool === 'select' && !readOnly && o.stroke !== ERASER_COLOR // a rub-out isn't something to pick up
+      const sel = tool === 'select' && !readOnly && o.stroke !== ERASER_COLOR && !(o as Obj).pinned // a rub-out isn't something to pick up, an earlier sheet is only to look at
       o.set({ selectable: sel, evented: sel, hoverCursor: 'move' })
     }
 

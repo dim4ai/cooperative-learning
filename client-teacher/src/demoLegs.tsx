@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import type { SheetPlace } from './DemoVoice';
 
 // The solo demo, Миша's pair: the teacher has said «клетки — это катеты». Pale blinking legs over their board
 // show where to draw: AO goes 5 cells right along AD and 2 up, AB goes 4 up and 2 right (outside the figure).
-// Page coordinates of the 1600×900 board, a cell is 56: A(116,568), B(228,344), O(396,456).
+// Coordinates of Миша's sheet from b2 (1600×900, a cell is 56: A(116,568), B(228,344), O(396,456)), shrunk to where
+// it lies on the pair's board.
 
 const AO = { color: '#e67e22', path: 'M116 568 H396 V456', labels: [{ x: 256, y: 600, t: '5' }, { x: 420, y: 520, t: '2' }] };
 const AB = { color: '#8e44ad', path: 'M116 568 V344 H228', labels: [{ x: 90, y: 462, t: '4' }, { x: 172, y: 326, t: '2' }] };
 
-export function LegsGhost() {
+export function LegsGhost({ at }: { at: SheetPlace }) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
@@ -30,6 +32,7 @@ export function LegsGhost() {
     <div ref={ref} data-testid="legs-ghost" style={{ position: 'absolute', pointerEvents: 'none', ...(box ?? { display: 'none' }) }}>
       <style>{'@keyframes legs-blink { 0%, 100% { opacity: 0.15 } 50% { opacity: 0.6 } }'}</style>
       <svg viewBox="0 0 1600 900" width="100%" height="100%" style={{ animation: 'legs-blink 1.4s ease-in-out infinite' }}>
+        <g transform={`translate(${at.x} ${at.y}) scale(${at.s})`}>
         {[AO, AB].map(l => (
           <g key={l.path} fill="none" stroke={l.color} strokeWidth={10} strokeLinecap="round" strokeLinejoin="round">
             <path d={l.path} strokeDasharray="22 16" />
@@ -38,6 +41,7 @@ export function LegsGhost() {
             ))}
           </g>
         ))}
+        </g>
       </svg>
     </div>
   );

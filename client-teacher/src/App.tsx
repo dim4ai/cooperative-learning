@@ -33,7 +33,7 @@ import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 import { playCallBell, playStageBeep } from './beep';
-import { DemoVoice, demoVoiceHeard, useDemoLegs, useDemoSpeaker } from './DemoVoice';
+import { DemoVoice, demoVoiceHeard, useDemoLegs, useDemoSpeaker, type SheetPlace } from './DemoVoice';
 import { LegsGhost } from './demoLegs';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
@@ -187,7 +187,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
   /** this room, as the server names it */
   roomKey?: string;
   /** the solo demo: pale blinking legs over the board (Pythagoras for AB and AO) */
-  legs?: boolean;
+  legs?: SheetPlace | null;
 }) {
   // with placeholders: without video everyone still gets a tile with their name
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
@@ -241,7 +241,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             }}>Я ответил(а) сам(а)</button>
           </div>
         )}
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>{sheet}{legs && <LegsGhost />}</div>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>{sheet}{legs && <LegsGhost at={legs} />}</div>
       </div>
 
       {/* Right column: cameras + back button */}
@@ -338,9 +338,9 @@ function ScreenShareSync({ active, pick, onCancel }: { active: boolean; pick: nu
   return null;
 }
 
-function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity, poll }: { poll: TeacherPollView | null; activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[] }) {
+function StudentGrid({ seatsLocked, students, stage, atDesks, seats, hasLivekit, groupMode, callingRooms, onJoinPair, onMute, lessonCode, slidesView, names, marks, mapOpen, waiting, activity, poll }: { poll: TeacherPollView | null; activity: ClassActivity | null; students: Participant[]; stage: Stage; atDesks?: boolean; seats: Seat[]; hasLivekit: boolean; groupMode: GroupMode; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void; onMute: (name: string) => void; lessonCode: string; slidesView: ReactNode; names: SeatNames; marks: Marks; mapOpen: boolean; waiting: string[]; seatsLocked?: boolean }) {
   if (stage === 'waiting') {
-    return <SeatingMap seats={seats} showSelf={hasLivekit} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
+    return <SeatingMap seats={seats} showSelf={hasLivekit} readOnly={seatsLocked} callingRooms={callingRooms} onJoinPair={onJoinPair} onMute={onMute} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} atDesks={atDesks} />;
   }
 
   if (stage === 'group' && poll) {
@@ -355,7 +355,7 @@ function StudentGrid({ students, stage, atDesks, seats, hasLivekit, groupMode, c
 
   if (stage === 'group') {
     // Everyone is in the main room: a move takes effect when the next block splits the class
-    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove callingRooms={callingRooms} onJoinPair={onJoinPair} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
+    if (mapOpen) return <SeatingMap seats={seats} showSelf={hasLivekit} noRemove readOnly={seatsLocked} callingRooms={callingRooms} onJoinPair={onJoinPair} lessonCode={lessonCode} names={names} marks={marks} waiting={waiting} />;
     if (groupMode === 'board') return <>{slidesView}</>;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#aaa', fontSize: 15 }}>
@@ -658,6 +658,10 @@ export default function App() {
   const [endDialog, setEndDialog] = useState(false);
   const hands = useHands();
   const legs = useDemoLegs(demo?.solo ? livekit?.room ?? null : null); // Миша's pair: pale legs after the teacher's answer
+  // the solo demo: once the lesson began the class stays where it sat (the bots' pairs go by it); the server keeps to it too
+  const [begun, setBegun] = useState(false);
+  useEffect(() => { if (state.stage !== 'waiting') setBegun(true); }, [state.stage]);
+  const seatsLocked = !!demo?.solo && begun;
   const [demoReply, setDemoReply] = useState<{ room: string; text: string } | null>(null); // the solo demo: a group waits for an answer
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
   const poll = usePoll();
@@ -1096,7 +1100,7 @@ export default function App() {
               elsewhere={[...callingRooms].filter(r => r !== livekit?.room).map(r => ({ room: r, names: students.filter(p => p.livekitRoom === r).map(p => p.name) }))}
               onGo={room => socket.emit('joinPair', { room })}
               reply={demoReply && demoReply.room === livekit?.room ? { text: demoReply.text, onAnswer: ready => { socket.emit('demoReply', { room: demoReply.room, ready }); setDemoReply(null); } } : null} />
-            : <StudentGrid activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
+            : <StudentGrid seatsLocked={seatsLocked} activity={activity} students={students} stage={state.stage} atDesks={state.atDesks} seats={seats} hasLivekit={!!livekit} groupMode={groupMode} callingRooms={callingRooms} onJoinPair={(room, toTalk) => { socket.emit('joinPair', {
                 room,
                 // a group at work isn't disturbed: the teacher comes in unseen and unheard unless called
                 // (the bell) or asked to talk; «Войти открыто» in the room when it's needed
@@ -1111,7 +1115,7 @@ export default function App() {
       <HighFive room={inSmallRoom ? livekit?.room ?? null : null} />
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={legs} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={!!legs} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

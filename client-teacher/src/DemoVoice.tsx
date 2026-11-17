@@ -3,14 +3,16 @@ import { useEffect, useState } from 'react';
 // The solo demo's voiced dialogues: the server says when a line begins in a room; the teacher hears it only
 // at that room's board, coming in mid-line as into a real conversation
 
-interface Clip { room: string; src: string; ms: number; startedAt: number; who?: string } // startedAt: on this computer's clock
+/** Where Миша's sheet from b2 lies on his pair's board: its corner and how much smaller (server demoBots.ts) */
+export interface SheetPlace { x: number; y: number; s: number }
+interface Clip { room: string; src: string; ms: number; startedAt: number; who?: string; legs?: SheetPlace | null } // startedAt: on this computer's clock
 
 const latest = new Map<string, Clip>();
 const listeners = new Set<() => void>();
 
 /** From the socket: { room, src, ms, now } with now on the server's clock */
-export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string }) {
-  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who });
+export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string; legs?: SheetPlace | null }) {
+  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who, legs: c.legs });
   listeners.forEach(f => f());
 }
 
@@ -27,12 +29,15 @@ export function useDemoSpeaker(room: string | null): string | null {
   return c?.who && Date.now() - c.startedAt < c.ms ? c.who : null;
 }
 
-/** Миша's pair, from the teacher's answer till they've counted: pale legs on their board for AB and AO */
-export function useDemoLegs(room: string | null): boolean {
-  const calc = () => !!room && /\/p1-(ta|18|19)-/.test(latest.get(room)?.src ?? '');
+/** Миша's pair, from the teacher's answer till they've counted: pale legs for AB and AO over his sheet (null: none) */
+export function useDemoLegs(room: string | null): SheetPlace | null {
+  const calc = (): SheetPlace | null => {
+    const c = room ? latest.get(room) : undefined;
+    return c && /\/p1-(ta|18|19)-/.test(c.src) ? c.legs ?? { x: 0, y: 0, s: 1 } : null;
+  };
   const [on, setOn] = useState(calc);
   useEffect(() => {
-    const f = () => setOn(calc());
+    const f = () => setOn(prev => { const n = calc(); return JSON.stringify(n) === JSON.stringify(prev) ? prev : n; });
     f();
     listeners.add(f);
     return () => { listeners.delete(f); };

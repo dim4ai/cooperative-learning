@@ -5,6 +5,8 @@
 import { CHAT, CHATTER, CHOCOLATE, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
+/** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
+export interface SheetPlace { x: number; y: number; s: number }
 export const BOTS = [
   { name: 'Аня', avatar: 'fox' }, { name: 'Миша', avatar: 'bear' },
   { name: 'Лена', avatar: 'owl' }, { name: 'Тимур', avatar: 'tiger' },
@@ -171,10 +173,136 @@ const ERASE_BEFORE = new Set(['p2-21', 'p2-31']);
 const OBSERVATIONS = ['AD = BC, по 8 клеток', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'];
 const lines = (texts: string[], first: number, gap: number): Line[] => texts.map((text, i) => ({ at: first + i * gap, text }));
 
+/** The pairs of b3, by who sits at a desk: Миша's is always П1; the other desks get П2–П4 at random (once the lesson
+ *  began, nobody is moved any more). {1} and {2} as in each dialogue */
+type Role = 'p1' | 'p2' | 'p3' | 'p4';
+const PAIR_PART: Record<Role, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }; // SCRIPT.pairs
+/** b2 «Что я замечаю»: what each one writes on their sheet, by their part in b3 — what the pair says of it there.
+ *  start, gap: seconds; call: they ask the teacher, and write `reply` once the teacher has been */
+interface Sheet { lines: string[]; start: number; gap: number; call?: { at: number; note: string; reply?: string[] } }
+const SHEETS: Record<string, Sheet> = {
+  // Миша, with a mouse at his aunt's: «как курица лапкой», and AB = AO wrong
+  'p1-1': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', '∠B = ∠D', 'AB = AO'], start: 6, gap: 9 },
+  // «Пять. Стороны, диагонали, угол» — the diagonals after asking
+  'p1-2': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C'], start: 5, gap: 8, call: {
+    at: 27, note: 'А стороны и отрезки — это разве не одно и то же?', reply: ['AO = OC', 'BO = OD'] } },
+  // the strong one: everything, and asks about the small angles
+  'p2-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'], start: 4, gap: 7, call: {
+    at: 40, note: 'Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?', reply: ['∠BAC = ∠ACD'] } },
+  // the weak one: «Одну пару сторон нашёл, и всё»
+  'p2-2': { lines: ['AD = BC'], start: 18, gap: 0 },
+  // the one who does all the talking, and the quiet one
+  'p3-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C'], start: 5, gap: 8 },
+  'p3-2': { lines: ['AD = BC'], start: 3, gap: 0, call: {
+    at: 12, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠B = ∠D'] } },
+  // «Четыре. Стороны и диагонали» — «У меня тоже четыре, только другие… Зато углы» in a scrawl: «Это бэ или восьмёрка?»
+  'p4-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
+  'p4-2': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', '∠B = ∠D'], start: 6, gap: 10 },
+};
+const MESSY = new Set(['p1-1', 'p4-2']);
+const INKS = ['#1971c2', '#5f3dc4', '#2b8a3e', '#c2255c', '#0c8599', '#e67700', '#862e9c', '#495057']; // each one's pen, by BOTS
+const ANY_SHEET: Sheet = { lines: OBSERVATIONS.slice(0, 3), start: 6, gap: 9 };
+const SHEET_TOP = 60, SHEET_ROW = 72, SHEET_LEFT = 860, SHEET_FONT = 40; // in the sheet's own pixels
+const SHEET_BLOCK = 'b2'; // the sheet b3 shows (lesson's boardsFrom)
+
+/** b3: as a line is said, the one checking marks the partner's sheet: ✓, ?, a crossing out, or a line added under the list.
+ *  on: whose sheet ({1} or {2}); by: who marks; row: the sheet's line */
+interface Mark { at: number; on: 1 | 2; by: 1 | 2; row?: number; mark?: '✓' | '?'; strike?: boolean; add?: string }
+const SHEET_MARKS: Record<string, Mark[]> = {
+  // «А-дэ равно бэ-цэ — есть. А-бэ равно цэ-дэ — есть. Углы есть… А это что? А-бэ равно а-о?»
+  'p1-06': [
+    { at: 0.22, on: 1, by: 2, row: 0, mark: '✓' }, { at: 0.42, on: 1, by: 2, row: 1, mark: '✓' },
+    { at: 0.58, on: 1, by: 2, row: 2, mark: '✓' }, { at: 0.64, on: 1, by: 2, row: 3, mark: '✓' },
+    { at: 0.95, on: 1, by: 2, row: 4, mark: '?' },
+  ],
+  'p1-18': [{ at: 0.9, on: 1, by: 2, add: 'AB² = 4 + 16 = 20' }],
+  'p1-19': [{ at: 0.3, on: 1, by: 1, add: 'AO² = 25 + 4 = 29' }, { at: 0.75, on: 1, by: 1, row: 4, strike: true }],
+  // «А-дэ равно бэ-цэ. Это правильно»; then the weak one adds what they work out together
+  'p2-05': [{ at: 0.6, on: 2, by: 1, row: 0, mark: '✓' }],
+  'p2-20': [{ at: 0.3, on: 2, by: 2, add: 'AB = CD' }],
+  'p2-23': [{ at: 0.9, on: 2, by: 2, add: 'AO = OC' }],
+  'p2-26': [{ at: 0.95, on: 2, by: 2, add: 'BO = OD' }],
+  'p2-34': [{ at: 0.9, on: 2, by: 2, add: '∠A = ∠C' }],
+  'lp01': [{ at: 0.9, on: 2, by: 1, row: 0, mark: '✓' }],
+  // «Угол а равен углу цэ — вижу. А внизу что? Это бэ или восьмёрка?» — «Бэ»
+  'p4-05': [{ at: 0.3, on: 2, by: 1, row: 2, mark: '✓' }, { at: 0.8, on: 2, by: 1, row: 3, mark: '?' }],
+  'p4-06': [{ at: 0.9, on: 2, by: 1, row: 3, mark: '✓' }],
+};
+const MARK_COLOR = { '✓': '#2f9e44', '?': '#e8590c' };
+const STRIKE_COLOR = '#c92a2a';
+
+/** Handwriting with a mouse: each letter a few shaky strokes, sizes and slants all over the place. Strokes in a box
+ *  of height 1, y down */
+type Stroke = [number, number][];
+const oval = (cx: number, rx: number, from: number, to: number, n = 12): Stroke =>
+  Array.from({ length: n + 1 }, (_, i) => { const t = (from + (to - from) * i / n) * Math.PI / 180; return [cx + rx * Math.cos(t), 0.5 + 0.5 * Math.sin(t)]; });
+const TWO: Stroke[] = [[[0.05, 0.2], [0.2, 0.02], [0.4, 0], [0.52, 0.15], [0.5, 0.35], [0.05, 1], [0.58, 1]]];
+const GLYPHS: Record<string, Stroke[]> = {
+  A: [[[0, 1], [0.3, 0], [0.6, 1]], [[0.13, 0.6], [0.47, 0.6]]],
+  B: [[[0, 1], [0, 0], [0.35, 0], [0.5, 0.08], [0.52, 0.25], [0.38, 0.46], [0, 0.47]], [[0.38, 0.46], [0.56, 0.58], [0.58, 0.82], [0.42, 1], [0, 1]]],
+  C: [oval(0.3, 0.3, -40, -320)],
+  D: [[[0, 0], [0, 1], [0.28, 1], [0.5, 0.85], [0.6, 0.5], [0.5, 0.15], [0.28, 0], [0, 0]]],
+  O: [oval(0.3, 0.3, 0, 360)],
+  '=': [[[0.05, 0.38], [0.55, 0.38]], [[0.05, 0.66], [0.55, 0.66]]],
+  '∠': [[[0.65, 0.15], [0.02, 1], [0.7, 1]]],
+  '+': [[[0.3, 0.25], [0.3, 0.85]], [[0.02, 0.55], [0.58, 0.55]]],
+  '?': [[[0.05, 0.25], [0.15, 0.05], [0.35, 0], [0.52, 0.1], [0.52, 0.3], [0.3, 0.5], [0.3, 0.7]], [[0.3, 0.92], [0.3, 0.98]]],
+  '0': [oval(0.26, 0.24, 0, 360)],
+  '1': [[[0.1, 0.2], [0.3, 0], [0.3, 1]]],
+  '2': TWO,
+  '²': TWO.map(st => st.map(([x, y]) => [x * 0.5, y * 0.5 - 0.1] as [number, number])),
+  '3': [[[0.05, 0.1], [0.3, 0], [0.5, 0.12], [0.48, 0.35], [0.25, 0.47], [0.5, 0.58], [0.55, 0.82], [0.35, 1], [0.05, 0.92]]],
+  '4': [[[0.45, 1], [0.45, 0], [0, 0.7], [0.6, 0.7]]],
+  '5': [[[0.55, 0], [0.1, 0], [0.05, 0.45], [0.35, 0.4], [0.55, 0.6], [0.5, 0.88], [0.3, 1], [0.03, 0.92]]],
+  '6': [[[0.5, 0.05], [0.25, 0.1], [0.07, 0.45], [0.05, 0.8], [0.25, 1], [0.5, 0.88], [0.52, 0.62], [0.3, 0.5], [0.07, 0.62]]],
+  '7': [[[0.02, 0], [0.58, 0], [0.2, 1]]],
+  '8': [[[0.3, 0.47], [0.08, 0.3], [0.12, 0.08], [0.3, 0], [0.48, 0.08], [0.52, 0.3], [0.3, 0.47], [0.06, 0.65], [0.08, 0.92], [0.3, 1], [0.52, 0.92], [0.55, 0.65], [0.3, 0.47]]],
+  '9': [[[0.5, 0.4], [0.3, 0.52], [0.08, 0.4], [0.08, 0.12], [0.3, 0], [0.5, 0.12], [0.52, 0.5], [0.4, 1], [0.1, 0.95]]],
+};
+
+/** A line in a scrawl from (x, y), its letters h high: a Path, placed by its middle */
+function scrawl(uid: string, text: string, x: number, y: number, h: number, color: string) {
+  let seed = [...text].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) >>> 0;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 - 0.5; };
+  const path: (string | number)[][] = [];
+  const xs: number[] = [], ys: number[] = [];
+  const at = (cmd: string, px: number, py: number) => {
+    const r = (v: number) => Math.round(v * 10) / 10;
+    path.push([cmd, r(px), r(py)]); xs.push(px); ys.push(py);
+  };
+  let cx = x + 0.2 * h;
+  for (const ch of text) {
+    const g = GLYPHS[ch];
+    if (!g) { cx += 0.45 * h; continue; }
+    const k = h * (1.05 + 0.45 * rnd()), tilt = 0.45 * rnd(), lift = 0.25 * h * rnd();
+    for (const stroke of g) {
+      stroke.forEach(([gx, gy], i) => {
+        const put = (ux: number, uy: number, shake: number) => {
+          const px = cx + (ux + shake * rnd()) * k + (1 - uy) * tilt * k, py = y + lift + (uy + shake * rnd()) * k;
+          at(i === 0 && shake > 0.15 ? 'M' : 'L', px, py);
+        };
+        if (i > 0) { // the mouse wobbles between the points too
+          const [px0, py0] = stroke[i - 1];
+          put(px0 + (gx - px0) / 3, py0 + (gy - py0) / 3, 0.1);
+          put(px0 + (gx - px0) * 2 / 3, py0 + (gy - py0) * 2 / 3, 0.1);
+        }
+        put(gx, gy, 0.2);
+      });
+    }
+    cx += (Math.max(...g.flat().map(p => p[0])) + 0.25 + 0.2 * rnd()) * k;
+  }
+  const l = Math.min(...xs), r = Math.max(...xs), t = Math.min(...ys), b = Math.max(...ys);
+  return {
+    uid, type: 'Path', path, left: (l + r) / 2, top: (t + b) / 2, originX: 'center', originY: 'center',
+    fill: '', stroke: color, strokeWidth: Math.max(1.5, h * 0.08), strokeLineCap: 'round', strokeLineJoin: 'round',
+  };
+}
+
 /** By room, in room order; a room past the end of the list uses the script from the start of it.
  *  Rooms call some time apart, so the teacher can get to each: three on the individual stage, two in pairs, one in fours
  *  (client-teacher/src/demoHints.tsx, CALLS counts on that). */
 const SCRIPT: Record<BotStage, RoomScript[]> = {
+  // b2 goes by SHEETS; this is for an individual task added during the lesson, room by room
   individual: [
     { lines: lines(['AD = BC', 'AB = CD'], 5, 8), call: {
       at: 27, note: 'А стороны и отрезки — это разве не одно и то же?',
@@ -194,12 +322,12 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   pairs: [
     // П1 «Как курица лапкой»: they check their lists, argue about AB = AO and call
     { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, talk: [0.55, 0.5] },
-    // П2 «Давай я быстро объясню»: Лена explains with triangles drawn on the cells, the other one gets it
-    { lead: 'Лена', lines: [], explain: EXPLAIN, talk: [0.6, 0.45] },
+    // П2 «Давай я быстро объясню»: {1} explains with triangles drawn on {2}'s sheet, {2} gets it
+    { lines: [], explain: EXPLAIN, talk: [0.6, 0.45] },
     // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
     { lines: [], spoken: LOPSIDED_PAIR, later: true },
     // П4 «Трёп»: they begin checking and drift off; the teacher may listen in, or come in and set them to work
-    { lead: 'Тимур', lines: [], chat: CHAT, talk: [0.5, 0.45] },
+    { lines: [], chat: CHAT, talk: [0.5, 0.45] },
   ],
   fours: [
     { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), talk: [0.5, 0.4, 0.35, 0.03], call: {
@@ -257,6 +385,12 @@ export interface BotHost {
   /** «Дай пять»: a bot puts the hand up in its room, a bot taps it */
   five(room: string, name: string): void;
   fiveTap(room: string, name: string): void;
+  /** Where someone's earlier sheet lies on their group's board now (index.ts layEarlierSheets); null: it doesn't */
+  sheetAt(room: string, name: string): SheetPlace | null;
+  /** Who sits with whom: each desk's pair, in seat order */
+  deskmates(): string[][];
+  /** A bot's writing on an earlier block's sheet, as if done then (that block was skipped, or a test began later) */
+  pastWrite(name: string, blockId: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
   /** The teacher's drawing on a group's board (the ready answer drawn as it is said) */
   teacherWrite(room: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
   /** A bot talked this long: counted as a real student's microphone would be */
@@ -265,7 +399,7 @@ export interface BotHost {
   members(room: string): string[];
   call(room: string, note: string, who?: string): void;
   /** A voiced line begins in a room: the teacher there hears it */
-  say(room: string, clip: { src: string; ms: number; who?: string }): void;
+  say(room: string, clip: { src: string; ms: number; who?: string; legs?: SheetPlace | null }): void;
   /** A bot raises a hand in the explanation */
   raise(name: string): void;
   /** Given the word, a bot says its line to the class */
@@ -303,7 +437,12 @@ export class BotRun {
   private stageTimers = new Set<NodeJS.Timeout>();
   private written = new Map<string, { n: number; top: number }>();
   private names = new Map<string, [string, string]>(); // room → who {1} and {2} are there
-  private replies = new Map<string, string>();
+  private replies = new Map<string, () => void>();
+  private roles = new Map<string, { role: Role; who: 1 | 2 }>();
+  private sheetRows = new Map<string, { text: string; top: number }[]>(); // name → their b2 sheet's lines
+  private marked = new Set<string>(); // room:line whose marks are on the sheets already
+  private rowMarks = new Map<string, number>(); // room:owner:row → marks there already, the next one goes left of them
+  private listed = new Map<string, number>(); // room → lines of the pair's common list under the sheets
   // calls come one at a time: the next one only after the teacher has answered this one and come back
   private callQueue: { room: string; at: number; fire: () => void }[] = [];
   private calling: { room: string; visited: boolean } | null = null;
@@ -352,6 +491,7 @@ export class BotRun {
     const speaker = /^\{([12])\}: /.exec(text)?.[1];
     const [lead, partner] = this.names.get(room) ?? ['', ''];
     const author = ((by ?? Number(speaker ?? 1)) === 2 ? partner : lead) || undefined;
+    if (!speaker && author && this.stage === 'pairs' && this.host.sheetAt(room, author)) { this.listLine(room, this.fill(room, text), author); return; }
     const fontSize = speaker ? 30 : 40;
     const rows = text.split('\n').length;
     const height = speaker ? rows * 36 + 14 : 72;
@@ -385,12 +525,32 @@ export class BotRun {
     this.earlyCalled = false;
     this.stageStart = Date.now();
     this.raiseHands(stage, blockId);
+    this.marked.clear();
+    this.rowMarks.clear();
+    this.listed.clear();
     if (stage !== 'individual' && stage !== 'pairs' && stage !== 'fours') return;
+    if (stage === 'individual' && blockId === SHEET_BLOCK) { this.sheets(); return; }
     const script = (blockId && BLOCK_SCRIPT[blockId]) || SCRIPT[stage];
     const rooms = this.host.rooms();
-    // a script with a lead goes to that bot's room; the rest, in turn, to the other rooms
     const parts = new Map<string, RoomScript>();
+    // pairs: each desk its dialogue, as given out when the lesson began; who is {1} and {2} too
+    const fixed = new Map<string, [string, string]>();
+    if (script === SCRIPT.pairs) {
+      const pairRooms = rooms.map(r => this.host.members(r));
+      if (pairRooms.some(ms => ms.some(m => !this.roles.has(m)))) this.assignRoles(true);
+      this.pastSheets();
+      for (const room of rooms) {
+        const ms = this.host.members(room);
+        const r = this.roles.get(ms[0] ?? '');
+        if (!r || !ms.every(m => this.roles.get(m)?.role === r.role)) continue;
+        const one = ms.find(m => this.roles.get(m)!.who === 1) ?? ms[0], two = ms.find(m => m !== one) ?? one;
+        parts.set(room, script[PAIR_PART[r.role]]);
+        fixed.set(room, [one, two]);
+      }
+    }
+    // a script with a lead goes to that bot's room; the rest, in turn, to the other rooms
     for (const part of script) {
+      if ([...parts.values()].includes(part)) continue;
       const room = part.lead && rooms.find(r => !parts.has(r) && this.host.members(r).includes(part.lead!));
       if (room) parts.set(room, part);
     }
@@ -399,9 +559,11 @@ export class BotRun {
     rooms.forEach(room => {
       const part = parts.get(room)!;
       const members = this.host.members(room);
-      const lead = part.lead && members.includes(part.lead) ? part.lead : members[0] ?? '';
-      // the partner if they sit together; otherwise whoever sits with the lead, so the board matches the pair
-      const partner = part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== lead) ?? lead;
+      const [lead, partner] = fixed.get(room) ?? (() => {
+        const l = part.lead && members.includes(part.lead) ? part.lead : members[0] ?? '';
+        // the partner if they sit together; otherwise whoever sits with the lead, so the board matches the pair
+        return [l, part.partner && members.includes(part.partner) ? part.partner : members.find(m => m !== l) ?? l];
+      })();
       this.names.set(room, [lead, partner]);
       for (const line of part.lines) this.after(line.at * 1000, () => this.write(room, line.text));
       let callAt = part.call?.at;
@@ -459,13 +621,135 @@ export class BotRun {
         const { note, reply, by } = part.call;
         const at = callAt ?? part.call.at;
         this.callQueue.push({ room, at: at * 1000, fire: () => {
-          if (reply) this.replies.set(room, reply);
+          if (reply) this.replies.set(room, () => this.write(room, reply));
           this.host.call(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
         } });
       }
     });
     this.callQueue.sort((a, b) => a.at - b.at);
     this.nextCall();
+  }
+
+  // ---------- the sheets of b2, and marks on them in b3 ----------
+  /** Who has which part in the pairs, by the desks (Миша's desk: П1). Given out once: the class stays where it sat */
+  private assignRoles(again = false) {
+    if (this.roles.size && !again) return;
+    this.roles.clear();
+    const left = (['p2', 'p3', 'p4'] as Role[]).sort(() => Math.random() - 0.5);
+    for (const desk of this.host.deskmates()) {
+      if (desk.length !== 2) continue;
+      let [a, b] = desk;
+      const role: Role | undefined = desk.includes(SOLO_NEWCOMER) ? 'p1' : left.shift();
+      if (!role) continue;
+      if (b === SOLO_NEWCOMER) [a, b] = [b, a];
+      if (role === 'p4' && this.female(b) && !this.female(a)) [a, b] = [b, a]; // the chatter: the girl is {1}
+      this.roles.set(a, { role, who: 1 });
+      this.roles.set(b, { role, who: 2 });
+    }
+  }
+
+  private sheetOf(name: string): { sheet: Sheet; messy: boolean } {
+    const r = this.roles.get(name);
+    const key = r ? `${r.role}-${r.who}` : '';
+    return { sheet: SHEETS[key] ?? ANY_SHEET, messy: MESSY.has(key) };
+  }
+  private messy(name: string) { return this.sheetOf(name).messy && this.roles.has(name); }
+  private ink(name: string) { return INKS[Math.max(0, BOTS.findIndex(b => b.name === name)) % INKS.length]; }
+
+  /** One line of a list in the writer's hand: printed, or a scrawl */
+  private hand(uid: string, name: string, text: string, x: number, y: number, size: number, color = this.ink(name)) {
+    return this.messy(name)
+      ? scrawl(uid, text, x, y + size * 0.15, size * 0.8, color)
+      : { uid, type: 'IText', text, left: x, top: y, originX: 'left', originY: 'top', fontSize: size, fontFamily: 'sans-serif', fill: color };
+  }
+
+  /** b2: each one alone writes their sheet line by line; three ask the teacher something on the way */
+  private sheets() {
+    this.assignRoles();
+    this.sheetRows.clear();
+    for (const room of this.host.rooms()) {
+      const name = this.host.members(room)[0];
+      if (!name) continue;
+      this.names.set(room, [name, name]);
+      const { sheet } = this.sheetOf(name);
+      const put = (text: string) => this.sheetLine(name, text, obj => this.host.write(room, obj, name));
+      sheet.lines.forEach((text, i) => this.after((sheet.start + i * sheet.gap) * 1000, () => put(text)));
+      if (!sheet.call) continue;
+      const { at, note, reply } = sheet.call;
+      this.callQueue.push({ room, at: at * 1000, fire: () => {
+        if (reply) this.replies.set(room, () => reply.forEach((t, i) => this.after(i * 2500, () => put(t))));
+        this.host.call(room, note, name);
+      } });
+    }
+    this.callQueue.sort((a, b) => a.at - b.at);
+    this.nextCall();
+  }
+
+  /** The next line down someone's sheet */
+  private sheetLine(name: string, text: string, put: (obj: Record<string, unknown> & { uid: string; type: string }) => void) {
+    const rows = this.sheetRows.get(name) ?? [];
+    const top = SHEET_TOP + rows.length * SHEET_ROW;
+    put(this.hand(`bot-${name}-${this.uid++}`, name, text, SHEET_LEFT, top, SHEET_FONT));
+    rows.push({ text, top });
+    this.sheetRows.set(name, rows);
+  }
+
+  /** Pairs with nothing from b2 (the teacher skipped it, or a test began at b3): their sheets as they would have been */
+  private pastSheets() {
+    for (const [name] of this.roles) {
+      if (this.sheetRows.has(name)) continue;
+      const { sheet } = this.sheetOf(name);
+      for (const text of [...sheet.lines, ...sheet.call?.reply ?? []]) this.sheetLine(name, text, obj => this.host.pastWrite(name, SHEET_BLOCK, obj));
+    }
+  }
+
+  /** A line is being said in a pair: the marks that go with it, on the sheets */
+  private sheetMarks(room: string, id: string, ms: number) {
+    const marks = SHEET_MARKS[id.replace(/f$/, '')];
+    if (!marks || this.marked.has(`${room}:${id}`)) return;
+    this.marked.add(`${room}:${id}`);
+    const names = this.names.get(room) ?? ['', ''];
+    const rowMarks = this.rowMarks;
+    for (const m of marks) this.after(m.at * ms, () => {
+      const owner = names[m.on - 1], by = names[m.by - 1];
+      const at = this.host.sheetAt(room, owner);
+      if (!owner || !at) return;
+      const X = (x: number) => at.x + x * at.s, Y = (y: number) => at.y + y * at.s;
+      const rows = this.sheetRows.get(owner) ?? [];
+      const uid = `bot-${room}-${this.uid++}`;
+      if (m.add) {
+        const top = SHEET_TOP + rows.length * SHEET_ROW;
+        rows.push({ text: m.add, top });
+        this.sheetRows.set(owner, rows);
+        const obj = this.hand(uid, by, m.add, X(SHEET_LEFT), Y(top), SHEET_FONT * at.s);
+        this.host.write(room, obj, by);
+        return;
+      }
+      const row = rows[m.row ?? -1];
+      if (!row) return;
+      const mid = Y(row.top + SHEET_FONT * 0.6);
+      if (m.strike) {
+        const x1 = X(SHEET_LEFT - 10), x2 = X(SHEET_LEFT + row.text.length * SHEET_FONT * 0.6 + 10);
+        this.host.write(room, { uid, type: 'Line', x1, y1: mid, x2, y2: mid, left: (x1 + x2) / 2, top: mid, originX: 'center', originY: 'center',
+          stroke: STRIKE_COLOR, strokeWidth: 4, strokeLineCap: 'round' }, by);
+      } else if (m.mark) {
+        const k = `${room}:${owner}:${m.row}`, n = rowMarks.get(k) ?? 0;
+        rowMarks.set(k, n + 1);
+        this.host.write(room, { uid, type: 'IText', text: m.mark, left: X(SHEET_LEFT - 40 - n * 44), top: mid, originX: 'center', originY: 'center',
+          fontSize: 50 * at.s, fontWeight: 'bold', fontFamily: 'sans-serif', fill: MARK_COLOR[m.mark] }, by);
+      }
+    });
+  }
+
+  /** The pair's common list, under the sheets: down a column, then the next one */
+  private listLine(room: string, text: string, author: string) {
+    const n = this.listed.get(room) ?? 0;
+    this.listed.set(room, n + 1);
+    const lead = this.names.get(room)?.[0] ?? author;
+    if (n === 0) this.host.write(room, { uid: `bot-${room}-${this.uid++}`, type: 'IText', text: 'Общий список', left: 40, top: 472,
+      originX: 'left', originY: 'top', fontSize: 24, fontFamily: 'sans-serif', fill: '#64748b' }, lead);
+    const col = Math.floor(n / 5), row = n % 5;
+    this.host.write(room, this.hand(`bot-${room}-${this.uid++}`, author, text, 40 + col * 420, 510 + row * 76, 44), author);
   }
 
   /** Talking in the room: one at a time, short phrases out loud, each one as often as their weight says;
@@ -496,7 +780,7 @@ export class BotRun {
   private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
     const v = voiceFor(who, lengths, this.stand);
     const ms = lengths[v];
-    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who });
+    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who, legs: this.legs(room) });
     for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
     return ms;
   }
@@ -517,7 +801,7 @@ export class BotRun {
       t += line.pause;
       const v = voiceFor(who, line.ms, this.stand);
       if (v !== VOICE_OF[who]) this.stand.set(who, v);
-      this.after(t, () => this.voice(room, who, line.id, line.ms));
+      this.after(t, () => { this.voice(room, who, line.id, line.ms); this.sheetMarks(room, line.id, line.ms[v]); });
       t += line.ms[v];
       if (line.write) { const text = line.write, by = line.who; this.after(t, () => this.write(room, text, by)); }
     }
@@ -568,7 +852,7 @@ export class BotRun {
     const reply = this.replies.get(room);
     if (!reply) return;
     this.replies.delete(room);
-    this.after(VISIT_REPLY_MS, () => this.write(room, reply));
+    this.after(VISIT_REPLY_MS, reply);
   }
 
   // ---------- a dialogue that listens (Talk) ----------
@@ -614,6 +898,7 @@ export class BotRun {
     t.busy = true;
     t.saying = said;
     const ms = this.sayLine(room, said);
+    this.sheetMarks(room, said.id, ms);
     const gen = t.gen;
     this.after(ms, () => {
       if (t.gen !== gen) return; // broken off
@@ -643,6 +928,7 @@ export class BotRun {
     if (said.who === 1 && /^p2-([012]\d|3[0-6])f?$/.test(said.id)) e.lastStrong = said;
     e.busy = true;
     const ms = this.sayLine(room, said);
+    this.sheetMarks(room, said.id, ms);
     const draws = EXPLAIN_DRAW[said.id.replace(/f$/, '')];
     if (draws && !e.drawn.has(said.id)) {
       e.drawn.add(said.id);
@@ -820,6 +1106,7 @@ export class BotRun {
     if (line.id === 'p4-70') c.phase = 'end'; // too late for the teacher to set them going
     c.busy = true;
     const ms = this.sayLine(room, line);
+    this.sheetMarks(room, line.id, ms);
     this.after(ms, () => {
       c.busy = false;
       if (line.write && line.who !== 'T') {
@@ -868,15 +1155,18 @@ export class BotRun {
     const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard?.push(u); return u; };
     const author = this.names.get(room)?.[by - 1] || undefined;
     const color = COLORS[by - 1];
-    const px = ([x, y]: Pt) => ({ x: 116 + 56 * x, y: 568 - 56 * y }); // the figure's cells: A is (0, 0), a cell is 56
-    const line = (a: { x: number; y: number }, b: { x: number; y: number }, w = 5) => this.host.write(room, {
+    // on {2}'s sheet from b2 (a quarter of the board), else on the board's own figure
+    const at = this.host.sheetAt(room, this.names.get(room)?.[1] ?? '') ?? { x: 0, y: 0, s: 1 };
+    const k = Math.min(1, at.s * 1.4); // lines and letters a little bolder than the sheet shrunk
+    const px = ([x, y]: Pt) => ({ x: at.x + at.s * (116 + 56 * x), y: at.y + at.s * (568 - 56 * y) }); // the figure's cells: A is (0, 0), a cell is 56
+    const line = (a: { x: number; y: number }, b: { x: number; y: number }, w0 = 5) => { const w = w0 * k; this.host.write(room, {
       uid: uid(), type: 'Line', x1: a.x, y1: a.y, x2: b.x, y2: b.y, left: (a.x + b.x) / 2, top: (a.y + b.y) / 2,
       originX: 'center', originY: 'center', stroke: color, strokeWidth: w, strokeLineCap: 'round',
-    }, author);
+    }, author); };
     if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => line(px(d.path![i]), px(p))));
     if (d.angle) {
       // a right-angle mark: a small square in the corner
-      const [c, a, b] = d.angle.map(px), s = 16;
+      const [c, a, b] = d.angle.map(px), s = 16 * at.s;
       const u = (p: { x: number; y: number }) => { const l = Math.hypot(p.x - c.x, p.y - c.y); return { x: (p.x - c.x) / l * s, y: (p.y - c.y) / l * s }; };
       const ua = u(a), ub = u(b);
       const p1 = { x: c.x + ua.x, y: c.y + ua.y }, p2 = { x: c.x + ua.x + ub.x, y: c.y + ua.y + ub.y }, p3 = { x: c.x + ub.x, y: c.y + ub.y };
@@ -886,9 +1176,9 @@ export class BotRun {
       // equal segments: short strokes across the middle, one or two
       for (const [from, to, n] of d.ticks) {
         const a = px(from), b = px(to), l = Math.hypot(b.x - a.x, b.y - a.y);
-        const ux = (b.x - a.x) / l, uy = (b.y - a.y) / l, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, h = 11;
-        for (let k = 0; k < n; k++) {
-          const off = (k - (n - 1) / 2) * 9, c = { x: m.x + ux * off, y: m.y + uy * off };
+        const ux = (b.x - a.x) / l, uy = (b.y - a.y) / l, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, h = 11 * at.s;
+        for (let j = 0; j < n; j++) {
+          const off = (j - (n - 1) / 2) * 9 * at.s, c = { x: m.x + ux * off, y: m.y + uy * off };
           line({ x: c.x - uy * h, y: c.y + ux * h }, { x: c.x + uy * h, y: c.y - ux * h }, 3);
         }
       }
@@ -898,23 +1188,28 @@ export class BotRun {
       const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
       this.host.write(room, {
         uid: uid(), type: 'Polygon', points: pts, left: (Math.min(...xs) + Math.max(...xs)) / 2, top: (Math.min(...ys) + Math.max(...ys)) / 2,
-        originX: 'center', originY: 'center', fill: color + '40', stroke: color, strokeWidth: 3,
+        originX: 'center', originY: 'center', fill: color + '40', stroke: color, strokeWidth: 3 * k,
       }, author);
     }
     if (d.label) {
       const p = px(d.label.at);
       this.host.write(room, {
         uid: uid(), type: 'IText', text: d.label.text, left: p.x, top: p.y,
-        originX: 'center', originY: 'center', fontSize: 30, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
+        originX: 'center', originY: 'center', fontSize: 30 * k, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
       }, author);
     }
+  }
+
+  /** Миша's pair: where his sheet lies, for the pale legs over it (client-teacher demoLegs.tsx) */
+  private legs(room: string): SheetPlace | null | undefined {
+    return this.talks.has(room) ? this.host.sheetAt(room, this.names.get(room)?.[0] ?? '') : undefined;
   }
 
   /** One line out loud: a student's counted as talk; how long it takes */
   private sayLine(room: string, line: DialogueLine): number {
     if (line.who === 'T') {
       const v = line.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(line.ms)[0];
-      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher' });
+      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher', legs: this.legs(room) });
       return line.ms[v];
     }
     const who = this.names.get(room)?.[line.who - 1] ?? '';

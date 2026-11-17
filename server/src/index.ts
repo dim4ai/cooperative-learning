@@ -20,7 +20,7 @@ import {
 import type { Block, Scene } from './slides';
 import { MediaRelay, type ChunkMsg } from './mediaRelay';
 import { Throttle, hashIp } from './demoGuard';
-import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, SOLO_NEWCOMER, NEWCOMER_UUID, botUuid, scatteredSeat, soloBlockOpen, BotRun } from './demoBots';
+import { BOTS, SOLO_SEATS, SOLO_MIN_SEATS, SOLO_NEWCOMER, NEWCOMER_UUID, botUuid, scatteredSeat, soloBlockOpen, BotRun, type SheetPlace } from './demoBots';
 import { bookableStarts, isHeld, peakTaken, type BookingMode, type BookingRecord } from './booking';
 import { createSampler } from './loadSampler';
 import { canSendMail, sendMail, canSendFeedback, cleanFeedback, sendFeedback, sendDemoFeedback, FEEDBACK_PER_IP_PER_HOUR } from './mailer';
@@ -448,6 +448,7 @@ interface LessonRuntime {
   fives: Map<string, Five>;       // «Дай пять» going on, by room
   roomPositions: Map<string, Record<string, { left: number; top: number }>>; // a work block's sheet: where each group dragged its ✋ objects (by boardKey)
   roomsByBlock: Map<string, Map<string, string>>; // work block id → student name → the room they wrote in there
+  laidSheets: Map<string, Map<string, SheetPlace>>; // board key → whose earlier sheet lies where on it
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
   polls: Map<string, PollRun>;     // the answers to each poll block, by block id
   material: Material | null;
@@ -655,6 +656,28 @@ function startBots(code: string, lesson: LessonRuntime) {
     five: (room, name) => startFive(lesson, room, name),
     fiveTap: (room, name) => tapFive(lesson, room, name),
     teacherWrite: (room, obj) => applyBoardOp(lesson, room, { t: 'add', obj }, 'Учитель', true, ''),
+    sheetAt: (room, name) => lesson.laidSheets.get(boardKey(lesson, room))?.get(name) ?? null,
+    deskmates() {
+      const desks = new Map<string, string[]>();
+      for (const s of lesson.seats) {
+        if (!s.occupant || s.extra !== undefined) continue;
+        const k = `${s.groupIndex}-${s.row}`;
+        desks.set(k, [...desks.get(k) ?? [], s.occupant]);
+      }
+      return [...desks.values()];
+    },
+    pastWrite(name, blockId, obj) {
+      const block = lesson.material?.blocks.find(b => b.id === blockId);
+      if (!block) return;
+      const room = roomName(code, `individual-${name}`);
+      const key = `${room}#${block.slides[0]?.id ?? block.id}`;
+      let board = boardAt(lesson, key);
+      if (!board) { board = new Map(); lesson.boards.set(key, board); }
+      board.set(obj.uid, { ...obj, author: name } as BoardObject);
+      let rooms = lesson.roomsByBlock.get(blockId);
+      if (!rooms) { rooms = new Map(); lesson.roomsByBlock.set(blockId, rooms); }
+      if (!rooms.has(name)) rooms.set(name, room);
+    },
     talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
     call(room, note, who) {
@@ -686,6 +709,9 @@ function startBots(code: string, lesson: LessonRuntime) {
   lesson.bots = bots;
   bots.seatEveryone(!!fast);
 }
+
+/** The solo demo: once the lesson began, the class stays where it sat (the bots' work goes by who sits with whom) */
+const seatsLocked = (lesson: LessonRuntime) => !!lesson.bots && lesson.startedAt !== null;
 
 const realBotRooms = (lesson: LessonRuntime) =>
   [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom).map(p => p.livekitRoom!);
@@ -772,6 +798,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     roomPositions: new Map(),
     fives: new Map(),
     roomsByBlock: new Map(),
+    laidSheets: new Map(),
     boardConnections: new Map(),
     polls: new Map(),
     material: null,
@@ -1301,6 +1328,61 @@ function sendEarlierBoards(lesson: LessonRuntime, only?: string) {
   }
 }
 
+/** A work block that shows earlier boards: each group's board starts with its members' earlier sheets, smaller, a quarter
+ *  of the board each, side by side at the top (four: two rows). They are only to look at: nobody but the teacher moves
+ *  or rubs them out (pinned); the group writes and marks over and under them. True if a board got them now */
+function layEarlierSheets(lesson: LessonRuntime): boolean {
+  const from = earlierBlocks(lesson)[0];
+  if (!from || !lesson.block) return false;
+  const seatOf = (name: string) => { const i = lesson.seats.findIndex(s => s.occupant === name); return i < 0 ? 1e9 : i; };
+  const byRoom = new Map<string, string[]>();
+  for (const p of lesson.participants.values()) {
+    if (p.role !== 'student' || !p.livekitRoom || p.livekitRoom.endsWith('main-room')) continue;
+    byRoom.set(p.livekitRoom, [...byRoom.get(p.livekitRoom) ?? [], p.name]);
+  }
+  const here = currentScene(lesson.material, lesson.slides);
+  const size = (sc: Scene | null | undefined, k: 'width' | 'height', d: number) => typeof sc?.[k] === 'number' ? sc[k] as number : d;
+  const W = size(here, 'width', 1600), H = size(here, 'height', 900);
+  let laid = false;
+  for (const [room, names] of byRoom) {
+    const key = boardKey(lesson, room);
+    if (lesson.laidSheets.has(key)) continue;
+    const places = new Map<string, SheetPlace>();
+    lesson.laidSheets.set(key, places);
+    // one sheet per earlier room, in the order they sit; pairs that wrote together share theirs
+    const sources: { room: string; names: string[] }[] = [];
+    for (const name of names.sort((a, b) => seatOf(a) - seatOf(b))) {
+      const was = lesson.roomsByBlock.get(from.id)?.get(name);
+      if (!was) continue;
+      const src = sources.find(x => x.room === was);
+      if (src) src.names.push(name); else if (sources.length < 4) sources.push({ room: was, names: [name] });
+    }
+    if (!sources.length) continue;
+    let board = boardAt(lesson, key);
+    if (!board) { board = new Map(); lesson.boards.set(key, board); }
+    sources.forEach((src, i) => {
+      const sc = from.slides[0];
+      const scene = sc ? studentScene(sc, lesson.slides) : null;
+      const sw = size(scene, 'width', W), sh = size(scene, 'height', H);
+      const s = Math.min(W / 2 / sw, H / 2 / sh);
+      const x = (i % 2) * W / 2, y = Math.floor(i / 2) * H / 2;
+      const objects = [...(scene?.objects ?? []), ...(boardAt(lesson, `${src.room}#${sc?.id ?? from.id}`)?.values() ?? [])] as Record<string, unknown>[];
+      const put = (o: Record<string, unknown>) => board!.set(o.uid as string, { ...o, pinned: true, author: src.names[0] } as unknown as BoardObject);
+      put({ uid: `sheet${i}-frame`, type: 'Rect', left: x + 4, top: y + 4, width: sw * s - 8, height: sh * s - 8, originX: 'left', originY: 'top', fill: '', stroke: '#94a3b8', strokeWidth: 2 });
+      objects.forEach((o, n) => {
+        const num = (v: unknown, d = 0) => typeof v === 'number' ? v : d;
+        put({ ...o, uid: `sheet${i}-${n}`, left: x + num(o.left) * s, top: y + num(o.top) * s,
+          scaleX: num(o.scaleX, 1) * s, scaleY: num(o.scaleY, 1) * s, studentDraggable: false });
+      });
+      put({ uid: `sheet${i}-name`, type: 'IText', text: src.names.join(', '), left: x + 14, top: y + 10, originX: 'left', originY: 'top',
+        fontSize: 24, fontFamily: 'sans-serif', fill: '#64748b' });
+      for (const name of src.names) places.set(name, { x, y, s });
+    });
+    laid = true;
+  }
+  return laid;
+}
+
 function setMaterial(code: string, lesson: LessonRuntime, material: Material | null, { keepState = false } = {}) {
   lesson.material = material;
   if (!keepState) {
@@ -1565,6 +1647,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (pollStarts && block.poll) lesson.bots?.onPoll(block.poll.options.length);
   // the same stage again: everyone stays where they are, and writes there for this block
   for (const p of lesson.participants.values()) noteRoom(lesson, p);
+  if (layEarlierSheets(lesson)) pushBoards(lesson);
 }
 
 // ---------- who may come in ----------
@@ -1775,12 +1858,13 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
     if (!isBoardObject(op.obj) || !boardObjectAllowed(op.obj, isTeacher)) return;
     const prev = board.get(op.obj.uid);
     if (!prev && board.size >= BOARD_MAX_OBJECTS) return;
+    if (prev?.pinned && !isTeacher) return; // an earlier sheet: only to look at
     // the author is whoever created the object, as the server saw it
     const obj = { ...op.obj, author: (prev?.author as string | undefined) ?? author };
     board.set(obj.uid, obj);
     out = { t: op.t, obj };
   } else if (op.t === 'del') {
-    if (typeof op.uid !== 'string' || !board.delete(op.uid)) return;
+    if (typeof op.uid !== 'string' || (board.get(op.uid)?.pinned && !isTeacher) || !board.delete(op.uid)) return;
     out = { t: 'del', uid: op.uid };
   } else if (op.t === 'clear') {
     if (!isTeacher) return;
@@ -2305,6 +2389,7 @@ io.on('connection', async (socket) => {
     socket.on('clearSeat', (seatId: string) => {
       if (role !== 'teacher') return;
       const seat = lesson.seats.find(s => s.id === seatId);
+      if (seat?.occupant && seatsLocked(lesson)) return;
       if (seat?.occupant) lesson.bots?.onUnseated(seat.occupant);
       if (seat) seat.occupant = null;
       settleSeats(code, lesson).catch(e => console.error('seats not settled:', e));
@@ -2315,6 +2400,7 @@ io.on('connection', async (socket) => {
       const from = lesson.seats.find(s => s.occupant === studentName);
       const to = lesson.seats.find(s => s.id === toSeatId);
       if (!to || to === from || (to.occupant && !from)) return;
+      if (from && seatsLocked(lesson)) return;
       if (from) from.occupant = to.occupant; // into a taken seat they swap
       to.occupant = studentName;
       await settleSeats(code, lesson);
