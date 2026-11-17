@@ -888,9 +888,12 @@ export class BotRun {
           return;
         } else { line = cur; t.next++; }
       } else if (t.phase === 'b') {
+        while (t.lines[t.next]?.id.endsWith('f')) t.next++; // a variant said to a girl: not a line of its own
         line = t.lines[t.next];
         if (!line || !/^p1-(1[89]|2\d|3[01])$/.test(line.id)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
         t.next++;
+        // «Ты говорил / говорила»: as the partner is
+        if (line.id === 'p1-21' && this.female(this.names.get(room)?.[1] ?? '')) line = this.id1(t, 'p1-21f');
       } else return;
     }
     if (!line) return;
@@ -1027,7 +1030,12 @@ export class BotRun {
         t.insert.push(this.trapLine(t, 'c1-t0'), this.trapLine(t, 'c1-39'));
         line = this.trapLine(t, 'c1-38');
         t.next = t.lines.findIndex(l => l.id === 'c1-ta1');
-      } else if (t.phase === 'a' || t.phase === 'b') { line = cur; t.next++; }
+      } else if (t.phase === 'a' || t.phase === 'b') {
+        line = cur; t.next++;
+        while (t.lines[t.next]?.id.endsWith('f')) t.next++; // a variant said to a girl: not a line of its own
+        // «Ты был прав / Ты была права»: as Сомневающийся is
+        if (line.id === 'c1-22' && this.female(t.names[1])) line = this.trapLine(t, 'c1-22f');
+      }
       else return;
     }
     const said = line;
