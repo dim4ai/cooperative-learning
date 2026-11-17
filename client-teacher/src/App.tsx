@@ -764,6 +764,8 @@ export default function App() {
     socket.on('teacherVoice', (info: LivekitInfo) => setVoice(info));
     socket.on('classCams', (info: CamsInfo) => setCamsInfo(info));
     socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
+    // a new stage or block: the calls from the one before are over
+    socket.on('callsCleared', () => { setCallingRooms(new Set()); setCalls({}); setDemoReply(null); });
     socket.on('callTeacher', ({ room, calling, note, who }: { room: string; calling: boolean; note?: string; who?: string }) => {
       if (calling && !callingNow.current.has(room) && room !== roomNow.current) playCallBell();
       if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));

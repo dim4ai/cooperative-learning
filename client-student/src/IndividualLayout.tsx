@@ -40,8 +40,10 @@ export function IndividualLayout({ room, slides, mediaControls, leaveButton }: P
   const teacherTitle = useTeacherTitle();
 
   useEffect(() => {
-    socket.on('teacherJoined', () => setCalling(false));
-    return () => { socket.off('teacherJoined'); };
+    const off = () => setCalling(false);
+    socket.on('teacherJoined', off);
+    socket.on('callsCleared', off); // a new stage or block: the call from the one before is over
+    return () => { socket.off('teacherJoined', off); socket.off('callsCleared', off); };
   }, []);
 
   function toggleCall() {

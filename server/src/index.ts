@@ -1473,8 +1473,14 @@ function enterBlock(lesson: LessonRuntime, block: Block) {
   lesson.block = block.id;
 }
 
+/** A new stage or block: calls from the one before are over, on the teacher's screen and on the students' bells */
+function clearCalls(lesson: LessonRuntime) {
+  for (const id of lesson.participants.keys()) io.sockets.sockets.get(id)?.emit('callsCleared');
+}
+
 async function changeStage(code: string, lesson: LessonRuntime, stage: Stage) {
   const wereAtDesks = lesson.atDesks;
+  if (stage !== lesson.stage) clearCalls(lesson);
   if (stage !== lesson.stage) resetActivity(lesson); // who talked and wrote is counted for each stage anew
   lesson.stage = stage;
   lesson.atDesks = false;
@@ -1639,6 +1645,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   // A new explanation is a new topic: last topic's marks would say nothing about it
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
   const pollStarts = !!block.poll && block.id !== lesson.block && !lesson.polls.has(block.id);
+  if (block.id !== lesson.block && stage === lesson.stage) clearCalls(lesson); // a new stage clears them in changeStage
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
