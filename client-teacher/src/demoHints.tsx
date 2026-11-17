@@ -79,7 +79,7 @@ function lopsidedPair(x: HintsInput): string | null {
 const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number }>();
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
-const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
+const CALLS: Record<string, number> = { individual: 3, pairs: 1, fours: 1 };
 
 /** The lesson's blocks in the server's order, the polls added during the lesson among them */
 const planBlocks = (x: HintsInput) => x.slides.material?.blocks ?? x.slides.local?.blocks ?? [];

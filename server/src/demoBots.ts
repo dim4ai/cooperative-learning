@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHATTER, CHOCOLATE, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { CHAT, CHATTER, CHOCOLATE, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -43,7 +43,7 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[] }
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[] }
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
@@ -78,6 +78,15 @@ interface Explain {
   drawn: Set<string>;              // lines whose drawing is on the board already: not drawn again on repeating
   onBoard: string[];               // uids of what they drew: wiped bit by bit when the talk moves on
 }
+/** A dialogue that drifts (П4 «Трёп»): checking, chatter, and at the end a hurried list; a teacher coming in openly
+ *  before that turns it into real checking */
+interface Chat {
+  lines: DialogueLine[]; queue: DialogueLine[];
+  phase: 'drift' | 'end' | 'checking';
+  busy: boolean; gen: number; // gen: bumped when the teacher turns it round: the step already timed is dropped
+}
+
+const CHAT_WRITE_MS = 900;        // a list written out one line after another
 const SEGMENT_MS = 300; // a drawn line goes on the board one segment after another
 const ERASE_MS = 200;   // and is wiped one object after another
 /** Lines that move on to something new: what was drawn before goes away as they begin */
@@ -107,22 +116,14 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
     { lines: lines(OBSERVATIONS.slice(1, 4), 5, 9) },
   ],
   pairs: [
-    // П1 «Спорим на шоколадку?»: they check their lists, argue about AB = AO and call
+    // П1 «Как курица лапкой»: they check their lists, argue about AB = AO and call
     { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, talk: [0.55, 0.5] },
     // П2 «Давай я быстро объясню»: Лена explains with triangles drawn on the cells, the other one gets it
     { lead: 'Лена', lines: [], explain: EXPLAIN, talk: [0.6, 0.45] },
     // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
     { lines: [], spoken: LOPSIDED_PAIR, later: true },
-    { lead: 'Тимур', talk: [0.5, 0.45], lines: lines([
-      '{1}: AO = OC',
-      '{2}: BO = OD',
-      '{1}: ∠AOB = ∠COD',
-      '{2}: это же вертикальные углы,\nони всегда равны',
-      '{1}: ну и что, они же есть\nв параллелограмме',
-      '{2}: не знаю, давай спросим',
-      '{1}: давай',
-    ], 38, 0), call: {
-      at: 45, by: 1, note: 'Мы спорим, можно ли брать вертикальные углы при пересечении диагоналей. Я думаю, что ∠AOB = ∠COD можно записать, а {2} говорит, что это не свойство параллелограмма. Кто прав?' } },
+    // П4 «Трёп»: they begin checking and drift off; the teacher may listen in, or come in and set them to work
+    { lead: 'Тимур', lines: [], chat: CHAT, talk: [0.5, 0.45] },
   ],
   fours: [
     { lines: lines(['Уверены: AB = CD, AD = BC', 'Уверены: AO = OC, BO = OD', 'Сомневаемся: углы'], 4, 6), talk: [0.5, 0.4, 0.35, 0.03], call: {
@@ -231,6 +232,7 @@ export class BotRun {
   private uid = 0;
   private talks = new Map<string, Talk>();
   private explains = new Map<string, Explain>();
+  private chats = new Map<string, Chat>();
   private callPending = false; // the next call is timed already
   private stage = '';
   private earlyCalled = false;
@@ -289,6 +291,7 @@ export class BotRun {
     this.stand.clear();
     this.talks.clear();
     this.explains.clear();
+    this.chats.clear();
     this.callPending = false;
     this.stage = stage;
     this.earlyCalled = false;
@@ -324,6 +327,23 @@ export class BotRun {
         this.chatter(room, part, [lead, partner]);
         this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set(), onBoard: [] });
         this.after(TALK_START_MS, () => this.explainStep(room));
+      } else if (part.chat) {
+        this.quietRooms.add(room);
+        // the chatter goes by who sits there; boy and girl: the girl is {1}
+        const [a, b] = [lead, partner];
+        const fa = this.female(a), fb = this.female(b);
+        if (fa !== fb && !fa) this.names.set(room, [b, a]);
+        let range = fa && fb ? [30, 47] : fa || fb ? [48, 69] : [8, 29];
+        // testing: /demo/?fast=b3&trep=mm|ff — that chatter whoever sits there, in voices that fit it
+        const search = (globalThis as { location?: { search: string } }).location?.search;
+        const force = search ? new URLSearchParams(search).get('trep') : null;
+        const [p1, p2] = this.names.get(room)!;
+        if (force === 'mm') { range = [8, 29]; this.stand.set(p1, 'anton'); this.stand.set(p2, 'ermil'); }
+        if (force === 'ff') { range = [30, 47]; this.stand.set(p1, 'dasha'); this.stand.set(p2, 'masha'); }
+        const n = (l: DialogueLine) => Number(l.id.slice(3));
+        const queue = part.chat.filter(l => n(l) <= 7 || n(l) >= range[0] && n(l) <= range[1] || n(l) >= 70 && n(l) <= 76);
+        this.chats.set(room, { lines: part.chat, queue, phase: 'drift', busy: false, gen: 0 });
+        this.after(TALK_START_MS, () => this.chatStep(room));
       } else if (part.spoken?.length && part.later) {
         // the talk to listen to begins once the calls are over: the teacher is free then, and the hint shows them here
         this.chatter(room, { ...part, talk: [0.85, 0.05] }, [lead, partner]);
@@ -437,6 +457,7 @@ export class BotRun {
     }
     this.talkVisited(room);
     this.explainVisited(room);
+    this.chatVisited(room);
     const rest = this.afterAnswer.get(room);
     if (rest) {
       this.afterAnswer.delete(room);
@@ -462,30 +483,30 @@ export class BotRun {
     if (!line) {
       if (t.phase === 'a') {
         const cur = t.lines[t.next];
-        if (cur?.id === 'p1-17' && t.present) {
+        if (cur?.id === 'p1-15' && t.present) {
           // the teacher is here: asked straight away, no call
-          t.next = t.lines.findIndex(l => l.id === 'p1-20');
+          t.next = t.lines.findIndex(l => l.id === 'p1-18');
           t.phase = 'asked';
-          line = this.id1(t, 'p1-35');
+          line = this.id1(t, 'p1-33');
           this.host.call(room, line.text, this.names.get(room)?.[0]);
           this.host.callOff(room);
-        } else if (cur?.id === 'p1-19' && t.present) {
+        } else if (cur?.id === 'p1-17' && t.present) {
           // came in just as they were about to call: they ask right away
           t.next++;
           t.phase = 'asked';
           line = cur;
           this.host.call(room, cur.text, this.names.get(room)?.[1]);
           this.host.callOff(room);
-        } else if (cur?.id === 'p1-19') {
+        } else if (cur?.id === 'p1-17') {
           // they call: the bell waits its turn among the other rooms'
-          t.next = t.lines.findIndex(l => l.id === 'p1-20');
+          t.next = t.lines.findIndex(l => l.id === 'p1-18');
           t.phase = 'calling';
-          this.requestCall(room, this.id1(t, 'p1-19').text, 2);
+          this.requestCall(room, this.id1(t, 'p1-17').text, 2);
           return;
         } else { line = cur; t.next++; }
       } else if (t.phase === 'b') {
         line = t.lines[t.next];
-        if (!line || !/^p1-(2\d|3[0-3])$/.test(line.id)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
+        if (!line || !/^p1-(1[89]|2\d|3[01])$/.test(line.id)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
         t.next++;
       } else return;
     }
@@ -500,9 +521,9 @@ export class BotRun {
       t.busy = false;
       if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
       // asked: the teacher may answer once the question is out
-      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-35' || said.id === 'p1-19')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
+      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-33' || said.id === 'p1-17')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
       const next = t.insert[0]?.id;
-      this.after(next === 'p1-34' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
+      this.after(next === 'p1-32' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
     });
   }
 
@@ -539,6 +560,37 @@ export class BotRun {
       e.busy = false;
       this.after(LINE_GAP_MS, () => this.explainStep(room));
     });
+  }
+
+  // ---------- a dialogue that drifts (Chat) ----------
+  private chatStep(room: string, gen = 0) {
+    const c = this.chats.get(room);
+    if (!c || c.busy || c.gen !== gen) return;
+    const line = c.queue.shift();
+    if (!line) return; // over: they stay quiet
+    if (line.id === 'p4-70') c.phase = 'end'; // too late for the teacher to set them going
+    c.busy = true;
+    const ms = this.sayLine(room, line);
+    this.after(ms, () => {
+      c.busy = false;
+      if (line.write && line.who !== 'T') {
+        const by = line.who;
+        line.write.split('; ').forEach((w, i) => this.after(i * CHAT_WRITE_MS, () => this.write(room, w, by)));
+      }
+      const next = c.queue[0]?.id;
+      this.after(next === 'p4-77' ? GREET_GAP_MS : LINE_GAP_MS, () => this.chatStep(room, c.gen));
+    });
+  }
+
+  /** In openly while they still chat: the line going on is finished, then «Так, как у вас дела?» and they check for real */
+  private chatVisited(room: string) {
+    const c = this.chats.get(room);
+    if (!c || c.phase !== 'drift') return;
+    c.phase = 'checking';
+    c.queue = c.lines.filter(l => Number(l.id.slice(3)) >= 77);
+    const gen = ++c.gen;
+    // the line going on ends and steps on by itself; if none, after a moment for the teacher's page to get in
+    this.after(ARRIVE_MS, () => this.chatStep(room, gen));
   }
 
   private female(who: string) { return FEMALE_VOICES.has(this.stand.get(who) ?? VOICE_OF[who] ?? ''); }
@@ -632,12 +684,12 @@ export class BotRun {
     if (t.phase === 'a' && !t.greeted) {
       t.greeted = true;
       // the line going on is finished, then hello at once
-      t.insert.push(this.id1(t, 'p1-34'));
+      t.insert.push(this.id1(t, 'p1-32'));
     }
     else if (t.phase === 'calling') {
       // came on the call: «Какой у вас вопрос?» — and the partner asks it
       t.phase = 'asked';
-      t.insert.push(this.id1(t, 'p1-tq'), this.id1(t, 'p1-19'));
+      t.insert.push(this.id1(t, 'p1-tq'), this.id1(t, 'p1-17'));
     }
     // a moment for the teacher's page to get into the room: what's said for them is heard from its start
     this.after(ARRIVE_MS, () => this.step(room));
@@ -652,7 +704,7 @@ export class BotRun {
     this.host.offerReply(room, null);
     t.insert = [];
     t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.id1(t, 'p1-19').text, 2); });
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.id1(t, 'p1-17').text, 2); });
   }
 
   /** The teacher answered: with the ready answer, said in the teacher's voice, or in their own words */
