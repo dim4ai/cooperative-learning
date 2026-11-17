@@ -445,6 +445,8 @@ interface LessonRuntime {
   seatPlan: Map<string, string>; // from the teacher's journal, in memory only: student uuid → seat id
   sharedTexts: Map<string, string>; // per livekit room name
   boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
+  fives: Map<string, Five>;       // «Дай пять» going on, by room
+  roomPositions: Map<string, Record<string, { left: number; top: number }>>; // a work block's sheet: where each group dragged its ✋ objects (by boardKey)
   roomsByBlock: Map<string, Map<string, string>>; // work block id → student name → the room they wrote in there
   boardConnections: Map<string, { room: string }>; // board-only (mobile webview) viewers
   polls: Map<string, PollRun>;     // the answers to each poll block, by block id
@@ -649,6 +651,9 @@ function startBots(code: string, lesson: LessonRuntime) {
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
     write: (room, obj, author) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, ''),
     erase: (room, uid, author) => applyBoardOp(lesson, room, { t: 'del', uid }, author ?? 'Ученик', false, ''),
+    move: (room, uid, left, top) => moveInRoom(lesson, room, uid, left, top, ''),
+    five: (room, name) => startFive(lesson, room, name),
+    fiveTap: (room, name) => tapFive(lesson, room, name),
     talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
     call(room, note, who) {
@@ -763,6 +768,8 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     seatPlan: new Map(),
     sharedTexts: new Map(),
     boards: new Map(),
+    roomPositions: new Map(),
+    fives: new Map(),
     roomsByBlock: new Map(),
     boardConnections: new Map(),
     polls: new Map(),
@@ -1682,13 +1689,69 @@ function boardState(lesson: LessonRuntime, room: string): BoardObject[] {
   return Array.from(boardAt(lesson, boardKey(lesson, room))?.values() ?? []);
 }
 
+/** «Дай пять»: one in a group puts a hand up on everyone's screen there; each taps it, and once all the group's
+ *  students have, boom (client-teacher/src/HighFive.tsx). The teacher in the room may tap too: not waited for */
+interface Five { by: string; tapped: string[]; need: string[]; done: boolean; timer: NodeJS.Timeout }
+const FIVE_WAIT_MS = 30_000; // nobody else taps: the hand goes away
+const FIVE_BOOM_MS = 2_000;
+
+function fiveState(lesson: LessonRuntime, room: string) {
+  const f = lesson.fives.get(room);
+  return f ? { room, by: f.by, tapped: f.tapped, need: f.need, done: f.done } : { room, off: true };
+}
+function sendFive(lesson: LessonRuntime, room: string) {
+  const state = fiveState(lesson, room);
+  for (const [id, p] of lesson.participants) if (p.livekitRoom === room) io.sockets.sockets.get(id)?.emit('five', state);
+}
+function endFive(lesson: LessonRuntime, room: string, after: number) {
+  const f = lesson.fives.get(room);
+  if (!f) return;
+  clearTimeout(f.timer);
+  f.timer = setTimeout(() => { lesson.fives.delete(room); sendFive(lesson, room); }, after);
+}
+function startFive(lesson: LessonRuntime, room: string, by: string) {
+  if (lesson.fives.has(room) || room.endsWith('main-room')) return;
+  const need = [...lesson.participants.values()].filter(p => p.role === 'student' && p.livekitRoom === room).map(p => p.name);
+  lesson.fives.set(room, { by, tapped: [by], need, done: false, timer: setTimeout(() => {}, 0) });
+  endFive(lesson, room, FIVE_WAIT_MS);
+  sendFive(lesson, room);
+}
+function tapFive(lesson: LessonRuntime, room: string, name: string) {
+  const f = lesson.fives.get(room);
+  if (!f || f.done || f.tapped.includes(name)) return;
+  f.tapped.push(name);
+  if (f.need.every(n => f.tapped.includes(n))) { f.done = true; endFive(lesson, room, FIVE_BOOM_MS); }
+  sendFive(lesson, room);
+}
+
+/** In a work block each group moves the sheet's ✋ objects on its own: where they are in this room */
+function roomPositions(lesson: LessonRuntime, room: string) {
+  const own = inWork(lesson) && !room.endsWith('main-room'); // own: moves here stay in this room
+  return { room, own, positions: own ? lesson.roomPositions.get(boardKey(lesson, room)) ?? {} : {} };
+}
+const inWork = (lesson: LessonRuntime) => WORK_STAGES.includes(lesson.stage) && !!lesson.block;
+
+/** A ✋ object moved in a group's room: kept for the room, shown to whoever else is there */
+function moveInRoom(lesson: LessonRuntime, room: string, uid: string, left: number, top: number, fromSocket: string) {
+  const scene = currentScene(lesson.material, lesson.slides);
+  if (!scene?.objects.some(o => o.uid === uid && o.studentDraggable)) return;
+  const key = boardKey(lesson, room);
+  lesson.roomPositions.set(key, { ...lesson.roomPositions.get(key), [uid]: { left, top } });
+  for (const [id, p] of lesson.participants) {
+    if (p.livekitRoom === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('slides:roomMove', { room, uid, left, top });
+  }
+}
+
 /** The slide or sheet changed: everyone gets its drawing in their room */
 function pushBoards(lesson: LessonRuntime) {
   for (const [id, p] of lesson.participants) {
-    if (p.livekitRoom) io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
+    if (!p.livekitRoom) continue;
+    io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
+    io.sockets.sockets.get(id)?.emit('slides:roomPositions', roomPositions(lesson, p.livekitRoom));
   }
   for (const [id, bc] of lesson.boardConnections) {
     io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, bc.room));
+    io.sockets.sockets.get(id)?.emit('slides:roomPositions', roomPositions(lesson, bc.room));
   }
 }
 
@@ -1802,6 +1865,8 @@ async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string,
   noteRoom(lesson, participant);
   socket.emit('sharedText', { room, text: lesson.sharedTexts.get(room) ?? '' });
   socket.emit('boardState', boardState(lesson, room));
+  socket.emit('slides:roomPositions', roomPositions(lesson, room));
+  socket.emit('five', fiveState(lesson, room));
   console.log(`  [${code}] ${participant.name} -> ${room}`);
 }
 
@@ -2381,7 +2446,7 @@ io.on('connection', async (socket) => {
 
     socket.on('boardSync', () => {
       const room = lesson.participants.get(socket.id)?.livekitRoom;
-      if (room) socket.emit('boardState', boardState(lesson, room));
+      if (room) { socket.emit('boardState', boardState(lesson, room)); socket.emit('slides:roomPositions', roomPositions(lesson, room)); }
     });
 
     socket.on('boardOp', (op: unknown) => {
@@ -2516,9 +2581,24 @@ io.on('connection', async (socket) => {
       broadcastSlides(lesson);
     });
 
+    socket.on('five:start', () => {
+      const me = lesson.participants.get(socket.id);
+      if (role === 'student' && me?.livekitRoom) startFive(lesson, me.livekitRoom, me.name);
+    });
+    socket.on('five:tap', () => {
+      const me = lesson.participants.get(socket.id);
+      if (me?.livekitRoom && !me.quiet) tapFive(lesson, me.livekitRoom, me.name);
+    });
+
     socket.on('slides:move', ({ uid, left, top }: { uid: string; left: number; top: number }) => {
-      if (role !== 'teacher') return; // students get to move objects in pair work later
-      if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+      if (typeof uid !== 'string' || !Number.isFinite(left) || !Number.isFinite(top)) return;
+      // in a work block, in a group's room: that group's sheet (the teacher who came in openly moves it with them)
+      const me = lesson.participants.get(socket.id);
+      if (inWork(lesson) && me?.livekitRoom && me.livekitRoom !== roomName(code, 'main-room')) {
+        if (!me.quiet) moveInRoom(lesson, me.livekitRoom, uid, left, top, socket.id);
+        return;
+      }
+      if (role !== 'teacher') return;
       const scene = currentScene(lesson.material, lesson.slides);
       const obj = scene?.objects.find(o => o.uid === uid && o.studentDraggable);
       if (!scene || !obj) return;

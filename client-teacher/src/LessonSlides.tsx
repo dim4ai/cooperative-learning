@@ -30,6 +30,8 @@ export interface SlidesState {
   index: number;
   revealed: string[];
   positions: Record<string, { left: number; top: number }>;
+  /** in a group's room in a work block: that group's sheet, its ✋ objects where the group put them (own) */
+  group?: { room: string; own: boolean; positions: Record<string, { left: number; top: number }> };
 }
 
 export type UnderstoodMark = 'yes' | 'no';
@@ -79,7 +81,10 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
   useEffect(() => {
     if (!lessonCode) return;
     const onMaterial = (m: Material | null) => { setMaterial(m); setKnown(true); };
-    const onState = (s: SlidesState) => setState(s);
+    const onState = (s: SlidesState) => setState(was => ({ ...s, group: was.group }));
+    const onGroup = (group: NonNullable<SlidesState['group']>) => setState(s => ({ ...s, group }));
+    const onGroupMove = ({ room, uid, left, top }: { room: string; uid: string; left: number; top: number }) =>
+      setState(s => s.group?.room === room ? { ...s, group: { ...s.group, positions: { ...s.group.positions, [uid]: { left, top } } } } : s);
     // another teacher tab moved something
     const onMove = ({ uid, left, top }: { uid: string; left: number; top: number }) =>
       setState(s => ({ ...s, positions: { ...s.positions, [uid]: { left, top } } }));
@@ -87,12 +92,16 @@ export function useTeacherSlides(lessonCode: string | null, token: string | null
     socket.on('slides:material', onMaterial);
     socket.on('slides:state', onState);
     socket.on('slides:move', onMove);
+    socket.on('slides:roomPositions', onGroup);
+    socket.on('slides:roomMove', onGroupMove);
     const stopServing = serveMedia(socket, hash => fileRef.current?.byHash.get(hash));
     return () => {
       socket.off('understood', setUnderstood);
       socket.off('slides:material', onMaterial);
       socket.off('slides:state', onState);
       socket.off('slides:move', onMove);
+      socket.off('slides:roomPositions', onGroup);
+      socket.off('slides:roomMove', onGroupMove);
       stopServing();
       setMaterial(null); setKnown(false); setState(INITIAL); setUnderstood(NO_MARKS);
     };
@@ -357,7 +366,9 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
   const lastSent = useRef(0);
   const pending = useRef<number | undefined>(undefined);
   const onMove = useCallback((uid: string, left: number, top: number) => {
-    setState(s => ({ ...s, positions: { ...s.positions, [uid]: { left, top } } }));
+    setState(s => s.group?.own
+      ? { ...s, group: { ...s.group, positions: { ...s.group.positions, [uid]: { left, top } } } }
+      : { ...s, positions: { ...s.positions, [uid]: { left, top } } });
     const send = () => { lastSent.current = Date.now(); socket.emit('slides:move', { uid, left, top }); };
     clearTimeout(pending.current);
     if (Date.now() - lastSent.current >= 40) send();
@@ -365,6 +376,8 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
   }, [setState]);
 
   const revealed = useMemo(() => new Set(state.revealed), [state.revealed]);
+  const group = state.group;
+  const positions = useMemo(() => (group?.own ? { ...state.positions, ...group.positions } : state.positions) as Positions, [state.positions, group]);
   const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
   const hiddenLeft = scene ? scene.objects.filter(o => o.studentHidden && !revealed.has(o.uid)).length : 0;
 
@@ -386,7 +399,7 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
             resolveMedia={resolve}
             role="teacher"
             revealed={revealed}
-            positions={state.positions as Positions}
+            positions={positions}
             canDrag
             onToggleReveal={uid => socket.emit('slides:reveal', { uid, on: !revealed.has(uid) })}
             onMove={onMove}

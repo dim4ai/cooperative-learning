@@ -7,6 +7,7 @@ import { pollMarks, usePoll, type TeacherPollView } from './pollState';
 import { AvatarProvider, useTeacherTitle } from './avatars';
 import { ConnectionState, Track } from 'livekit-client';
 import { socket, setLessonCode, setAuthToken } from './socket';
+import { HighFive } from './HighFive';
 import { SeatingMap, type ClassActivity } from './SeatingMap';
 import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
@@ -1107,6 +1108,7 @@ export default function App() {
       </div>
 
       {demo?.solo && <DemoVoice stage={state.stage} room={inSmallRoom ? livekit?.room ?? null : 'class'} />}
+      <HighFive room={inSmallRoom ? livekit?.room ?? null : null} />
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
         quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={legs} />}

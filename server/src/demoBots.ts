@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHAT, CHATTER, CHOCOLATE, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { CHAT, CHATTER, CHOCOLATE, SIXTH, type FourLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 export const BOTS = [
@@ -43,7 +43,7 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[] }
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[] }
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
@@ -87,6 +87,54 @@ interface Chat {
 }
 
 const CHAT_WRITE_MS = 900;        // a list written out one line after another
+/** Ч2: where the cards of b10 go, as the line saying it ends (the sheet's ✋ cards: u00337… for 1…6) */
+const CARD_UID = ['u00337', 'u00338', 'u00339', 'u00340', 'u00341', 'u00342'];
+const YES = [[60, 250], [305, 250], [550, 250], [60, 410], [305, 410]], NO = [[830, 250], [1075, 250], [1320, 250]];
+const FOUR_MOVES: Record<string, [number, number[]]> = {
+  'c2-01': [1, YES[0]], 'c2-02': [2, YES[1]], 'c2-03': [3, YES[2]], 'c2-08': [3, NO[0]], 'c2-09': [4, YES[2]],
+  'c2-12': [5, NO[1]], 'c2-14': [6, NO[2]], 'c2-27': [6, YES[4]],
+};
+type XY = [number, number];
+/** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line */
+interface FourDraw { at: number; path?: XY[]; thin?: boolean; label?: { text: string; at: XY }; text?: { text: string; at: XY } }
+const FOUR_DRAW: Record<string, FourDraw[]> = {
+  // card 3: two parallel lines, AB on one, CD as long on the other — a parallelogram…
+  'c2-06': [
+    { at: 0.05, path: [[850, 590], [1280, 590]], thin: true }, { at: 0.2, path: [[850, 430], [1280, 430]], thin: true },
+    { at: 0.45, path: [[900, 590], [1080, 590]], label: { text: 'A', at: [885, 615] } }, { at: 0.5, label: { text: 'B', at: [1080, 615] } },
+    { at: 0.65, path: [[980, 430], [1160, 430]], label: { text: 'D', at: [975, 405] } }, { at: 0.7, label: { text: 'C', at: [1165, 405] } },
+    { at: 0.85, path: [[900, 590], [980, 430]] }, { at: 0.9, path: [[1080, 590], [1160, 430]] },
+  ],
+  // …and the other way: as long, but a trapezoid
+  'c2-07': [{ at: 0.4, path: [[1160, 430], [1240, 590]], label: { text: "B'", at: [1255, 615] } }],
+  // card 5: one diagonal cut in half, the other not
+  'c2-12': [
+    { at: 0.15, path: [[880, 520], [1120, 520]], label: { text: 'A', at: [862, 520] } }, { at: 0.2, label: { text: 'C', at: [1140, 520] } },
+    { at: 0.3, path: [[940, 508], [940, 532]] }, { at: 0.32, path: [[1060, 508], [1060, 532]] },
+    { at: 0.5, path: [[1000, 460], [1000, 630]], label: { text: 'B', at: [1000, 440] } }, { at: 0.55, label: { text: 'D', at: [1000, 652] } },
+    { at: 0.75, path: [[880, 520], [1000, 460], [1120, 520], [1000, 630], [880, 520]] },
+  ],
+  // card 6: angle after angle — the fourth comes out different
+  'c2-16': [
+    { at: 0.2, path: [[1290, 440], [1230, 610], [1500, 610]] },
+    { at: 0.45, path: [[1290, 440], [1480, 420]] },
+    { at: 0.65, path: [[1480, 420], [1500, 610]] },
+  ],
+  // the opposite angles equal straight away: their sides cross
+  'c2-17': [
+    { at: 0.35, path: [[1520, 560], [1240, 610], [1330, 420]] },
+    { at: 0.55, path: [[1230, 470], [1510, 430], [1420, 630]] },
+  ],
+  // Аня counts
+  'c2-22': [{ at: 0.95, text: { text: '∠A + ∠B = 180°', at: [70, 575] } }],
+  'c2-24': [{ at: 0.95, text: { text: 'AD ∥ BC', at: [470, 575] } }],
+};
+/** Lines that start on something new: what was drawn before goes away */
+const FOUR_ERASE = new Set(['c2-12', 'c2-17']);
+const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
+
+/** A four going through the cards by itself (Ч2): no teacher in it, no call */
+interface Four { lines: FourLine[]; next: number; names: string[]; onBoard: string[] }
 const SEGMENT_MS = 300; // a drawn line goes on the board one segment after another
 const ERASE_MS = 200;   // and is wiped one object after another
 /** Lines that move on to something new: what was drawn before goes away as they begin */
@@ -143,7 +191,8 @@ const BLOCK_SCRIPT: Record<string, RoomScript[]> = {
   b10: [
     { lines: lines(['1 — да', '2 — да', '3 — да?', '4 — да'], 5, 7), talk: [0.5, 0.45, 0.35, 0.2], call: {
       at: 30, note: 'Карточка 3: AB ∥ CD и BC = AD. Мы положили в «Да, точно», а {2} говорит, что это может быть трапеция. Кто прав?' } },
-    { lines: lines(['1 — да', '4 — да', '5 — не обязательно', '6 — ?'], 6, 8), talk: [0.45, 0.4, 0.3, 0.3] },
+    // Ч2 «Шестая — самая коварная»: the four where Аня sits goes through the cards by itself
+    { lead: 'Аня', lines: [], four: SIXTH, talk: [0.45, 0.4, 0.4, 0.1] },
   ],
 };
 
@@ -175,6 +224,11 @@ export interface BotHost {
   write(room: string, obj: Record<string, unknown> & { uid: string; type: string }, author?: string): void;
   /** Takes a bot's drawing off the board */
   erase(room: string, uid: string, author?: string): void;
+  /** Moves a ✋ object of the sheet in a group's room, as a student dragging it would */
+  move(room: string, uid: string, left: number, top: number): void;
+  /** «Дай пять»: a bot puts the hand up in its room, a bot taps it */
+  five(room: string, name: string): void;
+  fiveTap(room: string, name: string): void;
   /** A bot talked this long: counted as a real student's microphone would be */
   talk(name: string, ms: number): void;
   /** Names of the bots in a room */
@@ -233,6 +287,7 @@ export class BotRun {
   private talks = new Map<string, Talk>();
   private explains = new Map<string, Explain>();
   private chats = new Map<string, Chat>();
+  private fours = new Map<string, Four>();
   private callPending = false; // the next call is timed already
   private stage = '';
   private earlyCalled = false;
@@ -292,6 +347,7 @@ export class BotRun {
     this.talks.clear();
     this.explains.clear();
     this.chats.clear();
+    this.fours.clear();
     this.callPending = false;
     this.stage = stage;
     this.earlyCalled = false;
@@ -327,6 +383,10 @@ export class BotRun {
         this.chatter(room, part, [lead, partner]);
         this.explains.set(room, { lines: part.explain, next: 0, greeted: false, busy: false, gen: 0, insert: [], lastStrong: null, drawn: new Set(), onBoard: [] });
         this.after(TALK_START_MS, () => this.explainStep(room));
+      } else if (part.four) {
+        this.quietRooms.add(room);
+        this.fours.set(room, { lines: part.four, next: 0, names: this.fourNames(part.four, members), onBoard: [] });
+        this.after(TALK_START_MS, () => this.fourStep(room));
       } else if (part.chat) {
         this.quietRooms.add(room);
         // the chatter goes by who sits there; boy and girl: the girl is {1}
@@ -560,6 +620,59 @@ export class BotRun {
       e.busy = false;
       this.after(LINE_GAP_MS, () => this.explainStep(room));
     });
+  }
+
+  // ---------- a four by itself (Four) ----------
+  /** Who says {1}…{4}: Аня is 4; the others by whose own voice the lines were said in, then whoever is left */
+  private fourNames(lines: FourLine[], members: string[]): string[] {
+    const voiceOf = (who: number) => Object.keys(lines.find(l => l.who === who)?.ms ?? {})[0];
+    const names = ['', '', '', members.includes('Аня') ? 'Аня' : ''];
+    let left = members.filter(m => m !== names[3]);
+    for (const who of [1, 2, 3]) {
+      const m = left.find(n => VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
+      names[who - 1] = m;
+      left = left.filter(n => n !== m);
+    }
+    if (!names[3]) names[3] = left[0] ?? names[0];
+    return names;
+  }
+
+  private fourStep(room: string) {
+    const f = this.fours.get(room);
+    const line = f?.lines[f.next++];
+    if (!f || !line) return; // done: they stay quiet
+    const who = f.names[line.who - 1];
+    const ms = this.voice(room, who, line.id, line.ms);
+    if (FOUR_ERASE.has(line.id)) f.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who)));
+    for (const d of FOUR_DRAW[line.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, f, d, line.who, who));
+    const move = FOUR_MOVES[line.id];
+    if (move) this.after(ms * 0.8, () => this.host.move(room, CARD_UID[move[0] - 1], move[1][0], move[1][1]));
+    if (line.id === 'c2-29') {
+      // «Дайте пятюню!»: the hand is up, the others tap it one after another
+      this.after(ms * 0.6, () => this.host.five(room, who));
+      f.names.filter(n => n && n !== who).forEach((n, i) => this.after(ms + 500 + i * FIVE_TAP_MS + Math.random() * 300, () => this.host.fiveTap(room, n)));
+    }
+    const gap = line.id === 'c2-29' ? 3 * FIVE_TAP_MS + 2500 : LINE_GAP_MS;
+    this.after(ms + gap, () => this.fourStep(room));
+  }
+
+  private fourDraw(room: string, f: Four, d: FourDraw, by: number, author: string) {
+    const color = COLORS[(by - 1) % COLORS.length];
+    const uid = () => { const u = `bot-${room}-${this.uid++}`; f.onBoard.push(u); return u; };
+    if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => {
+      const [a, b] = [d.path![i], p];
+      this.host.write(room, {
+        uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,
+        originX: 'center', originY: 'center', stroke: d.thin ? '#adb5bd' : color, strokeWidth: d.thin ? 2 : 5, strokeLineCap: 'round',
+      }, author);
+    }));
+    for (const t of [d.label && { ...d.label, size: 28 }, d.text && { ...d.text, size: 34 }]) {
+      if (!t) continue;
+      this.host.write(room, {
+        uid: uid(), type: 'IText', text: t.text, left: t.at[0], top: t.at[1], originX: t.size === 28 ? 'center' : 'left', originY: 'center',
+        fontSize: t.size, fontWeight: 'bold', fontFamily: 'sans-serif', fill: color,
+      }, author);
+    }
   }
 
   // ---------- a dialogue that drifts (Chat) ----------
