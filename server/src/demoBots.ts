@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
@@ -45,7 +45,7 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** spoken: a voiced dialogue instead of random talk, heard on coming in (server/src/demoDialogue.ts): from the start
  *  of the stage, its call as it ends and the rest after the teacher's answer; or, with `later`, once all calls are over */
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
-interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[]; trap?: TrapLine[] }
+interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; plan?: TalkPlan; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[]; trap?: TrapLine[] }
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
@@ -60,8 +60,24 @@ const RECALL_MS = 15_000; // the teacher left without answering: they call again
 
 /** A dialogue that listens: the teacher coming in openly is greeted, one still there when they'd call is asked
  *  straight away, the call waits its turn among the others', and the second part begins once the teacher answered */
+/** How a dialogue that calls goes, by its line ids (the text files: ~/temp/П1-курица.txt, П3-ножницы.txt) */
+interface TalkPlan {
+  greet: string;        // hello to a teacher coming in openly before the call
+  cut: string;          // the teacher is still there when they get here: they ask straight away (direct) instead
+  direct: string[];
+  call: string[];       // the question, said on the call after «Какой у вас вопрос?» (tq)
+  callBy: 1 | 2;        // whose tile the bell is by
+  after: string;        // the first line once answered…
+  last: string;         // …and the last
+  tq: string; ta: string; // the teacher's question and ready answer
+  toOther?: string;     // said to the other one: its «…f» variant if that's a girl
+  legs?: boolean;       // the pale legs of Pythagoras over {1}'s sheet as the answer is said (Миша's pair)
+}
+const P1_PLAN: TalkPlan = { greet: 'p1-32', cut: 'p1-15', direct: ['p1-33'], call: ['p1-17'], callBy: 2, after: 'p1-18', last: 'p1-31', tq: 'p1-tq', ta: 'p1-ta', toOther: 'p1-21', legs: true };
+const P3_PLAN: TalkPlan = { greet: 'p3-38', cut: 'p3-19', direct: ['p3-39', 'p3-40'], call: ['p3-21', 'p3-22'], callBy: 1, after: 'p3-23', last: 'p3-37', tq: 'p3-tq', ta: 'p3-ta', toOther: 'p3-17' };
+
 interface Talk {
-  room: string; lines: DialogueLine[];
+  room: string; lines: DialogueLine[]; plan: TalkPlan;
   next: number;                 // index of the next line of the course
   phase: 'a' | 'calling' | 'asked' | 'b' | 'done';
   present: boolean; greeted: boolean; busy: boolean;
@@ -191,10 +207,11 @@ const SHEETS: Record<string, Sheet> = {
     at: 40, note: 'Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?', reply: ['∠BAC = ∠ACD'] } },
   // the weak one: «Одну пару сторон нашёл, и всё»
   'p2-2': { lines: ['AD = BC'], start: 18, gap: 0 },
-  // the one who does all the talking, and the quiet one
-  'p3-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C'], start: 5, gap: 8 },
-  'p3-2': { lines: ['AD = BC'], start: 3, gap: 0, call: {
-    at: 12, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠B = ∠D'] } },
+  // П3 «Хоть ножницы нарисуй»: «Я тоже их нашёл и ещё две пары углов» — the vertical ones, after asking how to write angles;
+  // «Стороны и диагонали. Четыре штуки»
+  'p3-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 5, gap: 8, call: {
+    at: 30, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠AOB = ∠COD', '∠BOC = ∠AOD'] } },
+  'p3-2': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
   // «Четыре. Стороны и диагонали» — «У меня тоже четыре, только другие… Зато углы» in a scrawl: «Это бэ или восьмёрка?»
   'p4-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
   'p4-2': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', '∠B = ∠D'], start: 6, gap: 10 },
@@ -321,11 +338,11 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
   ],
   pairs: [
     // П1 «Как курица лапкой»: they check their lists, argue about AB = AO and call
-    { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, talk: [0.55, 0.5] },
+    { lead: 'Миша', partner: 'Артём', lines: [], dialogue: CHOCOLATE, plan: P1_PLAN, talk: [0.55, 0.5] },
     // П2 «Давай я быстро объясню»: {1} explains with triangles drawn on {2}'s sheet, {2} gets it
     { lines: [], explain: EXPLAIN, talk: [0.6, 0.45] },
-    // one does all the talking and the writing, the other hardly gets a word in: heard on coming in
-    { lines: [], spoken: LOPSIDED_PAIR, later: true },
+    // П3 «Хоть ножницы нарисуй»: vertical angles, a bet on a chocolate bar; they call, and it's a draw
+    { lines: [], dialogue: SCISSORS, plan: P3_PLAN, talk: [0.5, 0.5] },
     // П4 «Трёп»: they begin checking and drift off; the teacher may listen in, or come in and set them to work
     { lines: [], chat: CHAT, talk: [0.5, 0.45] },
   ],
@@ -580,7 +597,7 @@ export class BotRun {
       if (part.dialogue) {
         this.quietRooms.add(room);
         this.chatter(room, part, [lead, partner]);
-        this.talks.set(room, { room, lines: part.dialogue, next: 0, phase: 'a', present: false, greeted: false, busy: false, saying: null, gen: 0, insert: [] });
+        this.talks.set(room, { room, lines: part.dialogue, plan: part.plan ?? P1_PLAN, next: 0, phase: 'a', present: false, greeted: false, busy: false, saying: null, gen: 0, insert: [] });
         this.after(TALK_START_MS, () => this.step(room));
       } else if (part.explain) {
         this.quietRooms.add(room);
@@ -899,39 +916,42 @@ export class BotRun {
   private step(room: string) {
     const t = this.talks.get(room);
     if (!t || t.busy) return;
+    const P = t.plan;
+    const at = (id: string) => t.lines.findIndex(l => l.id === id);
+    const ask = (ids: string[]) => {
+      // asked in the room: the question shows in the teacher's panel as a call would
+      const said = ids.map(id => this.id1(t, id));
+      this.host.call(room, said.map(l => l.text).join(' '), this.names.get(room)?.[said[0].who === 2 ? 1 : 0]);
+      this.host.callOff(room);
+      t.next = at(P.after);
+      t.phase = 'asked';
+      t.insert.push(...said.slice(1));
+      return said[0];
+    };
     let line = t.insert.shift();
     if (!line) {
       if (t.phase === 'a') {
+        while (t.lines[t.next]?.id.endsWith('f')) t.next++; // a variant said to a girl: not a line of its own
         const cur = t.lines[t.next];
-        if (cur?.id === 'p1-15' && t.present) {
-          // the teacher is here: asked straight away, no call
-          t.next = t.lines.findIndex(l => l.id === 'p1-18');
-          t.phase = 'asked';
-          line = this.id1(t, 'p1-33');
-          this.host.call(room, line.text, this.names.get(room)?.[0]);
-          this.host.callOff(room);
-        } else if (cur?.id === 'p1-17' && t.present) {
-          // came in just as they were about to call: they ask right away
-          t.next++;
-          t.phase = 'asked';
-          line = cur;
-          this.host.call(room, cur.text, this.names.get(room)?.[1]);
-          this.host.callOff(room);
-        } else if (cur?.id === 'p1-17') {
+        // the teacher is here: asked straight away, no call
+        if (cur?.id === P.cut && t.present) line = ask(P.direct);
+        // came in just as they were about to call: they ask right away
+        else if (cur?.id === P.call[0] && t.present) line = ask(P.call);
+        else if (cur?.id === P.call[0]) {
           // they call: the bell waits its turn among the other rooms'
-          t.next = t.lines.findIndex(l => l.id === 'p1-18');
+          t.next = at(P.after);
           t.phase = 'calling';
-          this.requestCall(room, this.id1(t, 'p1-17').text, 2);
+          this.requestCall(room, this.callNote(t), P.callBy);
           return;
         } else { line = cur; t.next++; }
       } else if (t.phase === 'b') {
         while (t.lines[t.next]?.id.endsWith('f')) t.next++; // a variant said to a girl: not a line of its own
         line = t.lines[t.next];
-        if (!line || !/^p1-(1[89]|2\d|3[01])$/.test(line.id)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
+        if (!line || t.next > at(P.last)) { t.phase = 'done'; return; } // the dialogue is over: they stay quiet
         t.next++;
-        // «Ты говорил / говорила»: as the partner is
-        if (line.id === 'p1-21' && this.female(this.names.get(room)?.[1] ?? '')) line = this.id1(t, 'p1-21f');
       } else return;
+      // «Ты говорил / говорила», «не прав / права»: as the other one is
+      if (line && line.id === P.toOther && this.female(this.names.get(room)?.[line.who === 1 ? 1 : 0] ?? '')) line = this.id1(t, `${P.toOther}f`);
     }
     if (!line) return;
     const said = line;
@@ -943,13 +963,17 @@ export class BotRun {
     this.after(ms, () => {
       if (t.gen !== gen) return; // broken off
       t.busy = false;
-      if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
+      if (said.write && said.who !== 'T') said.write.split('|').forEach((w, i) => this.after(i * 700, () => this.write(room, w, said.who as 1 | 2)));
       // asked: the teacher may answer once the question is out
-      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-33' || said.id === 'p1-17')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); this.after(THINK_MS, () => this.host.callDone(room)); }
+      const asked = [P.direct[P.direct.length - 1], P.call[P.call.length - 1]];
+      if (t.phase === 'asked' && !t.insert.length && asked.includes(said.id)) { t.phase = 'b'; t.insert.push(this.id1(t, P.ta)); this.after(THINK_MS, () => this.host.callDone(room)); }
       const next = t.insert[0]?.id;
-      this.after(next === 'p1-32' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
+      this.after(next === P.greet ? GREET_GAP_MS : next === P.ta ? THINK_MS : said.id === P.ta ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
     });
   }
+
+  /** What a call says, by the caller's tile */
+  private callNote(t: Talk) { return t.plan.call.map(id => this.id1(t, id).text).join(' '); }
 
   // ---------- a dialogue that goes on its own (Explain) ----------
   private explainStep(room: string) {
@@ -1248,7 +1272,7 @@ export class BotRun {
 
   /** Миша's pair: where his sheet lies, for the pale legs over it (client-teacher demoLegs.tsx) */
   private legs(room: string): SheetPlace | null | undefined {
-    return this.talks.has(room) ? this.host.sheetAt(room, this.names.get(room)?.[0] ?? '') : undefined;
+    return this.talks.get(room)?.plan.legs ? this.host.sheetAt(room, this.names.get(room)?.[0] ?? '') : undefined;
   }
 
   /** One line out loud: a student's counted as talk; how long it takes */
@@ -1274,12 +1298,12 @@ export class BotRun {
     if (t.phase === 'a' && !t.greeted) {
       t.greeted = true;
       // the line going on is finished, then hello at once
-      t.insert.push(this.id1(t, 'p1-32'));
+      t.insert.push(this.id1(t, t.plan.greet));
     }
     else if (t.phase === 'calling') {
       // came on the call: «Какой у вас вопрос?» — and the partner asks it
       t.phase = 'asked';
-      t.insert.push(this.id1(t, 'p1-tq'), this.id1(t, 'p1-17'));
+      t.insert.push(this.id1(t, t.plan.tq), ...t.plan.call.map(id => this.id1(t, id)));
     }
     // a moment for the teacher's page to get into the room: what's said for them is heard from its start
     this.after(ARRIVE_MS, () => this.step(room));
@@ -1294,7 +1318,7 @@ export class BotRun {
     this.host.offerReply(room, null);
     t.insert = [];
     t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.id1(t, 'p1-17').text, 2); });
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.callNote(t), t.plan.callBy); });
   }
 
   /** The teacher answered: with the ready answer, said in the teacher's voice, or in their own words */
@@ -1304,7 +1328,7 @@ export class BotRun {
     this.host.offerReply(room, null);
     this.host.callDone(room);
     t.phase = 'b';
-    if (ready) t.insert.push(this.id1(t, 'p1-ta'));
+    if (ready) t.insert.push(this.id1(t, t.plan.ta));
     this.after(ready ? 300 : 1500, () => this.step(room));
   }
 

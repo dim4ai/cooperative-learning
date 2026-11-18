@@ -57,21 +57,20 @@ function occupiedDesks(seats: Seat[]): number[] {
   return [...new Set(seats.filter(s => s.occupant && s.extra === undefined).map(s => s.groupIndex))].sort((a, b) => a - b);
 }
 
-/** The pair where one does the talking: the detective has something to look at there */
-function lopsidedPair(x: HintsInput): string | null {
+/** The pair that talks but hardly writes (П4 «Трёп»), and didn't call: the detective has something to look at there */
+function chattyPair(x: HintsInput): string | null {
   const pairs = new Map<string, string[]>();
   for (const s of x.seats) {
     if (!s.occupant) continue;
     const room = `${x.lesson}:pair-g${s.groupIndex}-r${s.row}`;
     pairs.set(room, [...(pairs.get(room) ?? []), s.occupant]);
   }
-  let best: string | null = null, bestShare = 1;
+  let best: string | null = null, bestOps = Infinity;
   for (const [room, names] of pairs) {
-    if (names.length < 2) continue;
-    const talk = names.map(n => x.activity?.students[n]?.talk ?? 0);
-    const total = talk.reduce((a, b) => a + b, 0);
-    const share = total >= 6 ? Math.min(...talk) / total : 0.5;
-    if (!best || share < bestShare) { best = room; bestShare = share; }
+    if (names.length < 2 || room in x.calls) continue;
+    const talk = names.reduce((a, n) => a + (x.activity?.students[n]?.talk ?? 0), 0);
+    const ops = names.reduce((a, n) => a + (x.activity?.students[n]?.ops ?? 0), 0);
+    if (talk >= 6 && ops < bestOps) { best = room; bestOps = ops; }
   }
   return best;
 }
@@ -79,7 +78,7 @@ function lopsidedPair(x: HintsInput): string | null {
 const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number }>();
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
-const CALLS: Record<string, number> = { individual: 3, pairs: 1, fours: 1 };
+const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
 
 /** The lesson's blocks in the server's order, the polls added during the lesson among them */
 const planBlocks = (x: HintsInput) => x.slides.material?.blocks ?? x.slides.local?.blocks ?? [];
@@ -251,9 +250,9 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (answered < (CALLS[stage] ?? 2)) return null; // the class works; someone will call
     // the detective: a pair that didn't call, but the map shows something's off there
     if (stage === 'pairs' && !done.has('spy')) {
-      const room = lopsidedPair(x);
+      const room = chattyPair(x);
       if (room) return { id: 'spy', anchor: `[data-pair-room="${CSS.escape(room)}"]`, text:
-        'Посмотрите на эту пару: говорит и пишет в основном один ученик. '
+        'Посмотрите на эту пару: разговаривают, а на доске почти ничего. '
         + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
     }
     return { id: `next-block:${stage}`, anchor: nextBlock(x), text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах'
