@@ -1649,6 +1649,13 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
   if (block.type === 'group' && block.id !== lesson.block) clearMarks(lesson);
   const pollStarts = !!block.poll && block.id !== lesson.block && !lesson.polls.has(block.id);
   if (block.id !== lesson.block && stage === lesson.stage) clearCalls(lesson); // a new stage clears them in changeStage
+  // the solo demo: back to a block is that block from the start, every board as it was given (its starter only)
+  if (lesson.bots && block.id !== lesson.block) {
+    const ids = new Set([block.id, ...block.slides.map(sl => sl.id)]);
+    const ofBlock = (key: string) => ids.has(key.slice(key.lastIndexOf('#') + 1));
+    for (const key of [...lesson.boards.keys()]) if (ofBlock(key)) lesson.boards.delete(key);
+    for (const key of [...lesson.laidSheets.keys()]) if (ofBlock(key)) lesson.laidSheets.delete(key); // laid anew, as they are now
+  }
   enterBlock(lesson, block);
   broadcastSlides(lesson);
   pushBoards(lesson);
