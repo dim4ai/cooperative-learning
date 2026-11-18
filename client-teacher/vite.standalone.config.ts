@@ -52,7 +52,8 @@ export default defineConfig(() => ({
     'process.env': JSON.stringify(SERVER_ENV),
   },
   build: { outDir: path.resolve(here, 'dist-demo'), emptyOutDir: true },
-  server: { port: 13127, fs: { allow: [path.resolve(here, '..')] } },
+  // /vox/: the voice editor on the test address (demo/voice-editor, not in git)
+  server: { port: 13127, fs: { allow: [path.resolve(here, '..')] }, proxy: { '/vox': 'http://127.0.0.1:13141' } },
   // dev only (pm2 cl-demo behind nginx); on co-learn.ru nginx serves dist-demo itself
   preview: { port: 13127, allowedHosts: true },
 }))

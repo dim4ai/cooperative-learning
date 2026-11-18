@@ -968,7 +968,7 @@ export class BotRun {
       const asked = [P.direct[P.direct.length - 1], P.call[P.call.length - 1]];
       if (t.phase === 'asked' && !t.insert.length && asked.includes(said.id)) { t.phase = 'b'; t.insert.push(this.id1(t, P.ta)); this.after(THINK_MS, () => this.host.callDone(room)); }
       const next = t.insert[0]?.id;
-      this.after(next === P.greet ? GREET_GAP_MS : next === P.ta ? THINK_MS : said.id === P.ta ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
+      this.after(next === P.greet ? GREET_GAP_MS : said.gap ?? (next === P.ta ? THINK_MS : said.id === P.ta ? PONDER_MS : LINE_GAP_MS), () => this.step(room));
     });
   }
 
