@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { CHAT, CHATTER, CHOCOLATE, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
@@ -310,7 +310,7 @@ const SCRIPT: Record<BotStage, RoomScript[]> = {
     { lines: lines(OBSERVATIONS.slice(0, 3), 8, 9) },
     { lines: lines(['AD = BC', 'AB = CD', 'угол A и угол C ?'], 3, 4), call: {
       // no reply: the teacher writes it on her board
-      at: 12, note: 'Я забыла, как записывается равенство углов. Напишите, пожалуйста' } },
+      at: 12, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста' } },
     { lines: lines([OBSERVATIONS[0], '∠A = ∠C'], 6, 10), call: {
       at: 40, note: 'Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?',
       reply: '∠BAC = ∠ACD' } },
@@ -438,6 +438,8 @@ export class BotRun {
   private written = new Map<string, { n: number; top: number }>();
   private names = new Map<string, [string, string]>(); // room → who {1} and {2} are there
   private replies = new Map<string, () => void>();
+  /** A text-only call's question, voiced: said when the teacher comes to the caller */
+  private asks = new Map<string, { line: (typeof ASKS)[number]; who: string }>();
   private roles = new Map<string, { role: Role; who: 1 | 2 }>();
   private sheetRows = new Map<string, { text: string; top: number }[]>(); // name → their b2 sheet's lines
   private marked = new Set<string>(); // room:line whose marks are on the sheets already
@@ -509,6 +511,7 @@ export class BotRun {
     for (const t of this.stageTimers) clearTimeout(t);
     this.stageTimers.clear();
     this.replies.clear();
+    this.asks.clear();
     this.callQueue = [];
     this.calling = null;
     this.spoken = null;
@@ -622,7 +625,7 @@ export class BotRun {
         const at = callAt ?? part.call.at;
         this.callQueue.push({ room, at: at * 1000, fire: () => {
           if (reply) this.replies.set(room, () => this.write(room, reply));
-          this.host.call(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
+          this.askCall(room, this.fill(room, note), by ? this.names.get(room)?.[by - 1] : undefined);
         } });
       }
     });
@@ -678,7 +681,7 @@ export class BotRun {
       const { at, note, reply } = sheet.call;
       this.callQueue.push({ room, at: at * 1000, fire: () => {
         if (reply) this.replies.set(room, () => reply.forEach((t, i) => this.after(i * 2500, () => put(t))));
-        this.host.call(room, note, name);
+        this.askCall(room, note, name);
       } });
     }
     this.callQueue.sort((a, b) => a.at - b.at);
@@ -827,6 +830,14 @@ export class BotRun {
     this.nextCall(NEXT_CALL_GAP_MS);
   }
 
+  /** A call whose question is not part of a voiced dialogue: the caller says it aloud when the teacher comes */
+  private askCall(room: string, note: string, who?: string) {
+    const line = ASKS.find(a => a.text === note);
+    const by = who ?? this.names.get(room)?.[0];
+    if (line && by) this.asks.set(room, { line, who: by });
+    this.host.call(room, note, who);
+  }
+
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
     if (this.calling?.room === room && !this.calling.visited) {
@@ -849,10 +860,18 @@ export class BotRun {
         this.after(took + 1500, () => this.quietRooms.delete(room)); // and back to their usual talk
       });
     }
+    // the question, aloud, as the teacher's page opens; the fix once it is said and heard
+    const ask = this.asks.get(room);
+    let replyAt = VISIT_REPLY_MS;
+    if (ask) {
+      this.asks.delete(room);
+      this.after(ARRIVE_MS, () => this.voice(room, ask.who, ask.line.id, ask.line.ms));
+      replyAt = Math.max(VISIT_REPLY_MS, ARRIVE_MS + (ask.line.ms[VOICE_OF[ask.who]] ?? 5000) + 2500);
+    }
     const reply = this.replies.get(room);
     if (!reply) return;
     this.replies.delete(room);
-    this.after(VISIT_REPLY_MS, reply);
+    this.after(replyAt, reply);
   }
 
   // ---------- a dialogue that listens (Talk) ----------

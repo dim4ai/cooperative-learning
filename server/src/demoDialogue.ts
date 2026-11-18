@@ -388,3 +388,11 @@ export const EXPLAIN: DialogueLine[] = [
   {"id": "p2-tq", "who": "T", "write": null, "ms": {"alena": 1620, "filipp": 1567}, "text": "Как вы тут? Как дела?"},
   {"id": "p2-tb", "who": "T", "write": null, "ms": {"alena": 2926, "filipp": 3056}, "text": "Отлично. Разбирайтесь, не буду мешать."},
 ];
+
+/** The questions of the text-only calls, said when the teacher comes (voice-tools/gen_asks.py) */
+export const ASKS: { id: string; text: string; ms: Record<string, number> }[] = [
+  {"id": "q1", "text": "А стороны и отрезки — это разве не одно и то же?", "ms": {"kirill": 3048, "anton": 2856, "alexander": 2832, "ermil": 2712, "dasha": 2952, "lera": 3000, "masha": 3192, "jane": 2880}},
+  {"id": "q2", "text": "Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?", "ms": {"kirill": 6192, "anton": 5808, "alexander": 5880, "ermil": 6216, "dasha": 5784, "lera": 5952, "masha": 6336, "jane": 5568}},
+  {"id": "q3", "text": "Не помню, как записывается равенство углов. Напишите, пожалуйста", "ms": {"kirill": 4200, "anton": 3984, "alexander": 3888, "ermil": 4008, "dasha": 4104, "lera": 4320, "masha": 4368, "jane": 4104}},
+  {"id": "q4", "text": "В сторонах уверены, а углы на клетках не посчитать. Как быть?", "ms": {"kirill": 4104, "anton": 3984, "alexander": 4032, "ermil": 3768, "dasha": 3960, "lera": 4080, "masha": 4272, "jane": 3960}},
+];
