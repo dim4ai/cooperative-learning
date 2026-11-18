@@ -343,6 +343,11 @@ export const SOLO_LIVE_BLOCKS = new Set(['b1', 'b2', 'b3', 'b9', 'b10', 'b12']);
 export const soloBlockOpen = (id: string) => SOLO_LIVE_BLOCKS.has(id) || id.startsWith('live-');
 
 /** A block of its own, not its stage's usual script. b10 «Точно параллелограмм?»: a stand-in until its dialogue is written */
+/** The pairs' dialogues fixed to the desks the journal seats them at (null: at random, Миша's desk always P1) */
+const FIXED_PAIRS: Partial<Record<Role, [string, string]>> | null = {
+  p1: ['Миша', 'Артём'], p2: ['Аня', 'Тимур'], p3: ['Глеб', 'Соня'], p4: ['Лена', 'Вика'],
+};
+
 const BLOCK_SCRIPT: Record<string, RoomScript[]> = {
   b10: [
     // Ч1 «Ловушка трапеции»: the four where Миша sits falls into card 3's trap and calls the teacher
@@ -641,7 +646,17 @@ export class BotRun {
     if (this.roles.size && !again) return;
     this.roles.clear();
     const left = (['p2', 'p3', 'p4'] as Role[]).sort(() => Math.random() - 0.5);
-    for (const desk of this.host.deskmates()) {
+    const desks = this.host.deskmates();
+    // for now each dialogue at its own desk, as the class sits by the journal, so each can be heard: {1} first
+    if (FIXED_PAIRS) {
+      const fixed = Object.entries(FIXED_PAIRS) as [Role, [string, string]][];
+      const sitting = fixed.filter(([, [x, y]]) => desks.some(d => d.length === 2 && d.includes(x) && d.includes(y)));
+      if (sitting.length === fixed.length) {
+        for (const [role, [x, y]] of fixed) { this.roles.set(x, { role, who: 1 }); this.roles.set(y, { role, who: 2 }); }
+        return;
+      }
+    }
+    for (const desk of desks) {
       if (desk.length !== 2) continue;
       let [a, b] = desk;
       const role: Role | undefined = desk.includes(SOLO_NEWCOMER) ? 'p1' : left.shift();
