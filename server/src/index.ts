@@ -690,6 +690,9 @@ function startBots(code: string, lesson: LessonRuntime) {
     callOff(room) {
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false });
     },
+    callDone(room) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: false, done: true });
+    },
     offerReply(room, text) {
       for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('demoReply', { room, text });
     },

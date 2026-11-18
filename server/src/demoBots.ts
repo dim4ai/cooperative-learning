@@ -406,6 +406,8 @@ export interface BotHost {
   speak(name: string, text: string, clip: { src: string; ms: number }): void;
   /** The call is over without a visit: the teacher is in the room already */
   callOff(room: string): void;
+  /** The call was answered: its question goes from the teacher's screen */
+  callDone(room: string): void;
   /** The teacher may answer now: with the ready answer (its text) or in their own words; null: not any more */
   offerReply(room: string, text: string | null): void;
   /** A bot answers the running poll */
@@ -856,6 +858,7 @@ export class BotRun {
     if (rest) {
       this.afterAnswer.delete(room);
       this.after(AFTER_ANSWER_MS, () => {
+        this.host.callDone(room);
         const took = this.speak(room, rest);
         this.after(took + 1500, () => this.quietRooms.delete(room)); // and back to their usual talk
       });
@@ -869,9 +872,9 @@ export class BotRun {
       replyAt = Math.max(VISIT_REPLY_MS, ARRIVE_MS + (ask.line.ms[VOICE_OF[ask.who]] ?? 5000) + 2500);
     }
     const reply = this.replies.get(room);
-    if (!reply) return;
+    if (!reply) { if (ask) this.after(replyAt, () => this.host.callDone(room)); return; }
     this.replies.delete(room);
-    this.after(replyAt, reply);
+    this.after(replyAt, () => { this.host.callDone(room); reply(); });
   }
 
   // ---------- a dialogue that listens (Talk) ----------
@@ -927,7 +930,7 @@ export class BotRun {
       t.busy = false;
       if (said.write && said.who !== 'T') this.write(room, said.write, said.who);
       // asked: the teacher may answer once the question is out
-      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-33' || said.id === 'p1-17')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); }
+      if (t.phase === 'asked' && !t.insert.length && (said.id === 'p1-33' || said.id === 'p1-17')) { t.phase = 'b'; t.insert.push(this.id1(t, 'p1-ta')); this.after(THINK_MS, () => this.host.callDone(room)); }
       const next = t.insert[0]?.id;
       this.after(next === 'p1-32' ? GREET_GAP_MS : next === 'p1-ta' ? THINK_MS : said.id === 'p1-ta' ? PONDER_MS : LINE_GAP_MS, () => this.step(room));
     });
@@ -1094,6 +1097,7 @@ export class BotRun {
       if (t.phase === 'asked' && (said.id === 'c1-19' || said.id === 'c1-39')) {
         // asked: the teacher's ready answer, drawn as it is said, and on they go
         t.phase = 'b';
+        this.after(THINK_MS, () => this.host.callDone(room));
         this.after(THINK_MS, () => this.trapStep(room));
         return;
       }
@@ -1283,6 +1287,7 @@ export class BotRun {
     const t = this.talks.get(room);
     if (!t || t.phase !== 'asked') return;
     this.host.offerReply(room, null);
+    this.host.callDone(room);
     t.phase = 'b';
     if (ready) t.insert.push(this.id1(t, 'p1-ta'));
     this.after(ready ? 300 : 1500, () => this.step(room));

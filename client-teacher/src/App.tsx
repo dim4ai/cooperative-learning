@@ -766,7 +766,9 @@ export default function App() {
     socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
     // a new stage or block: the calls from the one before are over
     socket.on('callsCleared', () => { setCallingRooms(new Set()); setCalls({}); setDemoReply(null); });
-    socket.on('callTeacher', ({ room, calling, note, who }: { room: string; calling: boolean; note?: string; who?: string }) => {
+    socket.on('callTeacher', ({ room, calling, note, who, done }: { room: string; calling: boolean; note?: string; who?: string; done?: boolean }) => {
+      // answered: the question by their tile goes too
+      if (done) setCalls(prev => { const next = { ...prev }; delete next[room]; return next; });
       if (calling && !callingNow.current.has(room) && room !== roomNow.current) playCallBell();
       if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));
       setCallingRooms(prev => {
