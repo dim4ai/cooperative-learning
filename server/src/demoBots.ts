@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, SIXTH_BOARD } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
@@ -113,8 +113,6 @@ const FOUR_MOVES: Record<string, [number, number[]]> = {
   'c2-12': [5, NO[1]], 'c2-14': [6, NO[2]], 'c2-27': [6, YES[4]],
 };
 type XY = [number, number];
-/** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line */
-interface FourDraw { at: number; path?: XY[]; thin?: boolean; label?: { text: string; at: XY }; text?: { text: string; at: XY }; dot?: XY }
 const FOUR_DRAW: Record<string, FourDraw[]> = {
   // card 3: two parallel lines, AB on one, CD as long on the other — a parallelogram…
   'c2-06': [
@@ -168,6 +166,17 @@ Object.assign(FOUR_DRAW, {
 });
 /** Lines that start on something new: what was drawn before goes away */
 const FOUR_ERASE = new Set(['c2-12', 'c2-17', 'c1-ta2', 'c1-27']);
+// Ч2 as set in the voice editor, when it was: instead of the above
+if (Object.keys(SIXTH_BOARD).length) {
+  for (const k of Object.keys(FOUR_DRAW)) if (k.startsWith('c2-')) delete FOUR_DRAW[k];
+  for (const k of Object.keys(FOUR_MOVES)) if (k.startsWith('c2-')) delete FOUR_MOVES[k];
+  for (const k of [...FOUR_ERASE]) if (k.startsWith('c2-')) FOUR_ERASE.delete(k);
+  for (const [id, b] of Object.entries(SIXTH_BOARD)) {
+    if (b.draw) FOUR_DRAW[id] = b.draw;
+    if (b.move) FOUR_MOVES[id] = b.move;
+    if (b.erase) FOUR_ERASE.add(id);
+  }
+}
 const TEACHER_COLOR = '#c92a2a';
 const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
 
@@ -1042,7 +1051,7 @@ export class BotRun {
     const who = f.names[line.who - 1];
     const ms = this.voice(room, who, line.id, line.ms);
     if (FOUR_ERASE.has(line.id)) f.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who)));
-    for (const d of FOUR_DRAW[line.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, f.onBoard, d, COLORS[(line.who - 1) % COLORS.length], who));
+    for (const d of FOUR_DRAW[line.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, f.onBoard, d, COLORS[(line.who - 1) % COLORS.length], who, ms));
     const move = FOUR_MOVES[line.id];
     if (move) this.after(ms * 0.8, () => this.host.move(room, CARD_UID[move[0] - 1], move[1][0], move[1][1]));
     if (line.id === 'c2-29') {
@@ -1050,16 +1059,16 @@ export class BotRun {
       this.after(ms * 0.6, () => this.host.five(room, who));
       f.names.filter(n => n && n !== who).forEach((n, i) => this.after(ms + 500 + i * FIVE_TAP_MS + Math.random() * 300, () => this.host.fiveTap(room, n)));
     }
-    const gap = line.id === 'c2-29' ? 3 * FIVE_TAP_MS + 2500 : LINE_GAP_MS;
+    const gap = line.gap ?? (line.id === 'c2-29' ? 3 * FIVE_TAP_MS + 2500 : LINE_GAP_MS);
     this.after(ms + gap, () => this.fourStep(room));
   }
 
   /** author '' — the teacher draws it */
-  private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string) {
+  private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string, ms: number) {
     const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard.push(u); return u; };
     const put = (obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj);
     if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
-    if (d.path) d.path.slice(1).forEach((p, i) => this.after(i * SEGMENT_MS, () => {
+    if (d.path) d.path.slice(1).forEach((p, i) => this.after(d.ts ? (d.ts[i + 1] - d.at) * ms : i * SEGMENT_MS, () => {
       const [a, b] = [d.path![i], p];
       put({
         uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,
@@ -1115,7 +1124,7 @@ export class BotRun {
     }
     if (FOUR_ERASE.has(said.id)) t.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who || t.names[0])));
     const color = said.who === 'T' ? TEACHER_COLOR : COLORS[(said.who - 1) % COLORS.length];
-    for (const d of FOUR_DRAW[said.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, t.onBoard, d, color, who));
+    for (const d of FOUR_DRAW[said.id] ?? []) this.after(d.at * ms, () => this.fourDraw(room, t.onBoard, d, color, who, ms));
     const move = FOUR_MOVES[said.id];
     if (move) this.after(ms * 0.8, () => this.host.move(room, CARD_UID[move[0] - 1], move[1][0], move[1][1]));
     this.after(ms, () => {

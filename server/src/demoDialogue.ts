@@ -176,7 +176,12 @@ export const CHAT: DialogueLine[] = [
 
 /** Ч2 «Шестая — самая коварная» (b10, the four where Аня sits): 1–3 whoever, 4 is always Аня. No teacher in it.
  *  Text: ~/temp/Ч2-шестая.txt */
-export interface FourLine { id: string; who: 1 | 2 | 3 | 4; write: string | null; ms: Record<string, number>; text: string }
+export interface FourLine { id: string; who: 1 | 2 | 3 | 4; write: string | null; ms: Record<string, number>; text: string; gap?: number }
+/** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line;
+ *  ts — when each point of the path comes (a share of the line, as `at`; without it a segment every 300 ms) */
+export interface FourDraw { at: number; path?: Pt[]; ts?: number[]; thin?: boolean; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
+/** A line's board, from the voice editor: what is wiped as it begins, a card moved, what is drawn */
+export interface LineBoard { erase?: boolean; move?: [number, Pt]; draw?: FourDraw[] }
 /** Ч1 «Ловушка трапеции» (b10, the other four): 1 Организатор, 2 Сомневающийся (a girl: Лена), 3 Третий, 4 Шутник; T the teacher:
  *  c1-t0 «Какие у вас вопросы?», c1-ta1… the ready answer (drawing as it goes), c1-tok the praise. 38–39 instead of 18–19
  *  when the teacher is in the room as they'd call. Text: ~/temp/Ч1-трапеция.txt */
@@ -265,6 +270,9 @@ export const SIXTH: FourLine[] = [
   {"id": "c2-30", "who": 1, "write": null, "ms": {"anton": 2038, "alexander": 1881, "ermil": 1881, "lera": 2116, "masha": 2194, "jane": 1776}, "text": "Аня, что ты раньше молчала?"},
   {"id": "c2-31", "who": 4, "write": null, "ms": {"dasha": 3997}, "text": "Тоже не знала, как решать. Только когда начала объяснять, все сложилось."},
 ];
+/** Ч2's board from the voice editor (empty: as in demoBots.ts) */
+export const SIXTH_BOARD: Record<string, LineBoard> = {
+};
 
 export const CHOCOLATE: DialogueLine[] = [
   {"id": "p1-01", "who": 2, "write": null, "ms": {"anton": 2247, "alexander": 2273, "ermil": 2168, "dasha": 2325, "lera": 2299, "masha": 2508, "jane": 2011}, "text": "Привет. Ну что, сверяемся?"},
