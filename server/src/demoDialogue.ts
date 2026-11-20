@@ -179,7 +179,7 @@ export const CHAT: DialogueLine[] = [
 export interface FourLine { id: string; who: 1 | 2 | 3 | 4; write: string | null; ms: Record<string, number>; text: string; gap?: number }
 /** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line;
  *  ts — when each point of the path comes (a share of the line, as `at`; without it a segment every 300 ms) */
-export interface FourDraw { at: number; path?: Pt[]; ts?: number[]; thin?: boolean; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
+export interface FourDraw { at: number; path?: Pt[]; ts?: number[]; thin?: boolean; color?: string; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
 /** A line's board, from the voice editor: what is wiped as it begins, a card moved, what is drawn */
 export interface LineBoard { erase?: boolean; move?: [number, Pt]; draw?: FourDraw[] }
 /** Ч1 «Ловушка трапеции» (b10, the other four): 1 Организатор, 2 Сомневающийся (a girl: Лена), 3 Третий, 4 Шутник; T the teacher:

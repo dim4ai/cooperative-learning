@@ -1090,6 +1090,7 @@ export class BotRun {
 
   /** author '' — the teacher draws it */
   private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string, ms: number) {
+    if (d.color) color = d.color;
     const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard.push(u); return u; };
     const put = (obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj);
     if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
@@ -1097,7 +1098,7 @@ export class BotRun {
       const [a, b] = [d.path![i], p];
       put({
         uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,
-        originX: 'center', originY: 'center', stroke: d.thin ? '#adb5bd' : color, strokeWidth: d.thin ? 2 : 5, strokeLineCap: 'round',
+        originX: 'center', originY: 'center', stroke: d.thin && !d.color ? '#adb5bd' : color, strokeWidth: d.thin ? 2 : 5, strokeLineCap: 'round',
       });
     }));
     for (const t of [d.label && { ...d.label, size: 28 }, d.text && { ...d.text, size: 34 }]) {
