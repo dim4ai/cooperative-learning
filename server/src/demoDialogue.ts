@@ -452,3 +452,6 @@ export const SCISSORS: DialogueLine[] = [
   {"id":"p3-tq","who":"T","write":null,"ms":{"alena":1149,"filipp":1176},"text":"Какой у вас вопрос?"},
   {"id":"p3-ta","who":"T","write":null,"ms":{"alena":15256,"filipp":15778},"text":"Вертикальные углы действительно равны, тут не поспоришь. Но диагонали любого четырёхугольника, пересекаясь, дают равные вертикальные углы. А в этом задании мы ищем то, что характерно именно для параллелограмма. Так что вы оба правы.","gap":5000},
 ];
+/** П3's board from the voice editor: drawn over the two sheets of b2 (the first one's on the left) */
+export const SCISSORS_BOARD: Record<string, LineBoard> = {
+};

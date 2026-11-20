@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, SIXTH_BOARD } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
@@ -178,6 +178,8 @@ if (Object.keys(SIXTH_BOARD).length) {
   }
 }
 const TEACHER_COLOR = '#c92a2a';
+/** The pairs' boards from the voice editor, by line */
+const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD };
 const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
 
 /** Ч1: a four that calls; the teacher's ready answer is said and drawn, then they go on (the teacher coming in openly
@@ -476,6 +478,7 @@ export class BotRun {
   private roles = new Map<string, { role: Role; who: 1 | 2 }>();
   private sheetRows = new Map<string, { text: string; top: number }[]>(); // name → their b2 sheet's lines
   private marked = new Set<string>(); // room:line whose marks are on the sheets already
+  private pairDrawn = new Map<string, string[]>(); // room → what the pair drew from PAIR_BOARD (wiped by `erase`)
   private rowMarks = new Map<string, number>(); // room:owner:row → marks there already, the next one goes left of them
   private listed = new Map<string, number>(); // room → lines of the pair's common list under the sheets
   // calls come one at a time: the next one only after the teacher has answered this one and come back
@@ -787,6 +790,27 @@ export class BotRun {
     });
   }
 
+  /** A pair's line drawn as it is said (PAIR_BOARD, from the voice editor), once. Drawn with the first one's sheet on
+   *  the left: if it lies on the right here, the two halves change places */
+  private pairBoard(room: string, said: DialogueLine, ms: number) {
+    const b = PAIR_BOARD[said.id.replace(/f$/, '')];
+    if (!b || this.marked.has(`${room}:${said.id}:board`)) return;
+    this.marked.add(`${room}:${said.id}:board`);
+    const names = this.names.get(room) ?? ['', ''];
+    const onBoard = this.pairDrawn.get(room) ?? [];
+    this.pairDrawn.set(room, onBoard);
+    const who = said.who === 'T' ? '' : names[said.who - 1];
+    if (b.erase) onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who || names[0])));
+    const swap = (this.host.sheetAt(room, names[0])?.x ?? 0) > 0;
+    const x = (v: number) => swap ? (v < 800 ? v + 800 : v - 800) : v;
+    const map = (p: Pt): Pt => [x(p[0]), p[1]];
+    const color = said.who === 'T' ? TEACHER_COLOR : COLORS[said.who - 1];
+    for (const d of b.draw ?? []) {
+      const m: FourDraw = { ...d, path: d.path?.map(map), dot: d.dot && map(d.dot), label: d.label && { ...d.label, at: map(d.label.at) }, text: d.text && { ...d.text, at: map(d.text.at) } };
+      this.after(d.at * ms, () => this.fourDraw(room, onBoard, m, color, who, ms));
+    }
+  }
+
   /** The pair's common list, under the sheets: down a column, then the next one */
   private listLine(room: string, text: string, author: string) {
     const n = this.listed.get(room) ?? 0;
@@ -968,6 +992,7 @@ export class BotRun {
     t.saying = said;
     const ms = this.sayLine(room, said);
     this.sheetMarks(room, said.id, ms);
+    this.pairBoard(room, said, ms);
     const gen = t.gen;
     this.after(ms, () => {
       if (t.gen !== gen) return; // broken off
