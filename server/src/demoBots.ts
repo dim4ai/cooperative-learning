@@ -4,6 +4,25 @@
 
 import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD } from './demoDialogue';
 
+/** The voices the dialogues were written for: who says a four's {1}…{4} goes by these */
+const BASE_VOICE_OF = { ...VOICE_OF };
+/** Each lesson deals the children's voices anew, a boy's among the boys, a girl's among the girls; they keep it all the
+ *  lesson. A voice some line has alone of its sex (Миша's kirill in П1) stays with its child: till that line is voiced in all */
+(() => {
+  const lines: { who?: unknown; ms: Record<string, number> }[] = [CHATTER, ASKS, CHAT, TRAP, SIXTH, CHOCOLATE, EXPLAIN, SCISSORS].flat();
+  const pinned = new Set<string>();
+  for (const l of lines) {
+    if (l.who === 'T') continue;
+    for (const f of [false, true]) { const vs = Object.keys(l.ms).filter(v => FEMALE_VOICES.has(v) === f); if (vs.length === 1) pinned.add(vs[0]); }
+  }
+  for (const f of [false, true]) {
+    const names = Object.keys(VOICE_OF).filter(n => FEMALE_VOICES.has(VOICE_OF[n]) === f && !pinned.has(VOICE_OF[n]));
+    const vs = names.map(n => VOICE_OF[n]);
+    for (let i = vs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [vs[i], vs[j]] = [vs[j], vs[i]]; }
+    names.forEach((n, i) => { VOICE_OF[n] = vs[i]; });
+  }
+})();
+
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
 export interface SheetPlace { x: number; y: number; s: number }
@@ -1054,7 +1073,7 @@ export class BotRun {
     if (!fourth) { // all four by voice
       let left = [...members];
       for (const who of [1, 2, 3, 4]) {
-        const m = left.find(n => VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
+        const m = left.find(n => BASE_VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
         names[who - 1] = m;
         left = left.filter(n => n !== m);
       }
@@ -1062,7 +1081,7 @@ export class BotRun {
     }
     let left = members.filter(m => m !== names[3]);
     for (const who of [1, 2, 3]) {
-      const m = left.find(n => VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
+      const m = left.find(n => BASE_VOICE_OF[n] === voiceOf(who)) ?? left.find(n => this.female(n) === FEMALE_VOICES.has(voiceOf(who) ?? '')) ?? left[0] ?? '';
       names[who - 1] = m;
       left = left.filter(n => n !== m);
     }
