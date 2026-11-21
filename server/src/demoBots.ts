@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD } from './demoDialogue';
 
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
@@ -166,12 +166,13 @@ Object.assign(FOUR_DRAW, {
 });
 /** Lines that start on something new: what was drawn before goes away */
 const FOUR_ERASE = new Set(['c2-12', 'c2-17', 'c1-ta2', 'c1-27']);
-// Ч2 as set in the voice editor, when it was: instead of the above
-if (Object.keys(SIXTH_BOARD).length) {
-  for (const k of Object.keys(FOUR_DRAW)) if (k.startsWith('c2-')) delete FOUR_DRAW[k];
-  for (const k of Object.keys(FOUR_MOVES)) if (k.startsWith('c2-')) delete FOUR_MOVES[k];
-  for (const k of [...FOUR_ERASE]) if (k.startsWith('c2-')) FOUR_ERASE.delete(k);
-  for (const [id, b] of Object.entries(SIXTH_BOARD)) {
+// Ч1 and Ч2 as set in the voice editor, when they were: instead of the above
+for (const [pre, board] of [['c1-', TRAP_BOARD], ['c2-', SIXTH_BOARD]] as const) {
+  if (!Object.keys(board).length) continue;
+  for (const k of Object.keys(FOUR_DRAW)) if (k.startsWith(pre)) delete FOUR_DRAW[k];
+  for (const k of Object.keys(FOUR_MOVES)) if (k.startsWith(pre)) delete FOUR_MOVES[k];
+  for (const k of [...FOUR_ERASE]) if (k.startsWith(pre)) FOUR_ERASE.delete(k);
+  for (const [id, b] of Object.entries(board)) {
     if (b.draw) FOUR_DRAW[id] = b.draw;
     if (b.move) FOUR_MOVES[id] = b.move;
     if (b.erase) FOUR_ERASE.add(id);

@@ -236,6 +236,9 @@ export const TRAP: TrapLine[] = [
   {"id": "c1-38", "who": 1, "write": null, "ms": {"kirill": 5616}, "text": "Слушайте, время идёт, а мы на третьей карточке. Татьяна Алексеевна, можно вопрос?"},
   {"id": "c1-39", "who": 1, "write": null, "ms": {"kirill": 9038}, "text": "Карточка три. Очень похоже на первый признак, но не то же самое. А нарисовать, чтобы получился не параллелограмм, не можем."},
 ];
+/** Ч1's board from the voice editor (empty: as in demoBots.ts) */
+export const TRAP_BOARD: Record<string, LineBoard> = {
+};
 
 export const SIXTH: FourLine[] = [
   {"id": "c2-01", "who": 1, "write": null, "ms": {"anton": 2116, "alexander": 2142, "ermil": 2038, "lera": 2168, "masha": 2194, "jane": 2142}, "text": "Первая — да, первый признак."},
