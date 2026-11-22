@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD, SHEET_DRAW } from './demoDialogue';
 
 /** The voices the dialogues were written for: who says a four's {1}…{4} goes by these */
 const BASE_VOICE_OF = { ...VOICE_OF };
@@ -230,9 +230,8 @@ interface Sheet { lines: string[]; start: number; gap: number; call?: { at: numb
 const SHEETS: Record<string, Sheet> = {
   // Миша, with a mouse at his aunt's: «как курица лапкой», and AB = AO wrong
   'p1-1': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', '∠B = ∠D', 'AB = AO'], start: 6, gap: 9 },
-  // «Пять. Стороны, диагонали, угол» — the diagonals after asking
-  'p1-2': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C'], start: 5, gap: 8, call: {
-    at: 27, note: 'А стороны и отрезки — это разве не одно и то же?', reply: ['AO = OC', 'BO = OD'] } },
+  // «Пять. Стороны, диагонали, угол» (asked nothing: two calls on this stage, 22.11)
+  'p1-2': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', 'AO = OC', 'BO = OD'], start: 5, gap: 8 },
   // the strong one: everything, and asks about the small angles
   'p2-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD', '∠A = ∠C', '∠B = ∠D'], start: 4, gap: 7, call: {
     at: 40, note: 'Можно записывать только полные углы параллелограмма или и уголки, на которые их делят диагонали?', reply: ['∠BAC = ∠ACD'] } },
@@ -742,16 +741,29 @@ export class BotRun {
       this.names.set(room, [name, name]);
       const { sheet } = this.sheetOf(name);
       const put = (text: string) => this.sheetLine(name, text, obj => this.host.write(room, obj, name));
-      sheet.lines.forEach((text, i) => this.after((sheet.start + i * sheet.gap) * 1000, () => put(text)));
+      // drawn by hand in the voice editor: its strokes in their time; the rows still there, for the marks of b3
+      const drawn = SHEET_DRAW[this.sheetKey(name)];
+      const draw = (list: FourDraw[]) => list.forEach(d => this.after(d.at * 1000, () => this.fourDraw(room, [], d, this.ink(name), name, 1000)));
+      if (drawn) { sheet.lines.forEach(t => this.sheetRow(name, t)); draw(drawn.draw); }
+      else sheet.lines.forEach((text, i) => this.after((sheet.start + i * sheet.gap) * 1000, () => put(text)));
       if (!sheet.call) continue;
-      const { at, note, reply } = sheet.call;
+      const { note, reply } = sheet.call, at = drawn?.call ?? sheet.call.at;
       this.callQueue.push({ room, at: at * 1000, fire: () => {
-        if (reply) this.replies.set(room, () => reply.forEach((t, i) => this.after(i * 2500, () => put(t))));
+        if (drawn) this.replies.set(room, () => { reply?.forEach(t => this.sheetRow(name, t)); draw(drawn.after ?? []); });
+        else if (reply) this.replies.set(room, () => reply.forEach((t, i) => this.after(i * 2500, () => put(t))));
         this.askCall(room, note, name);
       } });
     }
     this.callQueue.sort((a, b) => a.at - b.at);
     this.nextCall();
+  }
+
+  private sheetKey(name: string) { const r = this.roles.get(name); return r ? `${r.role}-${r.who}` : ''; }
+  /** A row of someone's sheet that is drawn by hand: only where it is, for the marks */
+  private sheetRow(name: string, text: string) {
+    const rows = this.sheetRows.get(name) ?? [];
+    rows.push({ text, top: SHEET_TOP + rows.length * SHEET_ROW });
+    this.sheetRows.set(name, rows);
   }
 
   /** The next line down someone's sheet */
@@ -768,6 +780,12 @@ export class BotRun {
     for (const [name] of this.roles) {
       if (this.sheetRows.has(name)) continue;
       const { sheet } = this.sheetOf(name);
+      const drawn = SHEET_DRAW[this.sheetKey(name)];
+      if (drawn) {
+        for (const t of [...sheet.lines, ...sheet.call?.reply ?? []]) this.sheetRow(name, t);
+        for (const d of [...drawn.draw, ...drawn.after ?? []]) this.fourDraw('', [], d, this.ink(name), name, 0, obj => this.host.pastWrite(name, SHEET_BLOCK, obj));
+        continue;
+      }
       for (const text of [...sheet.lines, ...sheet.call?.reply ?? []]) this.sheetLine(name, text, obj => this.host.pastWrite(name, SHEET_BLOCK, obj));
     }
   }
@@ -1109,12 +1127,14 @@ export class BotRun {
   }
 
   /** author '' — the teacher draws it */
-  private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string, ms: number) {
+  /** ms: the length the times are shares of (0: all at once); past: put there as if done earlier, not now */
+  private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string, ms: number, past?: (obj: Record<string, unknown> & { uid: string; type: string }) => void) {
     if (d.color) color = d.color;
-    const uid = () => { const u = `bot-${room}-${this.uid++}`; onBoard.push(u); return u; };
-    const put = (obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj);
+    const uid = () => { const u = `bot-${room || author}-${this.uid++}`; onBoard.push(u); return u; };
+    const put = past ?? ((obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj));
+    const later = (t: number, f: () => void) => past ? f() : this.after(t, f);
     if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
-    if (d.path) d.path.slice(1).forEach((p, i) => this.after(d.ts ? (d.ts[i + 1] - d.at) * ms : i * SEGMENT_MS, () => {
+    if (d.path) d.path.slice(1).forEach((p, i) => later(d.ts ? (d.ts[i + 1] - d.at) * ms : i * SEGMENT_MS, () => {
       const [a, b] = [d.path![i], p];
       put({
         uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,

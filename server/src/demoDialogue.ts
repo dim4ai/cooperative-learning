@@ -180,6 +180,12 @@ export interface FourLine { id: string; who: 1 | 2 | 3 | 4; write: string | null
 /** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line;
  *  ts — when each point of the path comes (a share of the line, as `at`; without it a segment every 300 ms) */
 export interface FourDraw { at: number; path?: Pt[]; ts?: number[]; ws?: number[]; thin?: boolean; color?: string; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
+/** A sheet of b2 drawn by hand (voice editor, «Листы»): draw at seconds into the stage; after: once the teacher answered the call
+ *  (at: seconds from the answer); call: when they call, s */
+export interface SheetDraw { draw: FourDraw[]; after?: FourDraw[]; call?: number }
+/** By the part in the pairs: `p1-1` is П1's {1} (Миша) */
+export const SHEET_DRAW: Record<string, SheetDraw> = {
+};
 /** A line's board, from the voice editor: what is wiped as it begins, a card moved, what is drawn */
 export interface LineBoard { erase?: boolean; move?: [number, Pt]; draw?: FourDraw[] }
 /** Ч1 «Ловушка трапеции» (b10, the other four): 1 Организатор, 2 Сомневающийся (a girl: Лена), 3 Третий, 4 Шутник; T the teacher:
