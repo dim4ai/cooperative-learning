@@ -68,7 +68,7 @@ interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: stri
 
 /** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
 const TEACHER_VOICE = 'alena';
-const LINE_GAP_MS = 600; // between lines: 0,6 с sounded best (voice editor, 20.11)
+const LINE_GAP_MS = 700; // between lines: 0,7 с (voice editor, 23.11; was 0,6 while each line still loaded in its turn)
 const PONDER_MS = 5000; // after the teacher's answer: a pause, the teacher may draw the legs, then they count
 const THINK_MS = 2500; // asked a question, the teacher thinks a moment before answering
 const GREET_GAP_MS = 300; // the teacher came in: hello straight after the line going on
