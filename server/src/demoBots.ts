@@ -451,7 +451,7 @@ export interface BotHost {
   members(room: string): string[];
   call(room: string, note: string, who?: string): void;
   /** A voiced line begins in a room: the teacher there hears it */
-  say(room: string, clip: { src: string; ms: number; who?: string; legs?: SheetPlace | null }): void;
+  say(room: string, clip: { src: string; ms: number; who?: string; legs?: SheetPlace | null; next?: string[] }): void;
   /** A bot raises a hand in the explanation */
   raise(name: string): void;
   /** Given the word, a bot says its line to the class */
@@ -467,6 +467,9 @@ export interface BotHost {
 }
 
 /** The bot's own voice if the clip has it, else another of the same sex, else any */
+/** The voiced dialogues, each in the order it is mostly said */
+const DIALOGUES: { id: string; who: number | 'T'; ms: Record<string, number> }[][] = [CHAT, TRAP, SIXTH, CHOCOLATE, EXPLAIN, SCISSORS];
+
 function voiceFor(who: string, lengths: Record<string, number>, stand?: Map<string, string>): string {
   const own = stand?.get(who) ?? VOICE_OF[who] ?? 'kirill';
   if (lengths[own] !== undefined) return own;
@@ -884,11 +887,23 @@ export class BotRun {
     this.after(TALK_START_MS + Math.random() * 2000, tick);
   }
 
+  /** The next lines of the dialogue this clip is in, as they will be heard: the teacher's page fetches them
+   *  ahead, or on a slow line each pause grows by its sound's loading (client-teacher DemoVoice.tsx) */
+  private nextClips(room: string, id: string): string[] {
+    const list = DIALOGUES.find(l => l.some(x => x.id === id));
+    if (!list) return [];
+    const i = list.findIndex(x => x.id === id), names = this.fours.get(room)?.names ?? this.names.get(room) ?? [];
+    return list.slice(i + 1, i + 4).map(l => {
+      const v = l.who === 'T' ? (l.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(l.ms)[0]) : voiceFor(names[l.who - 1] ?? '', l.ms, this.stand);
+      return `/demo/voice/${l.id}-${v}.mp3`;
+    });
+  }
+
   /** One says a clip: heard by the teacher in the room, counted as talk while it lasts; how long it is */
   private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
     const v = voiceFor(who, lengths, this.stand);
     const ms = lengths[v];
-    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who, legs: this.legs(room) });
+    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who, legs: this.legs(room), next: this.nextClips(room, id) });
     for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
     return ms;
   }
@@ -1354,7 +1369,7 @@ export class BotRun {
   private sayLine(room: string, line: DialogueLine): number {
     if (line.who === 'T') {
       const v = line.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(line.ms)[0];
-      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher', legs: this.legs(room) });
+      this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher', legs: this.legs(room), next: this.nextClips(room, line.id) });
       return line.ms[v];
     }
     const who = this.names.get(room)?.[line.who - 1] ?? '';

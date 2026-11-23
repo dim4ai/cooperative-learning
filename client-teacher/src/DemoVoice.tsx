@@ -5,14 +5,14 @@ import { useEffect, useState } from 'react';
 
 /** Where Миша's sheet from b2 lies on his pair's board: its corner and how much smaller (server demoBots.ts) */
 export interface SheetPlace { x: number; y: number; s: number }
-interface Clip { room: string; src: string; ms: number; startedAt: number; who?: string; legs?: SheetPlace | null } // startedAt: on this computer's clock
+interface Clip { room: string; src: string; ms: number; startedAt: number; who?: string; legs?: SheetPlace | null; next?: string[] } // startedAt: on this computer's clock
 
 const latest = new Map<string, Clip>();
 const listeners = new Set<() => void>();
 
 /** From the socket: { room, src, ms, now } with now on the server's clock */
-export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string; legs?: SheetPlace | null }) {
-  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who, legs: c.legs });
+export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string; legs?: SheetPlace | null; next?: string[] }) {
+  latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who, legs: c.legs, next: c.next });
   listeners.forEach(f => f());
 }
 
@@ -50,6 +50,18 @@ export function demoVoiceReset() {
   listeners.forEach(f => f());
 }
 
+// The lines to come in the room being listened to, fetched while this one plays: on a slow line the pauses
+// between lines would otherwise grow by each sound's loading
+const fetched = new Map<string, string>(); // src → its sound here (a blob URL)
+const urlOf = (src: string) => src.startsWith('/') ? import.meta.env.BASE_URL + src.slice(1) : src;
+function fetchAhead(srcs: string[]) {
+  for (const src of srcs) {
+    if (fetched.has(src)) continue;
+    fetched.set(src, '');
+    fetch(urlOf(src)).then(r => r.ok ? r.blob() : Promise.reject()).then(b => fetched.set(src, URL.createObjectURL(b))).catch(() => fetched.delete(src));
+  }
+}
+
 let lastStage: string | null = null;
 
 // One player for the page: the lesson screen is rebuilt now and then (coming into a room openly), the line goes on
@@ -75,7 +87,8 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
     const offset = Date.now() - clip.startedAt;
     if (offset >= clip.ms - 150) { stopPlayer(); return; } // over already: silence till the next line
     stopPlayer();
-    const a = new Audio(clip.src.startsWith('/') ? import.meta.env.BASE_URL + clip.src.slice(1) : clip.src);
+    const a = new Audio(fetched.get(clip.src) || urlOf(clip.src));
+    if (clip.next) fetchAhead(clip.next);
     player.audio = a;
     player.playing = clip;
     // coming in mid-line: from where it is now; a line just begun plays from its start (loading takes a moment,
