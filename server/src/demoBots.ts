@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD, SHEET_DRAW } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD, SHEET_DRAW, CHOCOLATE_BOARD, EXPLAIN_BOARD, CHAT_BOARD } from './demoDialogue';
 
 /** The voices the dialogues were written for: who says a four's {1}…{4} goes by these */
 const BASE_VOICE_OF = { ...VOICE_OF };
@@ -199,7 +199,9 @@ for (const [pre, board] of [['c1-', TRAP_BOARD], ['c2-', SIXTH_BOARD]] as const)
 }
 const TEACHER_COLOR = '#c92a2a';
 /** The pairs' boards from the voice editor, by line */
-const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD };
+const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD, ...CHOCOLATE_BOARD, ...EXPLAIN_BOARD, ...CHAT_BOARD };
+/** П2's drawings in the code, till they are drawn in the voice editor */
+const EXPLAIN_OLD = !Object.keys(EXPLAIN_BOARD).length;
 const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
 
 /** Ч1: a four that calls; the teacher's ready answer is said and drawn, then they go on (the teacher coming in openly
@@ -1080,7 +1082,8 @@ export class BotRun {
     e.busy = true;
     const ms = this.sayLine(room, said);
     this.sheetMarks(room, said.id, ms);
-    const draws = EXPLAIN_DRAW[said.id.replace(/f$/, '')];
+    this.pairBoard(room, said, ms);
+    const draws = EXPLAIN_OLD ? EXPLAIN_DRAW[said.id.replace(/f$/, '')] : undefined;
     if (draws && !e.drawn.has(said.id)) {
       e.drawn.add(said.id);
       if (ERASE_BEFORE.has(said.id.replace(/f$/, ''))) {
@@ -1267,6 +1270,7 @@ export class BotRun {
     c.busy = true;
     const ms = this.sayLine(room, line);
     this.sheetMarks(room, line.id, ms);
+    this.pairBoard(room, line, ms);
     this.after(ms, () => {
       c.busy = false;
       if (line.write && line.who !== 'T') {
