@@ -6,8 +6,10 @@ import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, t
 
 /** The voices the dialogues were written for: who says a four's {1}…{4} goes by these */
 const BASE_VOICE_OF = { ...VOICE_OF };
+const SPARE_BOY_VOICES = ['filipp'];
 /** Each lesson deals the children's voices anew, a boy's among the boys, a girl's among the girls; they keep it all the
- *  lesson. A voice some line has alone of its sex (Миша's kirill in П1) stays with its child: till that line is voiced in all */
+ *  lesson. A voice some line has alone of its sex (Миша's kirill in П1) stays with its child: till that line is voiced in all.
+ *  The boys have a voice to spare (filipp): five for four, so one of them is left out each lesson. anton is the teacher's */
 (() => {
   const lines: { who?: unknown; ms: Record<string, number> }[] = [CHATTER, ASKS, CHAT, TRAP, SIXTH, CHOCOLATE, EXPLAIN, SCISSORS].flat();
   const pinned = new Set<string>();
@@ -17,7 +19,7 @@ const BASE_VOICE_OF = { ...VOICE_OF };
   }
   for (const f of [false, true]) {
     const names = Object.keys(VOICE_OF).filter(n => FEMALE_VOICES.has(VOICE_OF[n]) === f && !pinned.has(VOICE_OF[n]));
-    const vs = names.map(n => VOICE_OF[n]);
+    const vs = [...names.map(n => VOICE_OF[n]), ...(f ? [] : SPARE_BOY_VOICES)];
     for (let i = vs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [vs[i], vs[j]] = [vs[j], vs[i]]; }
     names.forEach((n, i) => { VOICE_OF[n] = vs[i]; });
   }
@@ -66,7 +68,7 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
 interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; plan?: TalkPlan; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[]; trap?: TrapLine[] }
 
-/** The teacher's voice in the dialogues: Татьяна Алексеевна for now (filipp is voiced too) */
+/** The teacher's voice in the dialogues: Татьяна Алексеевна for now (anton, Николай Иванович, is voiced too) */
 const TEACHER_VOICE = 'alena';
 const LINE_GAP_MS = 700; // between lines: 0,7 с (voice editor, 23.11; was 0,6 while each line still loaded in its turn)
 const PONDER_MS = 5000; // after the teacher's answer: a pause, the teacher may draw the legs, then they count
@@ -660,7 +662,7 @@ export class BotRun {
         const search = (globalThis as { location?: { search: string } }).location?.search;
         const force = search ? new URLSearchParams(search).get('trep') : null;
         const [p1, p2] = this.names.get(room)!;
-        if (force === 'mm') { range = [8, 29]; this.stand.set(p1, 'anton'); this.stand.set(p2, 'ermil'); }
+        if (force === 'mm') { range = [8, 29]; this.stand.set(p1, 'zahar'); this.stand.set(p2, 'ermil'); }
         if (force === 'ff') { range = [30, 47]; this.stand.set(p1, 'dasha'); this.stand.set(p2, 'masha'); }
         const n = (l: DialogueLine) => Number(l.id.slice(3));
         const queue = part.chat.filter(l => n(l) <= 7 || n(l) >= range[0] && n(l) <= range[1] || n(l) >= 70 && n(l) <= 76);
