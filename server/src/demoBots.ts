@@ -202,6 +202,8 @@ for (const [pre, board] of [['c1-', TRAP_BOARD], ['c2-', SIXTH_BOARD]] as const)
 const TEACHER_COLOR = '#c92a2a';
 /** The pairs' boards from the voice editor, by line */
 const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD, ...CHOCOLATE_BOARD, ...EXPLAIN_BOARD, ...CHAT_BOARD };
+/** The dialogues (by the ids' prefix) whose common list is written by hand */
+const HAND_LISTS = new Set([SCISSORS, CHOCOLATE, EXPLAIN, CHAT].flatMap(ls => ls.filter(l => l.write && PAIR_BOARD[l.id]?.draw?.length).map(l => l.id.slice(0, l.id.indexOf('-')))));
 /** П2's drawings in the code, till they are drawn in the voice editor */
 const EXPLAIN_OLD = !Object.keys(EXPLAIN_BOARD).length;
 const FIVE_TAP_MS = 700; // «Дай пятюню!»: the others tap the hand one after another
@@ -550,12 +552,13 @@ export class BotRun {
   }
 
   /** One line down the board, each room filling up on its own; a dialogue line smaller, in the speaker's colour */
-  private write(room: string, text: string, by?: 1 | 2) {
+  /** drawn: the line's own drawing writes it (PAIR_BOARD) */
+  private write(room: string, text: string, by?: 1 | 2, drawn = false) {
     const w = this.written.get(room) ?? { n: 0, top: 60 };
     const speaker = /^\{([12])\}: /.exec(text)?.[1];
     const [lead, partner] = this.names.get(room) ?? ['', ''];
     const author = ((by ?? Number(speaker ?? 1)) === 2 ? partner : lead) || undefined;
-    if (!speaker && author && this.stage === 'pairs' && this.host.sheetAt(room, author)) { this.listLine(room, this.fill(room, text), author); return; }
+    if (!speaker && author && this.stage === 'pairs' && this.host.sheetAt(room, author)) { this.listLine(room, this.fill(room, text), author, drawn); return; }
     const fontSize = speaker ? 30 : 40;
     const rows = text.split('\n').length;
     const height = speaker ? rows * 36 + 14 : 72;
@@ -856,13 +859,19 @@ export class BotRun {
     }
   }
 
+  /** Is the pair's common list written by hand in this dialogue (voice editor: a line that writes has its drawing)?
+   *  Then none of it in print: the print would lie over the hand, or a line of it go where the hand writes another */
+  private drawnLine(id: string) { return HAND_LISTS.has(id.slice(0, id.indexOf('-'))); }
+
   /** The pair's common list, under the sheets: down a column, then the next one */
-  private listLine(room: string, text: string, author: string) {
+  private listLine(room: string, text: string, author: string, drawn = false) {
     const n = this.listed.get(room) ?? 0;
     this.listed.set(room, n + 1);
     const lead = this.names.get(room)?.[0] ?? author;
     if (n === 0) this.host.write(room, { uid: `bot-${room}-${this.uid++}`, type: 'IText', text: 'Общий список', left: 40, top: 472,
       originX: 'left', originY: 'top', fontSize: 24, fontFamily: 'sans-serif', fill: '#64748b' }, lead);
+    // written by hand in the voice editor (the line's drawing): that is on the board already, the print would lie over it
+    if (drawn) return;
     const col = Math.floor(n / 5), row = n % 5;
     this.host.write(room, this.hand(`bot-${room}-${this.uid++}`, author, text, 40 + col * 420, 510 + row * 76, 44), author);
   }
@@ -930,7 +939,7 @@ export class BotRun {
       if (v !== VOICE_OF[who]) this.stand.set(who, v);
       this.after(t, () => { this.voice(room, who, line.id, line.ms); this.sheetMarks(room, line.id, line.ms[v]); });
       t += line.ms[v];
-      if (line.write) { const text = line.write, by = line.who; this.after(t, () => this.write(room, text, by)); }
+      if (line.write) { const text = line.write, by = line.who, drawn = this.drawnLine(line.id); this.after(t, () => this.write(room, text, by, drawn)); }
     }
     return t;
   }
@@ -1054,7 +1063,7 @@ export class BotRun {
     this.after(ms, () => {
       if (t.gen !== gen) return; // broken off
       t.busy = false;
-      if (said.write && said.who !== 'T') said.write.split('|').forEach((w, i) => this.after(i * 700, () => this.write(room, w, said.who as 1 | 2)));
+      if (said.write && said.who !== 'T') said.write.split('|').forEach((w, i) => this.after(i * 700, () => this.write(room, w, said.who as 1 | 2, this.drawnLine(said.id))));
       // asked: the teacher may answer once the question is out
       const asked = [P.direct[P.direct.length - 1], P.call[P.call.length - 1]];
       if (t.phase === 'asked' && !t.insert.length && asked.includes(said.id)) { t.phase = 'b'; t.insert.push(this.id1(t, P.ta)); this.after(THINK_MS, () => this.host.callDone(room)); }
@@ -1293,7 +1302,7 @@ export class BotRun {
       c.busy = false;
       if (line.write && line.who !== 'T') {
         const by = line.who;
-        line.write.split('; ').forEach((w, i) => this.after(i * CHAT_WRITE_MS, () => this.write(room, w, by)));
+        line.write.split('; ').forEach((w, i) => this.after(i * CHAT_WRITE_MS, () => this.write(room, w, by, this.drawnLine(line.id))));
       }
       const next = c.queue[0]?.id;
       this.after(next === 'p4-77' ? GREET_GAP_MS : LINE_GAP_MS, () => this.chatStep(room, c.gen));
