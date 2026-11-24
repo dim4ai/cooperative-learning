@@ -182,7 +182,8 @@ export const CHAT_BOARD: Record<string, LineBoard> = {
 export interface FourLine { id: string; who: 1 | 2 | 3 | 4; write: string | null; ms: Record<string, number>; text: string; gap?: number }
 /** What is drawn while a line is said, in the board's pixels: at — how far into the line; thin — a helper line;
  *  ts — when each point of the path comes (a share of the line, as `at`; without it a segment every 300 ms) */
-export interface FourDraw { at: number; path?: Pt[]; ts?: number[]; ws?: number[]; thin?: boolean; color?: string; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
+/** key: a stroke the eraser later rubs out; rub: the eraser reaches the stroke with that key (voice editor, «Ластик») */
+export interface FourDraw { at: number; key?: string; rub?: string; path?: Pt[]; ts?: number[]; ws?: number[]; thin?: boolean; color?: string; label?: { text: string; at: Pt }; text?: { text: string; at: Pt }; dot?: Pt }
 /** A sheet of b2 drawn by hand (voice editor, «Листы»): draw at seconds into the stage; after: once the teacher answered the call
  *  (at: seconds from the answer); call: when they call, s */
 export interface SheetDraw { draw: FourDraw[]; after?: FourDraw[]; call?: number }

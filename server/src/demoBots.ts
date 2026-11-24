@@ -1148,10 +1148,26 @@ export class BotRun {
 
   /** author '' — the teacher draws it */
   /** ms: the length the times are shares of (0: all at once); past: put there as if done earlier, not now */
+  /** The strokes the eraser will reach, by `${room}|${key}`: their objects put so far; null: rubbed out already */
+  private keyed = new Map<string, string[] | null>();
+
   private fourDraw(room: string, onBoard: string[], d: FourDraw, color: string, author: string, ms: number, past?: (obj: Record<string, unknown> & { uid: string; type: string }) => void) {
     if (d.color) color = d.color;
-    const uid = () => { const u = `bot-${room || author}-${this.uid++}`; onBoard.push(u); return u; };
-    const put = past ?? ((obj: Record<string, unknown> & { uid: string; type: string }) => author ? this.host.write(room, obj, author) : this.host.teacherWrite(room, obj));
+    // the eraser: the stroke it reaches goes, every bit of it put so far (and any put later)
+    const keyed = `${room || author}|${d.key ?? d.rub}`;
+    if (d.rub) {
+      if (past) return;
+      for (const u of this.keyed.get(keyed) ?? []) { const k = onBoard.indexOf(u); if (k >= 0) onBoard.splice(k, 1); this.host.erase(room, u, author || undefined); }
+      this.keyed.set(keyed, null);
+      return;
+    }
+    if (d.key) this.keyed.set(keyed, []);
+    const uid = () => {
+      const u = `bot-${room || author}-${this.uid++}`; onBoard.push(u);
+      if (d.key) { const list = this.keyed.get(keyed); if (list) list.push(u); else { onBoard.pop(); return ''; } }
+      return u;
+    };
+    const put = (obj: Record<string, unknown> & { uid: string; type: string }) => { if (!obj.uid) return; if (past) past(obj); else if (author) this.host.write(room, obj, author); else this.host.teacherWrite(room, obj); };
     const later = (t: number, f: () => void) => past ? f() : this.after(t, f);
     if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
     if (d.path) d.path.slice(1).forEach((p, i) => later(d.ts ? (d.ts[i + 1] - d.at) * ms : i * SEGMENT_MS, () => {
