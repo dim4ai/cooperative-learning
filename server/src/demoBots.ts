@@ -128,7 +128,7 @@ interface Chat {
 const CHAT_WRITE_MS = 900;        // a list written out one line after another
 /** Ч2: where the cards of b10 go, as the line saying it ends (the sheet's ✋ cards: u00337… for 1…6) */
 const CARD_UID = ['u00337', 'u00338', 'u00339', 'u00340', 'u00341', 'u00342'];
-const YES = [[60, 250], [305, 250], [550, 250], [60, 410], [305, 410]], NO = [[830, 250], [1075, 250], [1320, 250]];
+const YES = [[60, 172], [305, 172], [550, 172], [60, 250], [305, 250]], NO = [[830, 172], [1075, 172], [1320, 172]]; // the columns of the compact sheet (24.11)
 const FOUR_MOVES: Record<string, [number, number[]]> = {
   'c2-01': [1, YES[0]], 'c2-02': [2, YES[1]], 'c2-03': [3, YES[2]], 'c2-08': [3, NO[0]], 'c2-09': [4, YES[2]],
   'c2-12': [5, NO[1]], 'c2-14': [6, NO[2]], 'c2-27': [6, YES[4]],
