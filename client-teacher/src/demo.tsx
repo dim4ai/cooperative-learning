@@ -166,12 +166,20 @@ const input: CSSProperties = {
 
 // ---------- how to try it: alone at once, or with a class on a booked time ----------
 
-export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<string | null>; onBook: () => void; onBack: () => void }) {
+/** Who the visitor is to the class: how the children call the teacher, and the teacher's voice in the dialogues */
+export type TeacherSex = 'f' | 'm';
+const TEACHERS: { sex: TeacherSex; name: string }[] = [
+  { sex: 'f', name: 'Татьяна Алексеевна' },
+  { sex: 'm', name: 'Николай Иванович' },
+];
+
+export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: (teacher: TeacherSex) => Promise<string | null>; onBook: () => void; onBack: () => void }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
+  const [teacher, setTeacher] = useState<TeacherSex>('f');
   async function solo() {
     setStarting(true);
-    setError((await onSolo()) ?? '');
+    setError((await onSolo(teacher)) ?? '');
     setStarting(false);
   }
   return (
@@ -183,6 +191,15 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
           <div style={cardText}>
             Проведите короткий урок с виртуальным классом: восемь учеников рассядутся как попало, вы соберёте их за парты, а они будут решать и звать вас на помощь.
             Камера и микрофон не нужны, займёт 10–15 минут.
+          </div>
+          <div style={cardText}>Как к вам будут обращаться ученики:</div>
+          <div role="radiogroup" aria-label="Учитель" style={{ display: 'flex', gap: 8 }}>
+            {TEACHERS.map(t => (
+              <button key={t.sex} role="radio" aria-checked={teacher === t.sex} data-testid={`teacher-${t.sex}`} onClick={() => setTeacher(t.sex)} style={{
+                flex: 1, padding: '12px 4px', borderRadius: 6, cursor: 'pointer',
+                fontSize: 14, color: '#222', border: `2px solid ${teacher === t.sex ? '#4a90e2' : '#ddd'}`, background: teacher === t.sex ? '#e7f1fc' : '#fff',
+              }}>{t.name}</button>
+            ))}
           </div>
           <button data-testid="solo-start" onClick={solo} disabled={starting} style={{ ...primary, opacity: starting ? 0.5 : 1 }}>
             {starting ? 'Собираем класс…' : 'Начать урок с виртуальным классом'}
@@ -210,12 +227,12 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: () => Promise<s
   );
 }
 
-export async function startSolo(): Promise<{ code: string; token: string } | { error: string }> {
+export async function startSolo(teacher: TeacherSex = 'f'): Promise<{ code: string; token: string } | { error: string }> {
   try {
     // ?fast (testing): the class sits down at once, at two desks; ?fast=b9 also starts the lesson on that block
     const f = new URLSearchParams(location.search).get('fast');
-    const fast = f === null ? '' : `?fast=${encodeURIComponent(f || '1')}`;
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo${fast}`, { method: 'POST' });
+    const q = new URLSearchParams({ teacher, ...(f === null ? {} : { fast: f || '1' }) });
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/demo/solo?${q}`, { method: 'POST' });
     const body = await res.json().catch(() => ({}));
     if (res.ok && body.token) return { code: body.code, token: body.token };
     if (body.error === 'slow down') return { error: 'Слишком много попыток, подождите немного' };

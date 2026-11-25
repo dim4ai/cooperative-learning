@@ -788,8 +788,8 @@ export default function App() {
   }
 
   if (!lessonCode && demoScreen === 'choice') {
-    return <DemoChoice onBack={() => setDemoScreen(null)} onBook={() => setDemoScreen('book')} onSolo={async () => {
-      const started = await startSolo();
+    return <DemoChoice onBack={() => setDemoScreen(null)} onBook={() => setDemoScreen('book')} onSolo={async teacher => {
+      const started = await startSolo(teacher);
       if ('error' in started) return started.error;
       setDemo({ ...started, solo: true });
       setDemoScreen(null);

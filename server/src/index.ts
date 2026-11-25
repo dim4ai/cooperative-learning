@@ -708,7 +708,7 @@ function startBots(code: string, lesson: LessonRuntime) {
       cur.run.answers.set(name, [choice]);
       sendPollToTeachers(lesson);
     },
-  });
+  }, demos.get(code)?.teacher);
   lesson.bots = bots;
   bots.seatEveryone(!!fast);
 }
@@ -2805,6 +2805,7 @@ app.post('/demo/solo', async (req, res) => {
     code: pendingKey, ipHash, videoMode: 'solo', createdAt: now, endsAt: now + DEMO_SOLO_MS, firstStudentAt: now,
     peakStudents: BOTS.length, endedAt: null, endReason: null, cooldownUntil: 0, slotFreeAt: 0, reached: 'waiting',
     ...(typeof req.query?.fast === 'string' && req.query.fast ? { fast: req.query.fast.slice(0, 20) } : {}),
+    ...(req.query?.teacher === 'm' ? { teacher: 'm' as const } : {}),
   };
   demos.set(pendingKey, demo);
   try {

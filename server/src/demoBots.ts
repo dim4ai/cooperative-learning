@@ -2,7 +2,7 @@
 // no sockets and no media; all they do is sit down, write on boards and call the teacher, on a
 // script tied to the sample lesson (client-teacher/public/demo/parallelogram.colesson).
 
-import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD, SHEET_DRAW, CHOCOLATE_BOARD, EXPLAIN_BOARD, CHAT_BOARD } from './demoDialogue';
+import { ASKS, CHAT, CHATTER, CHOCOLATE, SCISSORS, SIXTH, TRAP, type FourLine, type TrapLine, EXPLAIN, EXPLAIN_DRAW, FEMALE_VOICES, LOPSIDED_PAIR, VOICE_OF, type DialogueLine, type Draw, type Pt, type SpokenLine, type FourDraw, type LineBoard, SIXTH_BOARD, SCISSORS_BOARD, TRAP_BOARD, SHEET_DRAW, CHOCOLATE_BOARD, EXPLAIN_BOARD, CHAT_BOARD, MALE_ADDRESS } from './demoDialogue';
 
 /** The voices the dialogues were written for: who says a four's {1}…{4} goes by these */
 const BASE_VOICE_OF = { ...VOICE_OF };
@@ -68,8 +68,9 @@ interface Call { at: number; note: string; reply?: string; by?: 1 | 2 } // by: w
 /** dialogue: a voiced one that goes by what the teacher does (see Talk below); explain: one that needs no teacher (Explain) */
 interface RoomScript { lines: Line[]; call?: Call; lead?: string; partner?: string; talk?: number[]; quietAfter?: number; spoken?: SpokenLine[]; later?: boolean; dialogue?: DialogueLine[]; plan?: TalkPlan; explain?: DialogueLine[]; chat?: DialogueLine[]; four?: FourLine[]; trap?: TrapLine[] }
 
-/** The teacher's voice in the dialogues: Татьяна Алексеевна for now (anton, Николай Иванович, is voiced too) */
-const TEACHER_VOICE = 'alena';
+/** The teacher's voice in the dialogues: Татьяна Алексеевна or Николай Иванович, as chosen when starting */
+const TEACHER_VOICES = { f: 'alena', m: 'anton' };
+export type TeacherSex = keyof typeof TEACHER_VOICES;
 const LINE_GAP_MS = 700; // between lines: 0,7 с (voice editor, 23.11; was 0,6 while each line still loaded in its turn)
 const PONDER_MS = 5000; // after the teacher's answer: a pause, the teacher may draw the legs, then they count
 const THINK_MS = 2500; // asked a question, the teacher thinks a moment before answering
@@ -530,7 +531,13 @@ export class BotRun {
   private stage = '';
   private earlyCalled = false;
 
-  constructor(private host: BotHost) {}
+  constructor(private host: BotHost, private teacher: TeacherSex = 'f') {}
+
+  /** A teacher's line: the voice it is in */
+  private teacherVoice(ms: Record<string, number>) { const v = TEACHER_VOICES[this.teacher]; return ms[v] !== undefined ? v : Object.keys(ms)[0]; }
+  /** A line that calls the teacher by name, as it is said to a man; undefined: as written */
+  private maleAddress(id: string) { return this.teacher === 'm' ? MALE_ADDRESS[id] : undefined; }
+  private textOf(l: { id: string; text: string }) { return this.maleAddress(l.id)?.text ?? l.text; }
 
   private after(ms: number, fn: () => void, set = this.stageTimers) {
     const t = setTimeout(() => { set.delete(t); fn(); }, ms);
@@ -909,16 +916,16 @@ export class BotRun {
     if (!list) return [];
     const i = list.findIndex(x => x.id === id), names = this.fours.get(room)?.names ?? this.names.get(room) ?? [];
     return list.slice(i + 1, i + 4).map(l => {
-      const v = l.who === 'T' ? (l.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(l.ms)[0]) : voiceFor(names[l.who - 1] ?? '', l.ms, this.stand);
-      return `/demo/voice/${l.id}-${v}.mp3`;
+      const v = l.who === 'T' ? this.teacherVoice(l.ms) : voiceFor(names[l.who - 1] ?? '', l.ms, this.stand);
+      return `/demo/voice/${l.id}${this.maleAddress(l.id) ? 'n' : ''}-${v}.mp3`;
     });
   }
 
   /** One says a clip: heard by the teacher in the room, counted as talk while it lasts; how long it is */
   private voice(room: string, who: string, id: string, lengths: Record<string, number>): number {
     const v = voiceFor(who, lengths, this.stand);
-    const ms = lengths[v];
-    this.host.say(room, { src: `/demo/voice/${id}-${v}.mp3`, ms, who, legs: this.legs(room), next: this.nextClips(room, id) });
+    const m = this.maleAddress(id), ms = m?.ms[v] ?? lengths[v];
+    this.host.say(room, { src: `/demo/voice/${id}${m?.ms[v] ? 'n' : ''}-${v}.mp3`, ms, who, legs: this.legs(room), next: this.nextClips(room, id) });
     for (let d = 0; d < ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(who, Math.min(TALK_TICK_MS, ms - d)));
     return ms;
   }
@@ -1022,7 +1029,7 @@ export class BotRun {
     const ask = (ids: string[]) => {
       // asked in the room: the question shows in the teacher's panel as a call would
       const said = ids.map(id => this.id1(t, id));
-      this.host.call(room, said.map(l => l.text).join(' '), this.names.get(room)?.[said[0].who === 2 ? 1 : 0]);
+      this.host.call(room, said.map(l => this.textOf(l)).join(' '), this.names.get(room)?.[said[0].who === 2 ? 1 : 0]);
       this.host.callOff(room);
       t.next = at(P.after);
       t.phase = 'asked';
@@ -1075,7 +1082,7 @@ export class BotRun {
   }
 
   /** What a call says, by the caller's tile */
-  private callNote(t: Talk) { return t.plan.call.map(id => this.id1(t, id).text).join(' '); }
+  private callNote(t: Talk) { return t.plan.call.map(id => this.textOf(this.id1(t, id))).join(' '); }
 
   // ---------- a dialogue that goes on its own (Explain) ----------
   private explainStep(room: string) {
@@ -1226,13 +1233,13 @@ export class BotRun {
     const who = said.who === 'T' ? '' : t.names[said.who - 1];
     let ms: number;
     if (said.who === 'T') {
-      const v = said.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(said.ms)[0];
+      const v = this.teacherVoice(said.ms);
       ms = said.ms[v];
       this.host.say(room, { src: `/demo/voice/${said.id}-${v}.mp3`, ms, who: 'Teacher' });
     } else ms = this.voice(room, who, said.id, said.ms);
     if (said.id === 'c1-39') {
       // asked in the room: the question shows in the teacher's panel as a call would
-      this.host.call(room, said.text, t.names[0]);
+      this.host.call(room, this.textOf(said), t.names[0]);
       this.host.callOff(room);
     }
     if (FOUR_ERASE.has(said.id)) t.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who || t.names[0])));
@@ -1401,7 +1408,7 @@ export class BotRun {
   /** One line out loud: a student's counted as talk; how long it takes */
   private sayLine(room: string, line: DialogueLine): number {
     if (line.who === 'T') {
-      const v = line.ms[TEACHER_VOICE] !== undefined ? TEACHER_VOICE : Object.keys(line.ms)[0];
+      const v = this.teacherVoice(line.ms);
       this.host.say(room, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms[v], who: 'Teacher', legs: this.legs(room), next: this.nextClips(room, line.id) });
       return line.ms[v];
     }

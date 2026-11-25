@@ -281,6 +281,7 @@ export interface DemoRecord {
   slotFreeAt: number;
   reached?: string | null; // solo: the furthest stage the teacher got to
   fast?: string; // solo, testing: the class sits down at once; a block id: the lesson starts there, nobody comes in from elsewhere
+  teacher?: 'm'; // solo: the visitor is Николай Иванович to the class (else Татьяна Алексеевна)
 }
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
