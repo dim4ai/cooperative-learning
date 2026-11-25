@@ -162,7 +162,7 @@ function SpeechBubble({ text }: { text: string }) {
   );
   return (
     <div data-testid="speech-bubble" onClick={() => setFolded(true)} title="Свернуть" style={{ cursor: 'pointer',
-      position: 'absolute', right: 'calc(100% + 18px)', top: '50%', transform: 'translateY(-50%)', width: 230, zIndex: 20,
+      position: 'absolute', right: 'calc(100% + 18px)', top: '50%', transform: 'translateY(-50%)', width: 270, zIndex: 20,
       background: '#fff', color: '#222', border: '2px solid #222', borderRadius: 18, padding: '10px 14px',
       fontSize: 15, lineHeight: 1.35, textAlign: 'left', boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
     }}>
@@ -178,7 +178,7 @@ function SpeechBubble({ text }: { text: string }) {
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
 function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo, roomKey, legs }: {
-  onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string } | null;
+  onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string }[] | null;
   quiet?: boolean; onReveal?: () => void;
   /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
   reply?: { text: string; onAnswer: (ready: boolean) => void } | null;
@@ -262,7 +262,7 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             <div style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3', transition: 'box-shadow 0.2s', ...lit(speaker === name) }}>
               <NameCard name={name} identity={name} />
             </div>
-            {ask?.who === name && <SpeechBubble text={ask.text} />}
+            {ask?.filter(a => a.who === name).map(a => <SpeechBubble key={a.text} text={a.text} />)}
           </div>
         ))}
         <div style={{ marginTop: 'auto' }}>
@@ -583,7 +583,7 @@ export default function App() {
   callingNow.current = callingRooms;
   const roomNow = useRef<string | null>(null); // where the teacher is: asked in person there, no bell
   // the solo demo's calls of this stage, kept after the teacher answers: the hints show what to do in the room
-  const [calls, setCalls] = useState<Record<string, { note: string; who?: string }>>({});
+  const [calls, setCalls] = useState<Record<string, { note: string; who?: string; says?: { who: string; text: string }[] }>>({});
   const [activity, setActivity] = useState<ClassActivity | null>(null); // who talks and writes at work, by student
   const slides = useTeacherSlides(lessonCode, lessonToken, logout);
 
@@ -772,11 +772,11 @@ export default function App() {
     socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
     // a new stage or block: the calls from the one before are over
     socket.on('callsCleared', () => { setCallingRooms(new Set()); setCalls({}); setDemoReply(null); });
-    socket.on('callTeacher', ({ room, calling, note, who, done }: { room: string; calling: boolean; note?: string; who?: string; done?: boolean }) => {
+    socket.on('callTeacher', ({ room, calling, note, who, says, done }: { room: string; calling: boolean; note?: string; who?: string; says?: { who: string; text: string }[]; done?: boolean }) => {
       // answered: the question by their tile goes too
       if (done) setCalls(prev => { const next = { ...prev }; delete next[room]; return next; });
       if (calling && !callingNow.current.has(room) && room !== roomNow.current) playCallBell();
-      if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who } }));
+      if (calling && note) setCalls(prev => ({ ...prev, [room]: { note, who, says } }));
       setCallingRooms(prev => {
         const next = new Set(prev);
         calling ? next.add(room) : next.delete(room);
@@ -866,7 +866,7 @@ export default function App() {
   // the solo demo: who called this room and what about — said by their tile at the board
   const roomOthers = demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : [];
   const roomCall = demo?.solo && inSmallRoom && livekit ? calls[livekit.room] : undefined;
-  const roomAsk = roomCall ? { who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note } : null;
+  const roomAsk = roomCall ? roomCall.says?.length ? roomCall.says : [{ who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note }] : null;
   // speaking to all is for the work in rooms; at a student's board the teacher speaks to them alone
   const voiceAllowed = !!voice && !demo?.solo && (state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours') && !inSmallRoom;
   if (voiceOn && !voiceAllowed) setVoiceOn(false);

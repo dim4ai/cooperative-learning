@@ -25,6 +25,8 @@ const SPARE_BOY_VOICES = ['filipp'];
   }
 })();
 
+/** A question in parts, each said by one of them */
+export type Says = { who: string; text: string }[];
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
 export interface SheetPlace { x: number; y: number; s: number }
@@ -465,7 +467,8 @@ export interface BotHost {
   talk(name: string, ms: number): void;
   /** Names of the bots in a room */
   members(room: string): string[];
-  call(room: string, note: string, who?: string): void;
+  /** says: the question part by part, when two ask it together: each in their own bubble */
+  call(room: string, note: string, who?: string, says?: Says): void;
   /** A voiced line begins in a room: the teacher there hears it */
   say(room: string, clip: { src: string; ms: number; who?: string; legs?: SheetPlace | null; next?: string[] }): void;
   /** A bot raises a hand in the explanation */
@@ -1056,7 +1059,7 @@ export class BotRun {
     const ask = (ids: string[]) => {
       // asked in the room: the question shows in the teacher's panel as a call would
       const said = ids.map(id => this.id1(t, id));
-      this.host.call(room, said.map(l => this.textOf(l)).join(' '), this.names.get(room)?.[said[0].who === 2 ? 1 : 0]);
+      this.host.call(room, said.map(l => this.textOf(l)).join(' '), this.names.get(room)?.[said[0].who === 2 ? 1 : 0], this.saysOf(room, said));
       this.host.callOff(room);
       t.next = at(P.after);
       t.phase = 'asked';
@@ -1076,7 +1079,7 @@ export class BotRun {
           // they call: the bell waits its turn among the other rooms'
           t.next = at(P.after);
           t.phase = 'calling';
-          this.requestCall(room, this.callNote(t), P.callBy);
+          this.requestCall(room, this.callNote(t), P.callBy, this.callSays(t));
           return;
         } else { line = cur; t.next++; }
       } else if (t.phase === 'b') {
@@ -1108,6 +1111,16 @@ export class BotRun {
     });
   }
 
+  /** A question said by turns: who says what */
+  private saysOf(room: string, lines: DialogueLine[]): Says {
+    const says: Says = [];
+    for (const l of lines) {
+      const who = this.names.get(room)?.[l.who === 2 ? 1 : 0] ?? '', last = says[says.length - 1];
+      if (last?.who === who) last.text += ` ${this.textOf(l)}`; else says.push({ who, text: this.textOf(l) });
+    }
+    return says;
+  }
+  private callSays(t: Talk) { return this.saysOf(t.room, t.plan.call.map(id => this.id1(t, id))); }
   /** What a call says, by the caller's tile */
   private callNote(t: Talk) { return t.plan.call.map(id => this.textOf(this.id1(t, id))).join(' '); }
 
@@ -1443,8 +1456,8 @@ export class BotRun {
     return this.voice(room, who, line.id, line.ms);
   }
 
-  private requestCall(room: string, note: string, by: 1 | 2) {
-    this.callQueue.push({ room, at: Date.now() - this.stageStart, fire: () => this.host.call(room, note, this.names.get(room)?.[by - 1]) });
+  private requestCall(room: string, note: string, by: 1 | 2, says?: Says) {
+    this.callQueue.push({ room, at: Date.now() - this.stageStart, fire: () => this.host.call(room, note, this.names.get(room)?.[by - 1], says) });
     if (!this.calling && !this.callPending) this.nextCall();
   }
 
@@ -1475,7 +1488,7 @@ export class BotRun {
     this.host.offerReply(room, null);
     t.insert = [];
     t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.callNote(t), t.plan.callBy); });
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.callNote(t), t.plan.callBy, this.callSays(t)); });
   }
 
   /** The teacher answered: with the ready answer, said in the teacher's voice, or in their own words */

@@ -681,8 +681,8 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
     talk: (name, ms) => noteTalk(lesson, name, ms),
     members: room => [...lesson.participants.values()].filter(p => p.bot && p.livekitRoom === room).map(p => p.name),
-    call(room, note, who) {
-      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note, who });
+    call(room, note, who, says) {
+      for (const id of socketsOf(lesson, 'teacher')) io.sockets.sockets.get(id)?.emit('callTeacher', { room, calling: true, note, who, says });
     },
     say(room, clip) {
       // to the teacher wherever they are: on coming into the room mid-line they hear the rest of it

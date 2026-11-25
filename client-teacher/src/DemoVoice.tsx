@@ -64,9 +64,43 @@ function fetchAhead(srcs: string[]) {
 
 let lastStage: string | null = null;
 
-// One player for the page: the lesson screen is rebuilt now and then (coming into a room openly), the line goes on
-const player: { audio: HTMLAudioElement | null; playing: Clip | null; stopLater?: ReturnType<typeof setTimeout> } = { audio: null, playing: null };
-const stopPlayer = () => { player.audio?.pause(); player.audio = null; player.playing = null; };
+// One player for the page: the lesson screen is rebuilt now and then (coming into a room openly), the line goes on.
+// And one <audio> for all the lines: a tablet (iPad) lets a page sound by itself only through an element that was
+// started by a touch, so the first touch starts it with a silent clip, and the lines then take turns in it
+const SILENCE = (() => { // a tenth of a second of 8-bit WAV
+  const n = 800, le = (v: number, len: number) => String.fromCharCode(...Array.from({ length: len }, (_, i) => (v >> (8 * i)) & 255));
+  return 'data:audio/wav;base64,' + btoa('RIFF' + le(36 + n, 4) + 'WAVEfmt ' + le(16, 4) + le(1, 2) + le(1, 2) + le(8000, 4) + le(8000, 4) + le(1, 2) + le(8, 2) + 'data' + le(n, 4) + '\x80'.repeat(n));
+})();
+const player: { audio: HTMLAudioElement; playing: Clip | null; blocked: boolean; stopLater?: ReturnType<typeof setTimeout> } =
+  { audio: new Audio(), playing: null, blocked: false };
+const stopPlayer = () => { player.audio.pause(); player.playing = null; player.blocked = false; };
+
+function playClip(clip: Clip, src = fetched.get(clip.src) || urlOf(clip.src)) {
+  const a = player.audio;
+  player.playing = clip;
+  player.blocked = false;
+  a.src = src;
+  // coming in mid-line: from where it is now; a line just begun plays from its start (loading takes a moment,
+  // and skipping it would swallow the first sounds)
+  a.onloadedmetadata = Date.now() - clip.startedAt > 1000 ? () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); } : null;
+  a.play().catch((e: Error) => {
+    if (player.playing !== clip) return; // another line has taken its place
+    if (e.name === 'NotAllowedError') player.blocked = true; // the next touch will let it sound
+    else if (src.startsWith('blob:')) playClip(clip, urlOf(clip.src)); // what was fetched ahead won't play: from the network
+  });
+}
+
+let unlocked = false;
+function unlock() {
+  const clip = player.playing;
+  if (clip && !player.blocked) return; // it sounds already
+  if (clip && Date.now() - clip.startedAt < clip.ms - 150) { unlocked = true; playClip(clip); return; }
+  if (unlocked && !player.blocked) return;
+  player.audio.onloadedmetadata = null;
+  player.audio.src = SILENCE;
+  player.audio.play().then(() => { unlocked = true; player.blocked = false; }).catch(() => { /* the next touch */ });
+}
+for (const ev of ['pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { capture: true, passive: true });
 
 export function DemoVoice({ room, stage }: { room: string | null; stage: string }) {
   const [, setTick] = useState(0);
@@ -87,14 +121,8 @@ export function DemoVoice({ room, stage }: { room: string | null; stage: string 
     const offset = Date.now() - clip.startedAt;
     if (offset >= clip.ms - 150) { stopPlayer(); return; } // over already: silence till the next line
     stopPlayer();
-    const a = new Audio(fetched.get(clip.src) || urlOf(clip.src));
     if (clip.next) fetchAhead(clip.next);
-    player.audio = a;
-    player.playing = clip;
-    // coming in mid-line: from where it is now; a line just begun plays from its start (loading takes a moment,
-    // and skipping it would swallow the first sounds)
-    if (offset > 1000) a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, (Date.now() - clip.startedAt) / 1000); }, { once: true });
-    a.play().catch(() => { /* no sound allowed yet: the next line will try again */ });
+    playClip(clip);
   }, [clip]);
 
   // gone (the screen rebuilt, or the demo over): silence, unless a new player picks the line up at once
