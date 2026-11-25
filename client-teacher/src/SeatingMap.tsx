@@ -30,7 +30,7 @@ function SeatVideo({ identity }: { identity: string }) {
   </>);
 }
 
-function SelfPreview() {
+export function SelfPreview({ small = false }: { small?: boolean }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const localTrackRef = tracks.find(t => t.participant.isLocal);
   const selfAvatar = useAvatarUrl('Teacher'); // without video: own avatar (or the default one)
@@ -39,8 +39,8 @@ function SelfPreview() {
 
   return (
     <div style={{
-      position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
-      width: 200, aspectRatio: '4/3',
+      ...(small ? { position: 'relative', flex: 'none', width: 84 } : { position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', width: 200 }),
+      aspectRatio: '4/3',
       borderRadius: 8, overflow: 'hidden',
       boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
       background: hasVideo ? '#222' : NAME_CARD_BG,
@@ -58,7 +58,7 @@ function SelfPreview() {
 }
 
 /** What classmates call this student, when the teacher knows them by another name */
-function SeatNick({ nick }: { nick: string }) {
+export function SeatNick({ nick }: { nick: string }) {
   if (useStudentName(nick) === nick) return null;
   return (
     <div data-testid="seat-nick" title="Так его видят одноклассники" style={{ position: 'relative', zIndex: 1, fontSize: 11, color: '#555', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -86,10 +86,10 @@ export interface SeatNames {
 }
 
 const PALETTE = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#e91e63'];
-const groupColor = (g: number) => PALETTE[g % PALETTE.length];
+export const groupColor = (g: number) => PALETTE[g % PALETTE.length];
 
 
-const NOT_UNDERSTOOD = '#d00000';
+export const NOT_UNDERSTOOD = '#d00000';
 
 // ---------- who talks and writes at work ----------
 export interface StudentActivity { talk: number; ops: number; lastTalk: number | null; lastOp: number | null }
@@ -104,7 +104,7 @@ const LAMP: Record<Lamp, { color: string; title: string }> = {
 };
 
 /** The group's light: how long since anyone in it said or wrote something (alone at work: wrote) */
-function lampOf(names: string[], act: ClassActivity, now: number, writingOnly: boolean): Lamp {
+export function lampOf(names: string[], act: ClassActivity, now: number, writingOnly: boolean): Lamp {
   let last = act.since;
   for (const n of names) {
     const a = act.students[n];
@@ -115,7 +115,7 @@ function lampOf(names: string[], act: ClassActivity, now: number, writingOnly: b
   return age < 20_000 ? 'live' : age < 60_000 ? 'slow' : 'silent';
 }
 
-function LampDot({ lamp, style }: { lamp: Lamp; style?: React.CSSProperties }) {
+export function LampDot({ lamp, style }: { lamp: Lamp; style?: React.CSSProperties }) {
   return <div data-testid="lamp" data-lamp={lamp} title={LAMP[lamp].title} style={{
     position: 'absolute', width: 12, height: 12, borderRadius: '50%', zIndex: 4, background: LAMP[lamp].color,
     boxShadow: `0 0 0 2px #fff, 0 0 6px ${LAMP[lamp].color}`, pointerEvents: 'auto', ...style,
@@ -125,7 +125,7 @@ function LampDot({ lamp, style }: { lamp: Lamp; style?: React.CSSProperties }) {
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 /** Under a student's tile: how long they talked, how much they did on the board; the bar is their part of the group's talk */
-function SeatActivity({ name, group, act, showTalk }: { name: string; group: string[]; act: ClassActivity; showTalk: boolean }) {
+export function SeatActivity({ name, group, act, showTalk, inline = false }: { inline?: boolean; name: string; group: string[]; act: ClassActivity; showTalk: boolean }) {
   const a = act.students[name];
   const talk = a?.talk ?? 0;
   const total = group.reduce((sum, n) => sum + (act.students[n]?.talk ?? 0), 0);
@@ -134,7 +134,7 @@ function SeatActivity({ name, group, act, showTalk }: { name: string; group: str
   const quietOne = showTalk && group.length > 1 && total >= 20 && share < 0.15;
   return (
     <div data-testid="seat-activity" style={{
-      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3, padding: '2px 6px 3px', background: 'rgba(255,255,255,0.9)',
+      ...(inline ? { lineHeight: 1.25 } : { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3, padding: '2px 6px 3px', background: 'rgba(255,255,255,0.9)' }),
       fontSize: 11, color: '#333', display: 'flex', flexDirection: 'column', gap: 2, pointerEvents: 'none',
     }}>
       <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
@@ -151,10 +151,10 @@ function SeatActivity({ name, group, act, showTalk }: { name: string; group: str
 }
 
 /** What the marks on the map mean, above it */
-function ActivityLegend({ alone }: { alone: boolean }) {
+export function ActivityLegend({ alone }: { alone: boolean }) {
   const dot = (lamp: Lamp) => <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: LAMP[lamp].color, marginRight: 4, verticalAlign: -1 }} />;
   return (
-    <div data-testid="activity-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginBottom: 10, fontSize: 12, color: '#555' }}>
+    <div data-testid="activity-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: '#555' }}>
       {!alone && <span>🗣 сколько говорил на этом этапе</span>}
       <span>✏️ сколько раз писал или рисовал на доске</span>
       {!alone && <span>полоска — доля в разговоре группы</span>}
@@ -163,7 +163,7 @@ function ActivityLegend({ alone }: { alone: boolean }) {
   );
 }
 
-function useNow(skew: number, on: boolean): number {
+export function useNow(skew: number, on: boolean): number {
   const [now, setNow] = useState(() => Date.now() + skew);
   useEffect(() => {
     if (!on) return;
@@ -173,7 +173,7 @@ function useNow(skew: number, on: boolean): number {
   }, [skew, on]);
   return now;
 }
-const UNDERSTOOD = '#4cae6e';
+export const UNDERSTOOD = '#4cae6e';
 
 /** Everyone sitting here said they did not understand */
 const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
@@ -181,7 +181,7 @@ const allLost = (seats: Seat[], marks: Marks | undefined, atLeast: number) => {
   return taken.length >= atLeast && taken.every(s => marks?.[s.occupant!] === 'no');
 };
 
-export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks, activity, answers }: { answers?: Record<string, { color: string; label: string }>; activity?: ClassActivity | null; seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string, toTalk?: boolean) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
+export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair, onMute, lessonCode, names, marks, joinStage, noRemove, waiting = [], atDesks, activity, answers, corner }: { corner?: React.ReactNode; answers?: Record<string, { color: string; label: string }>; activity?: ClassActivity | null; seats: Seat[]; showSelf?: boolean; readOnly?: boolean; callingRooms?: Set<string>; onJoinPair?: (room: string, toTalk?: boolean) => void; onMute?: (name: string) => void; lessonCode?: string; names?: SeatNames; marks?: Marks; joinStage?: string; noRemove?: boolean; waiting?: string[]; atDesks?: boolean }) {
   const hasLivekit = !!showSelf;
   const [selected, setSelected] = useState<string | null>(null);
   const [swap, setSwap] = useState<{ a: string; b: string; seatId: string } | null>(null);
@@ -243,6 +243,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
           50% { border-color: #f39c1244; box-shadow: none; }
         }
       `}</style>
+      {corner && <div style={{ position: 'absolute', top: 8, left: 16, zIndex: 5 }}>{corner}</div>}
       {showSelf && <SelfPreview />}
       {waiting.length > 0 && (
         <div data-testid="seat-waiting" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 13, color: '#555' }}>
@@ -255,7 +256,7 @@ export function SeatingMap({ seats, showSelf, readOnly, callingRooms, onJoinPair
           ))}
         </div>
       )}
-      {act && <ActivityLegend alone={joinStage === 'individual'} />}
+      {act && <div style={{ marginBottom: 10 }}><ActivityLegend alone={joinStage === 'individual'} /></div>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignContent: 'flex-start' }}>
       {Array.from({ length: numGroups }, (_, g) => {
         const groupSeats = seats.filter(s => s.groupIndex === g);

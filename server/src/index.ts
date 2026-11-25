@@ -446,6 +446,8 @@ interface LessonRuntime {
   sharedTexts: Map<string, string>; // per livekit room name
   boards: Map<string, Map<string, BoardObject>>; // per livekit room name: uid → object JSON, in z-order
   fives: Map<string, Five>;       // «Дай пять» going on, by room
+  boardWatchers: Set<string>; // teachers' sockets looking at all the groups' boards at once
+  boardsDue?: NodeJS.Timeout;
   roomPositions: Map<string, Record<string, { left: number; top: number }>>; // a work block's sheet: where each group dragged its ✋ objects (by boardKey)
   roomsByBlock: Map<string, Map<string, string>>; // work block id → student name → the room they wrote in there
   laidSheets: Map<string, Map<string, SheetPlace>>; // board key → whose earlier sheet lies where on it
@@ -799,7 +801,7 @@ function getLessonRuntime(code: string, teacherId: number | null): LessonRuntime
     seatPlan: new Map(),
     sharedTexts: new Map(),
     boards: new Map(),
-    roomPositions: new Map(),
+    roomPositions: new Map(), boardWatchers: new Set(),
     fives: new Map(),
     roomsByBlock: new Map(),
     laidSheets: new Map(),
@@ -1844,10 +1846,32 @@ function moveInRoom(lesson: LessonRuntime, room: string, uid: string, left: numb
   for (const [id, p] of lesson.participants) {
     if (p.livekitRoom === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('slides:roomMove', { room, uid, left, top });
   }
+  toBoardWatchers(lesson, 'boards:move', { room, uid, left, top });
+}
+
+/** The boards of every working group, for the teacher who looks at them all; only what may be seen by the teacher anyway */
+function allBoards(lesson: LessonRuntime) {
+  const rooms = new Set<string>();
+  for (const p of lesson.participants.values()) {
+    if (p.role === 'student' && p.livekitRoom && !p.livekitRoom.endsWith('main-room')) rooms.add(p.livekitRoom);
+  }
+  return [...rooms].map(room => ({ room, objects: boardState(lesson, room), positions: roomPositions(lesson, room).positions }));
+}
+function toBoardWatchers(lesson: LessonRuntime, event: string, data: unknown) {
+  for (const id of lesson.boardWatchers) io.sockets.sockets.get(id)?.emit(event, data);
+}
+/** Rooms or sheets changed: all the boards again, once it has settled */
+function queueAllBoards(lesson: LessonRuntime) {
+  if (!lesson.boardWatchers.size || lesson.boardsDue) return;
+  lesson.boardsDue = setTimeout(() => {
+    lesson.boardsDue = undefined;
+    if (lesson.boardWatchers.size) toBoardWatchers(lesson, 'boards:state', allBoards(lesson));
+  }, 200);
 }
 
 /** The slide or sheet changed: everyone gets its drawing in their room */
 function pushBoards(lesson: LessonRuntime) {
+  queueAllBoards(lesson);
   for (const [id, p] of lesson.participants) {
     if (!p.livekitRoom) continue;
     io.sockets.sockets.get(id)?.emit('boardState', boardState(lesson, p.livekitRoom));
@@ -1891,6 +1915,7 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
     board.clear();
     out = { t: 'clear' };
   } else return;
+  toBoardWatchers(lesson, 'boards:op', { room, op: out });
   if (!isTeacher) noteBoardOp(lesson, author, sameStroke ? 'more' : op.t);
 
   for (const [id, p] of lesson.participants) {
@@ -1959,6 +1984,7 @@ async function prepareRoom(lesson: LessonRuntime, room: string) {
 
 async function sendToRoom(code: string, lesson: LessonRuntime, socketId: string, room: string, quiet = false) {
   const participant = lesson.participants.get(socketId);
+  queueAllBoards(lesson);
   if (participant?.bot) { participant.livekitRoom = room; noteRoom(lesson, participant); return; }
   const socket = io.sockets.sockets.get(socketId);
   if (!socket) return;
@@ -2287,6 +2313,7 @@ io.on('connection', async (socket) => {
     }
     // Registered before any await below: a socket that leaves mid-join must not stay as a ghost participant
     socket.on('disconnect', () => {
+      lesson.boardWatchers.delete(socket.id);
       lesson.relay.removePeer(socket.id);
       lesson.participants.delete(socket.id);
       if (lesson.participants.size === 0) lesson.emptySince = Date.now();
@@ -2550,6 +2577,13 @@ io.on('connection', async (socket) => {
           io.sockets.sockets.get(id)?.emit('sharedText', { room, text });
         }
       }
+    });
+
+    socket.on('boards:watch', ({ on }: { on?: unknown } = {}) => {
+      if (role !== 'teacher') return;
+      if (on !== true) { lesson.boardWatchers.delete(socket.id); return; }
+      lesson.boardWatchers.add(socket.id);
+      socket.emit('boards:state', allBoards(lesson));
     });
 
     socket.on('boardSync', () => {
