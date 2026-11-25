@@ -444,7 +444,8 @@ export interface BotHost {
   seat(botIndex: number): void;
   /** The rooms of this stage, in a stable order */
   rooms(): string[];
-  write(room: string, obj: Record<string, unknown> & { uid: string; type: string }, author?: string): void;
+  /** more: a further bit of the same stroke (a bot's stroke comes as many short lines) */
+  write(room: string, obj: Record<string, unknown> & { uid: string; type: string }, author?: string, more?: boolean): void;
   /** Takes a bot's drawing off the board */
   erase(room: string, uid: string, author?: string): void;
   /** Moves a ✋ object of the sheet in a group's room, as a student dragging it would */
@@ -1211,7 +1212,7 @@ export class BotRun {
       if (d.key) { const list = this.keyed.get(keyed); if (list) list.push(u); else { onBoard.pop(); return ''; } }
       return u;
     };
-    const put = (obj: Record<string, unknown> & { uid: string; type: string }) => { if (!obj.uid) return; if (past) past(obj); else if (author) this.host.write(room, obj, author); else this.host.teacherWrite(room, obj); };
+    const put = (obj: Record<string, unknown> & { uid: string; type: string }, more = false) => { if (!obj.uid) return; if (past) past(obj); else if (author) this.host.write(room, obj, author, more); else this.host.teacherWrite(room, obj); };
     const later = (t: number, f: () => void) => past ? f() : this.after(t, f);
     if (d.dot) put({ uid: uid(), type: 'Circle', radius: 7, left: d.dot[0], top: d.dot[1], originX: 'center', originY: 'center', fill: color, stroke: color, strokeWidth: 1 });
     if (d.path) d.path.slice(1).forEach((p, i) => later(d.ts ? (d.ts[i + 1] - d.at) * ms : i * SEGMENT_MS, () => {
@@ -1219,7 +1220,7 @@ export class BotRun {
       put({
         uid: uid(), type: 'Line', x1: a[0], y1: a[1], x2: b[0], y2: b[1], left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2,
         originX: 'center', originY: 'center', stroke: d.thin && !d.color ? '#adb5bd' : color, strokeWidth: d.thin ? 2 : d.ws ? (d.ws[i] + d.ws[i + 1]) / 2 : 5, strokeLineCap: 'round',
-      });
+      }, i > 0);
     }));
     for (const t of [d.label && { ...d.label, size: 28 }, d.text && { ...d.text, size: 34 }]) {
       if (!t) continue;

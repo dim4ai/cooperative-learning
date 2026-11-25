@@ -651,7 +651,7 @@ function startBots(code: string, lesson: LessonRuntime) {
       settleDesks(code, lesson).catch(e => console.error('!!! bots to desks:', e));
     },
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
-    write: (room, obj, author) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, ''),
+    write: (room, obj, author, more) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, '', more),
     erase: (room, uid, author) => applyBoardOp(lesson, room, { t: 'del', uid }, author ?? 'Ученик', false, ''),
     move: (room, uid, left, top) => moveInRoom(lesson, room, uid, left, top, ''),
     five: (room, name) => startFive(lesson, room, name),
@@ -1562,6 +1562,7 @@ function noteBoardOp(lesson: LessonRuntime, name: string, kind: unknown) {
   if (!atWork(lesson)) return;
   const a = activityOf(lesson, name);
   const now = Date.now();
+  if (kind === 'more') { a.lastOp = now; sendActivity(lesson); return; } // the same stroke going on
   if (kind !== 'add') { if (now - a.lastModAt < 2000) return; a.lastModAt = now; }
   a.ops++;
   a.lastOp = now;
@@ -1864,7 +1865,7 @@ function isBoardObject(o: unknown): o is BoardObject {
   return typeof uid === 'string' && uid.length > 0 && uid.length <= 64 && typeof type === 'string' && type.length <= 32;
 }
 
-function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author: string, isTeacher: boolean, fromSocket: string) {
+function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author: string, isTeacher: boolean, fromSocket: string, sameStroke = false) {
   if (!raw || typeof raw !== 'object') return;
   if (!isTeacher && lesson.material?.blocks.find(b => b.id === lesson.block)?.sheetReadOnly) return;
   const op = raw as { t?: unknown; obj?: unknown; uid?: unknown };
@@ -1890,7 +1891,7 @@ function applyBoardOp(lesson: LessonRuntime, room: string, raw: unknown, author:
     board.clear();
     out = { t: 'clear' };
   } else return;
-  if (!isTeacher) noteBoardOp(lesson, author, op.t);
+  if (!isTeacher) noteBoardOp(lesson, author, sameStroke ? 'more' : op.t);
 
   for (const [id, p] of lesson.participants) {
     if (p.livekitRoom === room && id !== fromSocket) io.sockets.sockets.get(id)?.emit('boardOp', out);
