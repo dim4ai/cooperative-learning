@@ -26,7 +26,7 @@ const SPARE_BOY_VOICES = ['filipp'];
 })();
 
 /** A question in parts, each said by one of them */
-export type Says = { who: string; text: string }[];
+export type Says = { who: string; text: string; ids?: string[] }[]; // ids: the voiced lines: the bubble is open while they sound
 export type BotStage = 'individual' | 'pairs' | 'fours';
 /** Where an earlier sheet lies on a group's board: its top left corner and how much smaller it is */
 export interface SheetPlace { x: number; y: number; s: number }
@@ -997,7 +997,7 @@ export class BotRun {
     const line = ASKS.find(a => a.text === note);
     const by = who ?? this.names.get(room)?.[0];
     if (line && by) this.asks.set(room, { line, who: by });
-    this.host.call(room, note, who);
+    this.host.call(room, note, who, line && by ? [{ who: by, text: note, ids: [line.id] }] : undefined);
   }
 
   /** The teacher came to a room that called: they take the hint and write the fix */
@@ -1007,7 +1007,7 @@ export class BotRun {
     if (this.stage === 'waiting' && room.endsWith(`:individual-${SOLO_NEWCOMER}`)) {
       this.after(ARRIVE_MS, () => {
         if (this.inRoom !== room) return;
-        this.host.call(room, NEWCOMER_LINE.text, SOLO_NEWCOMER); // the bubble by his tile, no bell
+        this.host.call(room, NEWCOMER_LINE.text, SOLO_NEWCOMER, [{ who: SOLO_NEWCOMER, text: NEWCOMER_LINE.text, ids: [NEWCOMER_LINE.id] }]); // the bubble by his tile, no bell
         this.host.callOff(room);
         this.voice(room, SOLO_NEWCOMER, NEWCOMER_LINE.id, NEWCOMER_LINE.ms);
       });
@@ -1116,7 +1116,7 @@ export class BotRun {
     const says: Says = [];
     for (const l of lines) {
       const who = this.names.get(room)?.[l.who === 2 ? 1 : 0] ?? '', last = says[says.length - 1];
-      if (last?.who === who) last.text += ` ${this.textOf(l)}`; else says.push({ who, text: this.textOf(l) });
+      if (last?.who === who) { last.text += ` ${this.textOf(l)}`; last.ids?.push(l.id); } else says.push({ who, text: this.textOf(l), ids: [l.id] });
     }
     return says;
   }
@@ -1279,7 +1279,7 @@ export class BotRun {
     } else ms = this.voice(room, who, said.id, said.ms);
     if (said.id === 'c1-39') {
       // asked in the room: the question shows in the teacher's panel as a call would
-      this.host.call(room, this.textOf(said), t.names[0]);
+      this.host.call(room, this.textOf(said), t.names[0], [{ who: t.names[0], text: this.textOf(said), ids: [said.id] }]);
       this.host.callOff(room);
     }
     if (FOUR_ERASE.has(said.id)) t.onBoard.splice(0).forEach((uid, i) => this.after(i * ERASE_MS, () => this.host.erase(room, uid, who || t.names[0])));
@@ -1299,7 +1299,7 @@ export class BotRun {
         }
         // they call: the bell waits its turn among the other rooms'
         t.phase = 'calling';
-        this.requestCall(room, this.trapLine(t, 'c1-19').text, 1);
+        this.requestCall(room, this.trapLine(t, 'c1-19').text, 1, [{ who: t.names[0], text: this.trapLine(t, 'c1-19').text, ids: ['c1-19'] }]);
         return;
       }
       if (t.phase === 'asked' && (said.id === 'c1-19' || said.id === 'c1-39')) {
@@ -1333,7 +1333,7 @@ export class BotRun {
     // gone before the answer: they call again a little later
     t.insert = [];
     t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.trapLine(t, 'c1-19').text, 1); });
+    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.trapLine(t, 'c1-19').text, 1, [{ who: t.names[0], text: this.trapLine(t, 'c1-19').text, ids: ['c1-19'] }]); });
   }
 
   // ---------- a dialogue that drifts (Chat) ----------

@@ -33,7 +33,7 @@ import { adoptTeacherProfile } from './teacherProfile';
 import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from './mediaCheck';
 import type { MediaPrefs } from './mediaCheck';
 import { playCallBell, playStageBeep } from './beep';
-import { DemoVoice, demoVoiceHeard, useDemoLegs, useDemoSpeaker, type SheetPlace } from './DemoVoice';
+import { DemoVoice, demoSaid, demoVoiceHeard, useDemoLegs, useDemoSpeaker, type SheetPlace } from './DemoVoice';
 import { LegsGhost } from './demoLegs';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
@@ -151,8 +151,11 @@ function VoiceMic({ on }: { on: boolean }) {
 
 /** A comic-style speech bubble to the left of a tile, its tail pointing at it. It covers the board on a
  *  small screen: a tap folds it into a small round 💬, a tap on that opens it again */
-function SpeechBubble({ text }: { text: string }) {
-  const [folded, setFolded] = useState(false);
+/** A part of a call's question: whose, and the voiced lines it is said in */
+interface Say { who: string; text: string; ids?: string[] }
+
+function SpeechBubble({ text, small = false }: { text: string; small?: boolean }) {
+  const [folded, setFolded] = useState(small);
   if (folded) return (
     <button data-testid="speech-bubble-folded" onClick={() => setFolded(false)} title="Что спросил ученик" style={{
       position: 'absolute', right: 'calc(100% + 8px)', top: '50%', transform: 'translateY(-50%)', zIndex: 20,
@@ -178,7 +181,7 @@ function SpeechBubble({ text }: { text: string }) {
 /** task: the block's task, shown above the sheet as the students see it;
  *  ask: what a student called about (the solo demo), in a speech bubble by their tile */
 function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal, reply, elsewhere, onGo, roomKey, legs }: {
-  onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: { who: string; text: string }[] | null;
+  onLeave: () => void; others: string[]; sheet: ReactNode; task?: string; ask?: Say[] | null;
   quiet?: boolean; onReveal?: () => void;
   /** the solo demo: the group waits for the teacher's answer — the ready one (its text), or in the teacher's own words */
   reply?: { text: string; onAnswer: (ready: boolean) => void } | null;
@@ -262,7 +265,11 @@ function TeacherPairContent({ onLeave, others, sheet, task, ask, quiet, onReveal
             <div style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', background: '#222', aspectRatio: '4/3', transition: 'box-shadow 0.2s', ...lit(speaker === name) }}>
               <NameCard name={name} identity={name} />
             </div>
-            {ask?.filter(a => a.who === name).map(a => <SpeechBubble key={a.text} text={a.text} />)}
+            {ask?.filter(a => a.who === name).map(a => {
+              // each opens as its words are said, and folds when they are over, not to lie over the board
+              const said = a.ids ? demoSaid(roomKey ?? '', a.ids) : 'now';
+              return said === 'no' ? null : <SpeechBubble key={a.text + said} text={a.text} small={said === 'over'} />;
+            })}
           </div>
         ))}
         <div style={{ marginTop: 'auto' }}>
@@ -583,7 +590,7 @@ export default function App() {
   callingNow.current = callingRooms;
   const roomNow = useRef<string | null>(null); // where the teacher is: asked in person there, no bell
   // the solo demo's calls of this stage, kept after the teacher answers: the hints show what to do in the room
-  const [calls, setCalls] = useState<Record<string, { note: string; who?: string; says?: { who: string; text: string }[] }>>({});
+  const [calls, setCalls] = useState<Record<string, { note: string; who?: string; says?: Say[] }>>({});
   const [activity, setActivity] = useState<ClassActivity | null>(null); // who talks and writes at work, by student
   const slides = useTeacherSlides(lessonCode, lessonToken, logout);
 
@@ -772,7 +779,7 @@ export default function App() {
     socket.on('demoReply', ({ room, text }: { room: string; text: string | null }) => setDemoReply(text ? { room, text } : null));
     // a new stage or block: the calls from the one before are over
     socket.on('callsCleared', () => { setCallingRooms(new Set()); setCalls({}); setDemoReply(null); });
-    socket.on('callTeacher', ({ room, calling, note, who, says, done }: { room: string; calling: boolean; note?: string; who?: string; says?: { who: string; text: string }[]; done?: boolean }) => {
+    socket.on('callTeacher', ({ room, calling, note, who, says, done }: { room: string; calling: boolean; note?: string; who?: string; says?: Say[]; done?: boolean }) => {
       // answered: the question by their tile goes too
       if (done) setCalls(prev => { const next = { ...prev }; delete next[room]; return next; });
       if (calling && !callingNow.current.has(room) && room !== roomNow.current) playCallBell();
@@ -866,7 +873,7 @@ export default function App() {
   // the solo demo: who called this room and what about — said by their tile at the board
   const roomOthers = demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : [];
   const roomCall = demo?.solo && inSmallRoom && livekit ? calls[livekit.room] : undefined;
-  const roomAsk = roomCall ? roomCall.says?.length ? roomCall.says : [{ who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note }] : null;
+  const roomAsk: Say[] | null = roomCall ? roomCall.says?.length ? roomCall.says : [{ who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note }] : null;
   // speaking to all is for the work in rooms; at a student's board the teacher speaks to them alone
   const voiceAllowed = !!voice && !demo?.solo && (state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours') && !inSmallRoom;
   if (voiceOn && !voiceAllowed) setVoiceOn(false);

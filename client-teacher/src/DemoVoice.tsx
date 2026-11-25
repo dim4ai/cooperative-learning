@@ -13,7 +13,17 @@ const listeners = new Set<() => void>();
 /** From the socket: { room, src, ms, now } with now on the server's clock */
 export function demoVoiceHeard(c: { room: string; src: string; ms: number; now: number; who?: string; legs?: SheetPlace | null; next?: string[] }) {
   latest.set(c.room, { room: c.room, src: c.src, ms: c.ms, startedAt: Date.now(), who: c.who, legs: c.legs, next: c.next });
+  const m = /\/([^/]+)-[a-z]+\.mp3$/.exec(c.src);
+  if (m) ends.set(`${c.room}|${m[1].replace(/n$/, '')}`, Date.now() + c.ms);
   listeners.forEach(f => f());
+}
+
+const ends = new Map<string, number>(); // `${room}|${line id}` → when it is said out
+/** These lines in this room: not said yet, being said, or over */
+export function demoSaid(room: string, ids: string[]): 'no' | 'now' | 'over' {
+  const at = ids.map(id => ends.get(`${room}|${id.replace(/n$/, '')}`));
+  if (at.every(t => t === undefined)) return 'no';
+  return at.every(t => t !== undefined && t < Date.now()) ? 'over' : 'now';
 }
 
 /** Who is saying a line in this room right now (a bot's name, or 'Teacher'): their tile lights up */
@@ -47,6 +57,7 @@ export function useDemoLegs(room: string | null): SheetPlace | null {
 
 export function demoVoiceReset() {
   latest.clear();
+  ends.clear();
   listeners.forEach(f => f());
 }
 

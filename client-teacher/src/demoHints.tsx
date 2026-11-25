@@ -249,9 +249,9 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (x.room) {
       const call = x.calls[x.room];
       if (x.legs) return [
-        { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', text:
-          'Помогите применить теорему Пифагора: нарисуйте ручкой два катета — как бледные линии на доске. '
-          + 'К AO — 5 клеток вправо и 2 вверх, к AB — 4 вверх и 2 вправо. Это не обязательно.' },
+        { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text:
+          'Помогите применить теорему Пифагора: выберите карандаш и обведите мигающие катеты. '
+          + 'К AO — 5 клеток вправо и 2 вверх, к AB — 4 вверх и 2 вправо.' },
         { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
       ];
       if ([...x.calling].some(r => r !== x.room)) return { id: 'call-elsewhere', anchor: '[data-testid="call-elsewhere-go"]', text:
@@ -263,7 +263,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it
         return done.has('room-back') ? back : [
-          { id: 'draw', anchor: '[data-testid="tool-pen"]', text: 'Вы можете писать и рисовать прямо на доске ученика — он сразу это увидит.' },
+          { id: 'draw', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text: 'Вы можете писать и рисовать прямо на доске ученика — он сразу это увидит.' },
           back,
         ];
       }
