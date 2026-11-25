@@ -231,7 +231,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         ? `Слайд ${st.index + 1} из ${scenes.length}. Объясняйте и листайте дальше — на последнем слайде появится кнопка «Всем понятно?»`
         : 'Следующий слайд — эта стрелка или клавиша →' };
     }
-    return { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь спросите класс: всем понятно?' };
+    const ask: Hint = { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь спросите класс: всем понятно?' };
+    // the first explanation ends on a drawing: the teacher may draw over it
+    return block === 'b1' && !done.has('draw-slide') ? [
+      { id: 'draw-slide', anchor: '[data-testid="tool-pen"]', text: 'Можно выбрать карандаш и прямо во время объяснения что-нибудь нарисовать на рисунке. Это увидят все ученики.' },
+      ask,
+    ] : ask;
   }
 
   if (stage === 'individual' || stage === 'pairs' || stage === 'fours') {
@@ -366,6 +371,20 @@ export function DemoHints(props: HintsInput) {
     window.addEventListener('click', onClick);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
   }, [previewOpen, lesson]);
+
+  // drew on the slide of the explanation
+  const explaining = props.stage === 'group';
+  useEffect(() => {
+    if (!explaining) return;
+    const drawn = (e: PointerEvent) => {
+      const m = memory.get(lesson);
+      if (!m || m.done.has('draw-slide') || (e.target as Element).tagName !== 'CANVAS' || !document.querySelector('[data-hint-id="draw-slide"]')) return;
+      m.done = new Set([...m.done, 'draw-slide']);
+      setDoneState(m.done);
+    };
+    window.addEventListener('pointerup', drawn);
+    return () => window.removeEventListener('pointerup', drawn);
+  }, [explaining, lesson]);
 
   // back from a group's board: a breath before the next hint, the teacher looks round the class first;
   // kept in the memory, as the screen is built anew on the way back
