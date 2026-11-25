@@ -315,13 +315,14 @@ function Classes({ classes, classId, onClassId, lesson, fixed }: {
           <div key={p.uuid} data-testid="unmatched" style={row}>
             <span style={{ flex: 1, minWidth: 0 }}>{p.name}</span>
             <select aria-label={`Кто это: ${p.name}`} value="" onChange={e => {
-              if (fixed && cls.students.find(s => s.id === e.target.value)?.name !== p.name) return; // in the demo it can only be himself
               if (e.target.value === 'new') addStudent(p.name, p.uuid!);
               else if (e.target.value) link(e.target.value, p.uuid!);
             }} style={{ ...input, padding: 4, fontSize: 13, width: 190 }}>
-              <option value="">Кто это?</option>
-              <option value="new">Новый ученик: {p.name}</option>
-              {cls.students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <option value="" disabled={fixed}>Кто это?</option>
+              <option value="new" disabled={fixed}>Новый ученик: {p.name}</option>
+              {/* in the demo it can only be himself: that line is lit, the rest can't be picked */}
+              {cls.students.map(s => <option key={s.id} value={s.id} disabled={fixed && s.name !== p.name}
+                style={fixed && s.name === p.name ? { background: '#ffe08a', color: '#222', fontWeight: 'bold' } : undefined}>{s.name}</option>)}
             </select>
           </div>
         ))}
