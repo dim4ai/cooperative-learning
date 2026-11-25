@@ -28,8 +28,8 @@ function onOp({ room, op }: { room: string; op: BoardOp }) {
   if (!timers.has(room)) timers.set(room, window.setTimeout(() => flushBoard(room), shown.has(room) ? SHOWN_MS : HIDDEN_MS));
 }
 
-// The boards are redrawn a few times a second at most, the ones not on the screen now seldom: a whole class is a lot of drawing
-const SHOWN_MS = 200, HIDDEN_MS = 2000;
+// The boards are redrawn once a second at most, the ones not on the screen now seldom: a whole class is a lot of drawing
+const SHOWN_MS = 1000, HIDDEN_MS = 3000;
 const pending = new Map<string, BoardOp[]>();
 const timers = new Map<string, number>();
 const shown = new Set<string>();
