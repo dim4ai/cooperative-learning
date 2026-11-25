@@ -8,6 +8,8 @@ import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import { SLIDE_HEIGHT, SLIDE_WIDTH, type Scene } from './slides/model';
 import { SharedBoard } from './SharedBoard';
+import { ANGLES_SCENE, AnglesGhost } from './demoAngles';
+import { STANDALONE } from './demo';
 import {
   readLesson, releaseLesson, lessonForServer, storedLessonFile, storeLessonFile, forgetLessonFile,
   NotALessonError, type LocalLesson, type LocalBlock,
@@ -392,7 +394,7 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
         {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <SharedBoard readOnly={readOnly} underlay={width => (
+        <SharedBoard readOnly={readOnly} underlay={width => (<>
           <SlidePlayer
             key={`${scene.id}:${local ? 'local' : 'none'}`}
             scene={scene}
@@ -405,7 +407,8 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
             onMove={onMove}
             width={width}
           />
-        )} />
+          {STANDALONE && scene.id === ANGLES_SCENE && <AnglesGhost width={width} />}
+        </>)} />
       </div>
     </div>
   );
