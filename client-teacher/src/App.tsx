@@ -1052,7 +1052,9 @@ export default function App() {
           <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)}
             onDemoOpen={() => setLessonPick(true)}
             demoNote={demo?.solo ? 'На настоящем уроке здесь закрывают вход, когда все пришли, меняют код и записывают урок.' : undefined} />
-          <TaskMenu onPick={setNewTask} only={demo?.solo ? 'poll' : undefined} />
+          {demo?.solo && state.stage === 'waiting' && !slides.state.block
+            ? <DemoOff note="Задание можно добавить и заранее. В демо — после начала урока."><TaskMenu onPick={setNewTask} /></DemoOff>
+            : <TaskMenu onPick={setNewTask} only={demo?.solo ? 'poll' : undefined} />}
           {/* right after the menus, so it stays put whatever the stage's title is */}
           {state.stage !== 'waiting' && <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />}
           <div style={{ width: 1, alignSelf: 'stretch', background: '#d6c8b0', margin: '0 6px' }} />

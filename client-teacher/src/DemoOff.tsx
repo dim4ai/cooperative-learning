@@ -32,7 +32,7 @@ export function DemoOff({ note, children, style }: { note: string; children: Rea
         style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }} />
       {at && (
         <div role="note" data-testid="demo-off-note" style={{
-          position: 'fixed', zIndex: 1000, width: NOTE_W, left: at.left,
+          position: 'fixed', zIndex: 3000, width: NOTE_W, left: at.left,
           ...(at.top > (box.current?.getBoundingClientRect().top ?? 0) ? { top: at.top } : { bottom: window.innerHeight - at.top }),
           background: '#2b3a55', color: '#fff', fontSize: 13, lineHeight: 1.4, padding: '8px 10px', borderRadius: 8,
           boxShadow: '0 4px 14px rgba(0,0,0,0.25)', textAlign: 'left', fontWeight: 'normal',
