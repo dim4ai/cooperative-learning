@@ -46,7 +46,7 @@ export const NEWCOMER_UUID = '00000000-0000-4000-8000-0000000000a1';
 export const SOLO_SEATS = 8;
 /** The teacher may change the number of seats, but every bot needs one */
 export const SOLO_MIN_SEATS = 8;
-const SEAT_PAUSE_MS = 700;
+const SEAT_PAUSE_MS = 1000;
 /** Who comes in after whom: five, then the one from an unknown device, then the last two */
 const ARRIVAL = ['Лена', 'Аня', 'Тимур', 'Соня', 'Артём', SOLO_NEWCOMER, 'Вика', 'Глеб'];
 const RESEAT_MS = 2500;
