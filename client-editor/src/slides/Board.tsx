@@ -455,7 +455,12 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
 
     // Fit the page into the stage
     const stage = stageRef.current!
+    let fitted = ''
     const fit = () => {
+      if (!stage.clientWidth) return // taken off the page for a while: stays as it was
+      const size = `${stage.clientWidth}x${stage.clientHeight}`
+      if (size === fitted) return // put back as it was: nothing to redraw
+      fitted = size
       // A local board matches nobody's page, so it needn't keep the shared proportions: it fills the stage
       const k = Math.max(0.05, live.current.link ? Math.min(stage.clientWidth / W, stage.clientHeight / H) : stage.clientWidth / W)
       fc.setDimensions(live.current.link

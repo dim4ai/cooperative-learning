@@ -15,7 +15,36 @@ function onOp({ room, op }: { room: string; op: BoardOp }) {
   if (op.t === 'clear') b.clear();
   else if (op.t === 'del') b.delete(op.uid);
   else b.set(op.obj.uid, op.obj);
-  subs.get(room)?.forEach(s => s.op(op));
+  if (op.t === 'clear') pending.set(room, [op]);
+  else {
+    const q = pending.get(room) ?? [];
+    const uid = op.t === 'del' ? op.uid : op.obj.uid;
+    const i = q.findLastIndex(o => o.t !== 'clear' && (o.t === 'del' ? o.uid : o.obj.uid) === uid);
+    // a stroke being drawn comes as many versions of it: the last one will do
+    if (op.t !== 'del' && i >= 0 && q[i].t !== 'del') q[i] = { t: q[i].t as 'add' | 'mod', obj: op.obj };
+    else q.push(op);
+    pending.set(room, q);
+  }
+  if (!timers.has(room)) timers.set(room, window.setTimeout(() => flushBoard(room), shown.has(room) ? SHOWN_MS : HIDDEN_MS));
+}
+
+// The boards are redrawn a few times a second at most, the ones not on the screen now seldom: a whole class is a lot of drawing
+const SHOWN_MS = 200, HIDDEN_MS = 2000;
+const pending = new Map<string, BoardOp[]>();
+const timers = new Map<string, number>();
+const shown = new Set<string>();
+function flushBoard(room: string) {
+  clearTimeout(timers.get(room));
+  timers.delete(room);
+  const q = pending.get(room) ?? [];
+  pending.delete(room);
+  for (const op of q) subs.get(room)?.forEach(s => s.op(op));
+}
+/** The room's board is on the screen (what it missed is drawn at once) or away from it */
+export function boardShown(room: string, on: boolean) {
+  if (!on) { shown.delete(room); return; }
+  shown.add(room);
+  flushBoard(room);
 }
 
 const same = (a: Map<string, BoardObject> | undefined, b: BoardObject[]) =>
@@ -50,6 +79,7 @@ export function useBoardsWatch(): Record<string, Positions> {
       for (const room of new Set([...boards.keys(), ...now.keys()])) {
         const objects = now.get(room)?.objects ?? [];
         if (same(boards.get(room), objects)) continue;
+        pending.delete(room);
         boards.set(room, new Map(objects.map(o => [o.uid, o])));
         subs.get(room)?.forEach(s => s.state(objects));
       }
@@ -70,6 +100,7 @@ export function useBoardsWatch(): Record<string, Positions> {
       socket.off('connect', ask);
       socket.emit('boards:watch', { on: false });
       boards.clear();
+      pending.clear();
     };
   }, []);
   return positions;

@@ -1,11 +1,12 @@
 // At work the teacher sees the groups' boards instead of the students' tiles: a board each when alone, one per pair,
 // one per four; names and who talks and writes are under the board. How many fours fit in a row is up to the teacher.
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Board } from './slides/Board';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import type { Scene } from './slides/model';
 import type { TeacherSlides } from './LessonSlides';
-import { useBoardsWatch, watchLink } from './boardsWatch';
+import { boardShown, useBoardsWatch, watchLink } from './boardsWatch';
 import { SpeakingRing } from './speaking';
 import { StudentName } from './studentNames';
 import { socket } from './socket';
@@ -37,24 +38,71 @@ export function WorkViewSwitch({ view, onView }: { view: 'boards' | 'students'; 
   );
 }
 
-const NOTHING: Positions = {};
+// The boards' canvases outlive the map: entering a group and coming back rebuilds the whole page (LiveKitRoom is keyed by
+// the room), so BoardsKeeper, above it, draws them into elements of their own, and the map only puts those in place.
+const hosts = new Map<string, HTMLDivElement>();
+let wanted: string[] = [];
+const wantedSubs = new Set<() => void>();
+const setWanted = (w: string[]) => { wanted = w; wantedSubs.forEach(f => f()); };
+function hostOf(room: string): HTMLDivElement {
+  let el = hosts.get(room);
+  if (!el) {
+    el = document.createElement('div');
+    el.style.cssText = 'position:absolute;inset:0;pointer-events:none';
+    hosts.set(room, el);
+    setWanted([...wanted, room]);
+  }
+  return el;
+}
 
-/** One board to look at: the task's sheet with this room's drawing over it */
-function MiniBoard({ room, scene, resolve, revealed, positions, children, frame, onOpen }: {
+function useScene(slides: TeacherSlides): Scene | undefined {
+  const { local, state, material } = slides;
+  const block = state.active ? (local ?? material)?.blocks.find(b => b.id === state.blockId) : undefined;
+  return block?.slides?.[state.index];
+}
+
+/** Above the keyed LiveKitRoom for the whole work stage: keeps every board shown once up to date */
+export function BoardsKeeper({ slides }: { slides: TeacherSlides }) {
+  const positions = useBoardsWatch();
+  const rooms = useSyncExternalStore(f => { wantedSubs.add(f); return () => { wantedSubs.delete(f); }; }, () => wanted);
+  const scene = useScene(slides);
+  const { local, state } = slides;
+  const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
+  const revealed = useMemo(() => new Set(state.revealed), [state.revealed]);
+  const placed = useMemo(() => Object.fromEntries(Object.entries(positions).map(([r, p]) => [r, { ...state.positions, ...p }])), [positions, state.positions]);
+  // a new stage, other rooms: what its map hasn't put in place by now is the last stage's
+  useLayoutEffect(() => {
+    for (const [room, el] of hosts) if (!el.isConnected) hosts.delete(room);
+    setWanted([...hosts.keys()]);
+  }, []);
+  return <>{rooms.map(room => createPortal(
+    <KeptBoard room={room} scene={scene} resolve={resolve} revealed={revealed} positions={placed[room] ?? (state.positions as Positions)} />, hostOf(room), room))}</>;
+}
+
+/** The task's sheet with this room's drawing over it */
+function KeptBoard({ room, scene, resolve, revealed, positions }: {
   room: string; scene?: Scene; resolve: (name: string) => string | undefined; revealed: ReadonlySet<string>; positions: Positions;
-  children?: ReactNode; frame: string; onOpen?: () => void;
 }) {
   const underlay = useCallback((width: number) => scene && (
     <SlidePlayer key={scene.id} scene={scene} resolveMedia={resolve} role="student" revealed={revealed} positions={positions} canDrag={false} width={width} />
   ), [scene, resolve, revealed, positions]);
+  return <Board key={scene ? 'sheet' : 'blank'} readOnly link={watchLink(room)} underlay={scene ? underlay : undefined} />;
+}
+
+/** One board to look at */
+function MiniBoard({ room, scene, children, frame, onOpen }: { room: string; scene?: Scene; children?: ReactNode; frame: string; onOpen?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = hostOf(room);
+    ref.current!.prepend(el);
+    boardShown(room, true);
+    return () => { el.remove(); boardShown(room, false); };
+  }, [room]);
   return (
-    <div data-testid="mini-board" data-board-room={room} onClick={onOpen} title={onOpen && 'Подойти'} style={{
+    <div ref={ref} data-testid="mini-board" data-board-room={room} onClick={onOpen} title={onOpen && 'Подойти'} style={{
       position: 'relative', width: '100%', aspectRatio: `${scene?.width ?? 1600} / ${scene?.height ?? 900}`, borderRadius: 4, overflow: 'hidden',
       boxShadow: `0 0 0 1px ${frame}`, cursor: onOpen ? 'pointer' : 'default', background: '#fff',
     }}>
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-        <Board key={scene ? 'sheet' : 'blank'} readOnly link={watchLink(room)} underlay={scene ? underlay : undefined} />
-      </div>
       {children}
     </div>
   );
@@ -64,18 +112,12 @@ export function BoardsMap({ seats, stage, slides, callingRooms, onJoinPair, less
   seats: Seat[]; stage: 'individual' | 'pairs' | 'fours'; slides: TeacherSlides; callingRooms: Set<string>; onJoinPair: (room: string, toTalk?: boolean) => void;
   lessonCode: string; marks: Marks; waiting: string[]; activity: ClassActivity | null; view: 'boards' | 'students'; onView: (v: 'boards' | 'students') => void; showSelf: boolean;
 }) {
-  const positions = useBoardsWatch();
   const [cols, setCols] = useState(() => Math.min(MAX_COLS, Math.max(1, Number(read(COLS_KEY)) || 2)));
   useEffect(() => write(COLS_KEY, String(cols)), [cols]);
   const [selected, setSelected] = useState<string | null>(null); // one waiting for a place
   const now = useNow(activity?.skew ?? 0, !!activity);
 
-  const { local, state, material } = slides;
-  const block = state.active ? (local ?? material)?.blocks.find(b => b.id === state.blockId) : undefined;
-  const scene = block?.slides?.[state.index];
-  const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
-  const revealed = useMemo(() => new Set(state.revealed), [state.revealed]);
-  const placed = useMemo(() => Object.fromEntries(Object.entries(positions).map(([r, p]) => [r, { ...state.positions, ...p }])), [positions, state.positions]);
+  const scene = useScene(slides);
 
   const chip = (seat: Seat, group: string[]) => {
     const name = seat.occupant;
@@ -119,7 +161,7 @@ export function BoardsMap({ seats, stage, slides, callingRooms, onJoinPair, less
         flex: stage === 'pairs' ? undefined : 1, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column', gap: 4, borderRadius: 6,
         outline: calling ? '3px solid #f39c12' : 'none', outlineOffset: 2, animation: calling ? 'boardCall 1.2s infinite' : 'none',
       }}>
-        <MiniBoard room={room} scene={scene} resolve={resolve} revealed={revealed} positions={placed[room] ?? (state.positions as Positions) ?? NOTHING} frame={color} onOpen={() => onJoinPair(room)}>
+        <MiniBoard room={room} scene={scene} frame={color} onOpen={() => onJoinPair(room)}>
           {bell(room, stage === 'fours' ? 56 : 40)}
         </MiniBoard>
         {lamp && activity && names.length > 0 && <LampDot lamp={lampOf(names, activity, now, stage === 'individual')} style={{ top: -5, right: -5 }} />}

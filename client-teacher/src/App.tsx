@@ -34,7 +34,7 @@ import { LocalMediaSync, loadMediaPrefs, saveMediaPrefs, captureOptions } from '
 import type { MediaPrefs } from './mediaCheck';
 import { playCallBell, playStageBeep } from './beep';
 import { DemoVoice, demoSaid, demoVoiceHeard, useDemoLegs, useDemoSpeaker, type SheetPlace } from './DemoVoice';
-import { BoardsMap, WorkViewSwitch, useWorkView } from './BoardsMap';
+import { BoardsKeeper, BoardsMap, WorkViewSwitch, useWorkView } from './BoardsMap';
 import { LegsGhost } from './demoLegs';
 import { DemoOff } from './DemoOff';
 import { HandsPanel, useHands } from './HandsPanel';
@@ -1180,5 +1180,6 @@ export default function App() {
       {inner}
     </LiveKitRoom>
     {voiceLink}
+    {(state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours') && <BoardsKeeper key={state.stage} slides={slides} />}
   </ClassCams.Provider></StudentNames.Provider></AvatarProvider>);
 }
