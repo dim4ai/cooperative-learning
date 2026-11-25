@@ -460,8 +460,8 @@ export interface BotHost {
   sheetAt(room: string, name: string): SheetPlace | null;
   /** Who sits with whom: each desk's pair, in seat order */
   deskmates(): string[][];
-  /** A bot's writing on an earlier block's sheet, as if done then (that block was skipped, or a test began later) */
-  pastWrite(name: string, blockId: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
+  /** A bot's whole writing on an earlier block's sheet, instead of its own there if that is less; the teacher's stays */
+  pastWrite(name: string, blockId: string, objs: (Record<string, unknown> & { uid: string; type: string })[]): void;
   /** The teacher's drawing on a group's board (the ready answer drawn as it is said) */
   teacherWrite(room: string, obj: Record<string, unknown> & { uid: string; type: string }): void;
   /** A bot talked this long: counted as a real student's microphone would be */
@@ -814,18 +814,21 @@ export class BotRun {
     this.sheetRows.set(name, rows);
   }
 
-  /** Pairs with nothing from b2 (the teacher skipped it, or a test began at b3): their sheets as they would have been */
+  /** The sheets of b2 as they would have been, for those with less on them: the teacher skipped it, left it early, went
+   *  back to it (it begins anew) and came out again, or a test began at b3 */
   private pastSheets() {
     for (const [name] of this.roles) {
-      if (this.sheetRows.has(name)) continue;
       const { sheet } = this.sheetOf(name);
       const drawn = SHEET_DRAW[this.sheetKey(name)];
+      const lines = [...sheet.lines, ...sheet.call?.reply ?? []];
+      const objs = new Map<string, Record<string, unknown> & { uid: string; type: string }>(); // a stroke may come in several versions
+      const put = (obj: Record<string, unknown> & { uid: string; type: string }) => { objs.set(obj.uid, obj); };
+      this.sheetRows.delete(name);
       if (drawn) {
-        for (const t of [...sheet.lines, ...sheet.call?.reply ?? []]) this.sheetRow(name, t);
-        for (const d of [...drawn.draw, ...drawn.after ?? []]) this.fourDraw('', [], d, this.ink(name), name, 0, obj => this.host.pastWrite(name, SHEET_BLOCK, obj));
-        continue;
-      }
-      for (const text of [...sheet.lines, ...sheet.call?.reply ?? []]) this.sheetLine(name, text, obj => this.host.pastWrite(name, SHEET_BLOCK, obj));
+        for (const t of lines) this.sheetRow(name, t);
+        for (const d of [...drawn.draw, ...drawn.after ?? []]) this.fourDraw('', [], d, this.ink(name), name, 0, put);
+      } else for (const text of lines) this.sheetLine(name, text, put);
+      this.host.pastWrite(name, SHEET_BLOCK, [...objs.values()]);
     }
   }
 

@@ -669,14 +669,18 @@ function startBots(code: string, lesson: LessonRuntime) {
       }
       return [...desks.values()];
     },
-    pastWrite(name, blockId, obj) {
+    pastWrite(name, blockId, objs) {
       const block = lesson.material?.blocks.find(b => b.id === blockId);
       if (!block) return;
       const room = roomName(code, `individual-${name}`);
       const key = `${room}#${block.slides[0]?.id ?? block.id}`;
       let board = boardAt(lesson, key);
       if (!board) { board = new Map(); lesson.boards.set(key, board); }
-      board.set(obj.uid, { ...obj, author: name } as BoardObject);
+      const own = [...board.values()].filter(o => o.author === name);
+      if (own.length < objs.length) {
+        for (const o of own) board.delete(o.uid);
+        for (const o of objs) board.set(o.uid, { ...o, author: name } as BoardObject);
+      }
       let rooms = lesson.roomsByBlock.get(blockId);
       if (!rooms) { rooms = new Map(); lesson.roomsByBlock.set(blockId, rooms); }
       if (!rooms.has(name)) rooms.set(name, room);
