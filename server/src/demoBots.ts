@@ -42,11 +42,13 @@ export const botUuid = (i: number) => `00000000-0000-4000-8000-${(0x100 + i).toS
 export const SOLO_NEWCOMER = 'Миша';
 export const NEWCOMER_UUID = '00000000-0000-4000-8000-0000000000a1';
 
-/** Twice the class: there is room to move people around, and four desks to gather them from */
-export const SOLO_SEATS = 16;
+/** A seat for each, two desks: the whole hall fits a screen */
+export const SOLO_SEATS = 8;
 /** The teacher may change the number of seats, but every bot needs one */
 export const SOLO_MIN_SEATS = 8;
-const SEAT_PAUSE_MS = 4000;
+const SEAT_PAUSE_MS = 700;
+/** Who comes in after whom: five, then the one from an unknown device, then the last two */
+const ARRIVAL = ['Лена', 'Аня', 'Тимур', 'Соня', 'Артём', SOLO_NEWCOMER, 'Вика', 'Глеб'];
 const RESEAT_MS = 2500;
 const VISIT_REPLY_MS = 6000;
 const AFTER_ANSWER_MS = 8000; // the teacher came on a call: their answer takes a while, then the group goes on
@@ -546,7 +548,10 @@ export class BotRun {
 
   /** fast (testing): all at once */
   seatEveryone(fast = false) {
-    BOTS.forEach((_, i) => this.after(fast ? 300 + i * 100 : 1600 + i * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers));
+    ARRIVAL.forEach((name, n) => {
+      const i = BOTS.findIndex(b => b.name === name);
+      this.after(fast ? 300 + n * 100 : 1200 + n * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers);
+    });
   }
 
   /** The teacher sent someone from their seat: as in a real class, they find another one */
