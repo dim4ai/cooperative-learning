@@ -42,6 +42,10 @@ export const botUuid = (i: number) => `00000000-0000-4000-8000-${(0x100 + i).toS
 export const SOLO_NEWCOMER = 'Миша';
 export const NEWCOMER_UUID = '00000000-0000-4000-8000-0000000000a1';
 
+/** What he says when the teacher comes up to his desk apart (voice-tools/gen_newcomer.py) */
+const NEWCOMER_LINE = { id: 'nm-01', text: 'Здравствуйте! Это Миша. Мы сегодня в гостях у тёти, я с её компьютера работаю.',
+  ms: { kirill: 6192, zahar: 5712, filipp: 6576, alexander: 6000, ermil: 6048 } as Record<string, number> };
+
 /** A seat for each, two desks: the whole hall fits a screen */
 export const SOLO_SEATS = 8;
 /** The teacher may change the number of seats, but every bot needs one */
@@ -530,7 +534,7 @@ export class BotRun {
   private fours = new Map<string, Four>();
   private traps = new Map<string, Trap>();
   private callPending = false; // the next call is timed already
-  private stage = '';
+  private stage = 'waiting';
   private earlyCalled = false;
 
   constructor(private host: BotHost, private teacher: TeacherSex = 'f') {}
@@ -547,6 +551,7 @@ export class BotRun {
   }
 
   private came = false;
+  private inRoom: string | null = null; // where the teacher is
   /** The journal is chosen: the class comes in, once */
   comeIn() { if (!this.came) this.seatEveryone(); }
 
@@ -974,6 +979,7 @@ export class BotRun {
 
   /** The teacher left a room: if it was the one that called, the next one may call after a breath */
   onLeave(room: string) {
+    if (this.inRoom === room) this.inRoom = null;
     this.talkLeft(room);
     this.trapLeft(room);
     this.explainLeft(room);
@@ -992,6 +998,16 @@ export class BotRun {
 
   /** The teacher came to a room that called: they take the hint and write the fix */
   onVisit(room: string) {
+    // before the lesson the one at the desk apart says who he is
+    this.inRoom = room;
+    if (this.stage === 'waiting' && room.endsWith(`:individual-${SOLO_NEWCOMER}`)) {
+      this.after(ARRIVE_MS, () => {
+        if (this.inRoom !== room) return;
+        this.host.call(room, NEWCOMER_LINE.text, SOLO_NEWCOMER); // the bubble by his tile, no bell
+        this.host.callOff(room);
+        this.voice(room, SOLO_NEWCOMER, NEWCOMER_LINE.id, NEWCOMER_LINE.ms);
+      });
+    }
     if (this.calling?.room === room && !this.calling.visited) {
       this.calling.visited = true;
       // on the individual stage the next one calls while the teacher is still busy here, once: someone else needs help too

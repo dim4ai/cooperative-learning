@@ -137,7 +137,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (newcomer && !x.previewOpen) {
       const room = `${x.lesson}:individual-${newcomer}`;
       if (x.room === room) return { id: 'newcomer-in', anchor: '[data-hint="room-back"]', text:
-        'Это Миша: он зашёл с телефона тёти, поэтому система его не узнала. Вернитесь в класс и отметьте в журнале, кто это.' };
+        'Это Миша: он зашёл с компьютера тёти, поэтому система его не узнала. Вернитесь в класс и отметьте в журнале, кто это.' };
       if (!done.has(`visit:${room}`)) return { id: 'newcomer', anchor: '[data-testid="newcomer-talk"]', text:
         'Кто-то зашёл с нового устройства — его посадили за отдельную парту. Поговорите с ним: 💬' };
       return x.journalOpen
