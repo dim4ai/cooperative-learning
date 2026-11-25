@@ -5,6 +5,7 @@ import {
 } from './journal';
 import type { JournalClass, JournalStudent } from './journal';
 import { MIN_PASSWORD_LENGTH, passwordProblem } from './passwordStrength';
+import { DemoOff } from './DemoOff';
 import { PasswordInput } from './PasswordInput';
 
 const FORGOT_WARNING = 'В профиле — журналы классов, ваше имя и фото для учеников. Он зашифрован вашим паролем, и прочитать его можете только вы. Забытый пароль можно сменить по письму, но профиль тогда откроется только кодом восстановления — мы покажем его сразу после создания.';
@@ -45,14 +46,14 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose, inMe
         {status === 'unavailable' && <div style={errorText}>Профиль сейчас недоступен. Проверьте связь и обновите страницу</div>}
         {status === 'none' && <CreateJournal email={email} onChangePassword={() => setPasswordOpen(true)} onCreated={setRecoveryCode} />}
         {status === 'locked' && <Unlock email={email} />}
-        {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} />}
+        {status === 'open' && data && <Classes classes={data.classes} classId={draftId} onClassId={setDraftId} lesson={lesson} fixed={inMemory} />}
         {saveError && <div style={errorText}>{saveError}</div>}
         {!inMemory && (status === 'none' || status === 'open') && (passwordOpen
           ? <ChangePassword email={email} onDone={() => setPasswordOpen(false)} />
           : <button onClick={() => setPasswordOpen(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Сменить пароль</button>)}
         {!inMemory && status === 'open' && <RecoverySection hasRecovery={hasRecovery} onMade={setRecoveryCode} />}
         {status === 'open' && data && (
-          <button data-testid="journal-choose" onClick={() => { onClassId(draftId); onClose(); }} style={mainBtn}>Выбрать</button>
+          <button data-testid="journal-choose" disabled={inMemory && !draftId} onClick={() => { onClassId(draftId); onClose(); }} style={{ ...mainBtn, opacity: inMemory && !draftId ? 0.5 : 1 }}>Выбрать</button>
         )}
         </>)}
       </div>
@@ -242,7 +243,9 @@ function patchClass(id: string, change: (c: JournalClass) => JournalClass) {
   updateJournal(d => ({ ...d, classes: d.classes.map(c => c.id === id ? change(c) : c) }));
 }
 
-function Classes({ classes, classId, onClassId, lesson }: {
+function Classes({ classes, classId, onClassId, lesson, fixed }: {
+  /** the solo demo: the journal can be chosen and Миша told apart there, nothing else changed */
+  fixed?: boolean;
   classes: JournalClass[];
   classId: string | null;
   onClassId: (id: string | null) => void;
@@ -253,6 +256,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [remembered, setRemembered] = useState(false);
   const cls = classes.find(c => c.id === classId) ?? null;
+  const off = (note: string, el: ReactNode, style?: CSSProperties) => fixed ? <DemoOff note={note} style={style}>{el}</DemoOff> : el;
 
   function addClass() {
     const name = newClass.trim();
@@ -298,9 +302,11 @@ function Classes({ classes, classId, onClassId, lesson }: {
         <option value="">Без класса</option>
         {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
+      {off('Создать журнал ещё одного класса.', <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
       <input value={newClass} onChange={e => setNewClass(e.target.value)} placeholder="Новый класс" aria-label="Новый класс"
         onKeyDown={e => { if (e.key === 'Enter') addClass(); }} style={{ ...input, flex: 1, minWidth: 0 }} />
       <button onClick={addClass} disabled={!newClass.trim()} style={smallBtn}>+</button>
+      </div>, { flex: 1, minWidth: 0 })}
     </div>
 
     {cls && lesson && unmatched.length > 0 && (
@@ -309,6 +315,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
           <div key={p.uuid} data-testid="unmatched" style={row}>
             <span style={{ flex: 1, minWidth: 0 }}>{p.name}</span>
             <select aria-label={`Кто это: ${p.name}`} value="" onChange={e => {
+              if (fixed && cls.students.find(s => s.id === e.target.value)?.name !== p.name) return; // in the demo it can only be himself
               if (e.target.value === 'new') addStudent(p.name, p.uuid!);
               else if (e.target.value) link(e.target.value, p.uuid!);
             }} style={{ ...input, padding: 4, fontSize: 13, width: 190 }}>
@@ -330,23 +337,21 @@ function Classes({ classes, classId, onClassId, lesson }: {
               {s.name}
             </span>
             <span style={hint}>{s.seat ? 'есть место' : s.uuids.length ? '' : 'ещё не заходил'}</span>
-            <button onClick={() => patchClass(cls.id, c => ({ ...c, students: c.students.filter(x => x.id !== s.id) }))}
-              aria-label={`Удалить: ${s.name}`} style={plainBtn}>✕</button>
+            {off('Убрать ученика из журнала.', <button onClick={() => patchClass(cls.id, c => ({ ...c, students: c.students.filter(x => x.id !== s.id) }))}
+              aria-label={`Удалить: ${s.name}`} style={plainBtn}>✕</button>)}
           </div>
         ))}
-        <div style={{ display: 'flex', gap: 6 }}>
+        {off('Записать в журнал нового ученика.', <div style={{ display: 'flex', gap: 6 }}>
           <input value={newStudent} onChange={e => setNewStudent(e.target.value)} placeholder="Добавить ученика" aria-label="Добавить ученика"
             onKeyDown={e => { if (e.key === 'Enter') { addStudent(newStudent); setNewStudent(''); } }} style={{ ...input, flex: 1, minWidth: 0 }} />
           <button onClick={() => { addStudent(newStudent); setNewStudent(''); }} disabled={!newStudent.trim()} style={smallBtn}>+</button>
-        </div>
+        </div>)}
       </Section>
     )}
 
-    {cls && lesson && (
-      <button onClick={rememberSeating} disabled={lesson.capacity === 0} style={mainBtn}>
+    {cls && lesson && off('Запомнить, кто где сидит сейчас: на следующем уроке ученики сядут так же.', <button onClick={rememberSeating} disabled={lesson.capacity === 0} style={{ ...mainBtn, width: '100%' }}>
         {remembered ? 'Рассадка запомнена ✓' : 'Запомнить текущую рассадку'}
-      </button>
-    )}
+      </button>)}
 
     {cls && (confirmDelete
       ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
@@ -355,7 +360,7 @@ function Classes({ classes, classId, onClassId, lesson }: {
             style={{ ...smallBtn, background: '#e74c3c' }}>Удалить</button>
           <button onClick={() => setConfirmDelete(false)} style={plainBtn}>Нет</button>
         </div>
-      : <button onClick={() => setConfirmDelete(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Удалить класс</button>)}
+      : off('Удалить журнал класса.', <button onClick={() => setConfirmDelete(true)} style={{ ...plainBtn, alignSelf: 'flex-start' }}>Удалить класс</button>, { alignSelf: 'flex-start' }))}
   </>);
 }
 

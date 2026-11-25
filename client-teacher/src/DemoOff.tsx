@@ -27,7 +27,7 @@ export function DemoOff({ note, children, style }: { note: string; children: Rea
   return (
     <div ref={box} data-testid="demo-off" style={{ position: 'relative', ...style }}>
       {/* what is under the cover can't be pressed: the cover takes the tap */}
-      <div aria-hidden style={{ pointerEvents: 'none' }}>{children}</div>
+      <div aria-hidden inert style={{ pointerEvents: 'none' }}>{children}</div>
       <button type="button" aria-label={note} onClick={() => (at ? setAt(null) : open())}
         style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }} />
       {at && (
