@@ -8,6 +8,7 @@ import { socket } from './socket';
 import { SlidePlayer, type Positions } from './slides/SlidePlayer';
 import { SLIDE_HEIGHT, SLIDE_WIDTH, type Scene } from './slides/model';
 import { SharedBoard } from './SharedBoard';
+import { BoardShot } from './BoardsMap';
 import { ANGLES_SCENE, AnglesGhost } from './demoAngles';
 import { STANDALONE } from './demo';
 import {
@@ -342,7 +343,8 @@ const panelBtn: CSSProperties = { padding: '8px 10px', borderRadius: 6, border: 
 
 // ---------- group stage: the board with the slide under it ----------
 
-export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: TeacherSlides; readOnly?: boolean }) {
+export function ExplainBoard({ slides: teacherSlides, readOnly, room }: { slides: TeacherSlides; readOnly?: boolean; room?: string }) {
+  const [loaded, setLoaded] = useState({ sheet: false, drawing: false });
   const { local, state, setState } = teacherSlides;
   // Without the file here the slides can still be navigated, just without pictures
   const material: { blocks: MaterialBlock[] } | null = local ?? teacherSlides.material;
@@ -383,7 +385,7 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
   const resolve = useCallback((name: string) => local?.urls.get(name), [local]);
   const hiddenLeft = scene ? scene.objects.filter(o => o.studentHidden && !revealed.has(o.uid)).length : 0;
 
-  if (!scene) return <SharedBoard readOnly={readOnly} />;
+  if (!scene) return <SharedBoard room={room} readOnly={readOnly} />;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -394,7 +396,7 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
         {hiddenLeft > 0 && <span data-testid="slide-hidden" style={{ color: '#777', fontSize: 12, marginLeft: 6 }}>Скрыто от учеников: {hiddenLeft}. Откройте инструментом ☝</span>}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <SharedBoard readOnly={readOnly} underlay={width => (<>
+        <SharedBoard room={room} readOnly={readOnly} onLoaded={() => setLoaded(l => l.drawing ? l : { ...l, drawing: true })} underlay={width => (<>
           <SlidePlayer
             key={`${scene.id}:${local ? 'local' : 'none'}`}
             scene={scene}
@@ -406,7 +408,9 @@ export function ExplainBoard({ slides: teacherSlides, readOnly }: { slides: Teac
             onToggleReveal={uid => socket.emit('slides:reveal', { uid, on: !revealed.has(uid) })}
             onMove={onMove}
             width={width}
+            onLoaded={() => setLoaded(l => l.sheet ? l : { ...l, sheet: true })}
           />
+          {room && !(loaded.sheet && loaded.drawing) && <BoardShot room={room} width={width} />}
           {STANDALONE && scene.id === ANGLES_SCENE && <AnglesGhost width={width} />}
         </>)} />
       </div>

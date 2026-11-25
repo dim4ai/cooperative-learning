@@ -119,13 +119,15 @@ interface Props {
   /** Pictures on the board (teacher only): without it there is no such button */
   pictures?: BoardPictures
   readOnly?: boolean
+  /** The board's drawing is on the canvas for the first time */
+  onLoaded?: () => void
   /** Shared board transport; omitted — a local board nobody else sees */
   link?: BoardLink
   /** What lies under the drawing, at the page's width in pixels */
   underlay?: (width: number) => ReactNode
 }
 
-export function Board({ role = 'student', readOnly = false, link, underlay, pictures }: Props) {
+export function Board({ role = 'student', readOnly = false, link, underlay, pictures, onLoaded }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const fcRef = useRef<Canvas | null>(null)
@@ -136,8 +138,8 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
   const [pageWidth, setPageWidth] = useState(0)
   const [imagePicked, setImagePicked] = useState(false) // one picture selected: it can be cropped
   const hasUnderlay = !!underlay
-  const live = useRef({ tool, color, width, readOnly, link, hasUnderlay })
-  live.current = { tool, color, width, readOnly, link, hasUnderlay }
+  const live = useRef({ tool, color, width, readOnly, link, hasUnderlay, onLoaded })
+  live.current = { tool, color, width, readOnly, link, hasUnderlay, onLoaded }
 
   // The last synced JSON of every object (for undo of moves/deletes) and local undo/redo stacks
   const known = useRef(new Map<string, BoardObject>())
@@ -209,6 +211,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
         known.current = new Map(objects.map(o => [o.uid, o]))
         undoStack.current = []; redoStack.current = []; syncHist()
         fc.requestRenderAll()
+        live.current.onLoaded?.()
       })
     }
 

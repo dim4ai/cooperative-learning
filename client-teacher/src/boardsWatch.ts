@@ -50,6 +50,9 @@ export function boardShown(room: string, on: boolean) {
 const same = (a: Map<string, BoardObject> | undefined, b: BoardObject[]) =>
   (a?.size ?? 0) === b.length && b.every(o => JSON.stringify(a!.get(o.uid)) === JSON.stringify(o));
 
+/** A group's board as it is now, if the boards are being watched */
+export const knownBoard = (room: string): BoardObject[] | undefined => boards.has(room) ? [...boards.get(room)!.values()] : undefined;
+
 const links = new Map<string, BoardLink>();
 /** A room's board to look at; nothing is ever sent from it */
 export function watchLink(room: string): BoardLink {

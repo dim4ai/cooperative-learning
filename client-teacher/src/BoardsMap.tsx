@@ -55,6 +55,23 @@ function hostOf(room: string): HTMLDivElement {
   return el;
 }
 
+/** A group's small board blown up over its big one till that has drawn itself */
+export function BoardShot({ room, width }: { room: string; width: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const c = ref.current!, host = hosts.get(room);
+    const layers = [...host?.querySelectorAll<HTMLCanvasElement>('canvas.lower-canvas') ?? []].filter(x => x.width > 0);
+    if (!layers.length) { c.style.display = 'none'; return; }
+    c.width = layers[0].width;
+    c.height = layers[0].height;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, c.width, c.height);
+    for (const l of layers) g.drawImage(l, 0, 0, c.width, c.height);
+  }, [room]);
+  return <canvas ref={ref} data-testid="board-shot" style={{ position: 'absolute', left: 0, top: 0, zIndex: 3, width, pointerEvents: 'none' }} />;
+}
+
 function useScene(slides: TeacherSlides): Scene | undefined {
   const { local, state, material } = slides;
   const block = state.active ? (local ?? material)?.blocks.find(b => b.id === state.blockId) : undefined;

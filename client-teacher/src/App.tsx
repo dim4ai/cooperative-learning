@@ -1112,7 +1112,7 @@ export default function App() {
         {livekit && state.stage === 'group' && <ScreenShareSync active={groupMode === 'screen' && !poll} pick={screenPick} onCancel={() => setGroupMode('board')} />}
         <div style={{ flex: 1, overflow: 'hidden' }}>
           {preview ? <LessonPreview slides={slides} /> : inSmallRoom
-            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard slides={slides} readOnly={livekit?.quiet} />}
+            ? <TeacherPairContent onLeave={() => socket.emit('leavePair')} others={roomOthers} sheet={<ExplainBoard key={livekit?.room} room={livekit?.room} slides={slides} readOnly={livekit?.quiet} />}
               quiet={livekit?.quiet} onReveal={() => socket.emit('revealSelf')}
               task={state.stage === 'group' ? undefined : (slides.material ?? slides.local)?.blocks.find(b => b.id === slides.state.block)?.task}
               ask={roomAsk} roomKey={livekit?.room} legs={legs}

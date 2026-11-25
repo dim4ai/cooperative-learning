@@ -26,6 +26,8 @@ interface Props {
   onToggleReveal?: (uid: string) => void
   onMove?: (uid: string, left: number, top: number) => void
   width: number
+  /** The scene is on the canvas */
+  onLoaded?: () => void
 }
 
 const HIDDEN_PREVIEW_OPACITY = 0.3
@@ -33,15 +35,15 @@ const NO_POSITIONS: Positions = {}
 
 export function SlidePlayer({
   scene, resolveMedia, role, revealed, positions = NO_POSITIONS, canDrag = role === 'student',
-  onToggleReveal, onMove, width,
+  onToggleReveal, onMove, width, onLoaded,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const fcRef = useRef<Canvas | null>(null)
   const objsRef = useRef<Obj[]>([])
   const baseOpacity = useRef(new Map<Obj, number>())
   const dragging = useRef<Obj | null>(null)
-  const live = useRef({ role, revealed, positions, canDrag, onToggleReveal, onMove })
-  live.current = { role, revealed, positions, canDrag, onToggleReveal, onMove }
+  const live = useRef({ role, revealed, positions, canDrag, onToggleReveal, onMove, onLoaded })
+  live.current = { role, revealed, positions, canDrag, onToggleReveal, onMove, onLoaded }
 
   function apply() {
     const fc = fcRef.current
@@ -83,6 +85,7 @@ export function SlidePlayer({
       objsRef.current = objs
       baseOpacity.current = new Map(objs.map(o => [o, o.opacity]))
       apply()
+      live.current.onLoaded?.()
     }).catch(() => { /* aborted or broken scene — nothing to show */ })
 
     // Click vs drag: a press that ends within a few pixels of where it started is a click
