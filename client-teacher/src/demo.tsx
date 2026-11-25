@@ -174,14 +174,8 @@ const TEACHERS: { sex: TeacherSex; name: string }[] = [
 ];
 
 export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: (teacher: TeacherSex) => Promise<string | null>; onBook: () => void; onBack: () => void }) {
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState('');
-  const [teacher, setTeacher] = useState<TeacherSex>('f');
-  async function solo() {
-    setStarting(true);
-    setError((await onSolo(teacher)) ?? '');
-    setStarting(false);
-  }
+  const [intro, setIntro] = useState(false);
+  if (intro) return <SoloIntro onSolo={onSolo} onBack={() => setIntro(false)} />;
   return (
     <div style={screen}>
       <div style={{ width: 460, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -189,22 +183,10 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: (teacher: Teach
         <div style={card}>
           <b>Одному, прямо сейчас</b>
           <div style={cardText}>
-            Проведите короткий урок с виртуальным классом: восемь учеников рассядутся как попало, вы соберёте их за парты, а они будут решать и звать вас на помощь.
+            Проведите короткий урок с виртуальным классом: восемь учеников сядут на свои места, будут решать задачи и звать вас на помощь.
             Камера и микрофон не нужны, займёт 10–15 минут.
           </div>
-          <div style={cardText}>Как к вам будут обращаться ученики:</div>
-          <div role="radiogroup" aria-label="Учитель" style={{ display: 'flex', gap: 8 }}>
-            {TEACHERS.map(t => (
-              <button key={t.sex} role="radio" aria-checked={teacher === t.sex} data-testid={`teacher-${t.sex}`} onClick={() => setTeacher(t.sex)} style={{
-                flex: 1, padding: '12px 4px', borderRadius: 6, cursor: 'pointer',
-                fontSize: 14, color: '#222', border: `2px solid ${teacher === t.sex ? '#4a90e2' : '#ddd'}`, background: teacher === t.sex ? '#e7f1fc' : '#fff',
-              }}>{t.name}</button>
-            ))}
-          </div>
-          <button data-testid="solo-start" onClick={solo} disabled={starting} style={{ ...primary, opacity: starting ? 0.5 : 1 }}>
-            {starting ? 'Собираем класс…' : 'Начать урок с виртуальным классом'}
-          </button>
-          {error && <div data-testid="solo-error" style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+          <button data-testid="solo-open" onClick={() => setIntro(true)} style={primary}>Начать урок с виртуальным классом</button>
         </div>
         <div style={card}>
           <b>Со своим классом</b>
@@ -222,6 +204,51 @@ export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: (teacher: Teach
         {STANDALONE
           ? <a href="/" style={{ color: '#888', fontSize: 13, textAlign: 'center', textDecoration: 'none' }}>Назад</a>
           : <button onClick={onBack} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Назад</button>}
+      </div>
+    </div>
+  );
+}
+
+/** Between the choice and the lesson: what awaits the visitor, what to look at, and who they are to the class */
+function SoloIntro({ onSolo, onBack }: { onSolo: (teacher: TeacherSex) => Promise<string | null>; onBack: () => void }) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState('');
+  const [teacher, setTeacher] = useState<TeacherSex>('f');
+  async function solo() {
+    setStarting(true);
+    setError((await onSolo(teacher)) ?? '');
+    setStarting(false);
+  }
+  return (
+    <div style={screen}>
+      <div data-testid="solo-intro" style={{ width: 560, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <h2 style={{ margin: 0, textAlign: 'center' }}>Перед началом урока</h2>
+        <div style={introText}>
+          Сейчас вы побываете на уроке с виртуальным классом и попробуете себя в роли учителя: будете общаться с учениками, подходить к ним и познакомитесь с нашими инструментами.
+        </div>
+        <div style={introText}>
+          Вы пройдёте весь урок, от рассадки до завершения: объяснение, самостоятельную работу, работу в парах и в четвёрках. На каждом этапе подсказки покажут, что можно сделать.
+        </div>
+        <div style={introText}>
+          Сосредоточьтесь не на содержании материала, а на самих инструментах и их возможностях. Подумайте, как вы могли бы использовать их на своих занятиях.
+        </div>
+        <div style={introText}>Желаем вам удачи и хорошего урока!</div>
+        <div style={card}>
+          <b>Кем вы будете на этом уроке?</b>
+          <div role="radiogroup" aria-label="Учитель" style={{ display: 'flex', gap: 8 }}>
+            {TEACHERS.map(t => (
+              <button key={t.sex} role="radio" aria-checked={teacher === t.sex} data-testid={`teacher-${t.sex}`} onClick={() => setTeacher(t.sex)} style={{
+                flex: 1, padding: '12px 4px', borderRadius: 6, cursor: 'pointer',
+                fontSize: 14, color: '#222', border: `2px solid ${teacher === t.sex ? '#4a90e2' : '#ddd'}`, background: teacher === t.sex ? '#e7f1fc' : '#fff',
+              }}>{t.name}</button>
+            ))}
+          </div>
+          <button data-testid="solo-start" onClick={solo} disabled={starting} style={{ ...primary, opacity: starting ? 0.5 : 1 }}>
+            {starting ? 'Собираем класс…' : 'Начать урок'}
+          </button>
+          {error && <div data-testid="solo-error" style={{ color: '#e74c3c', fontSize: 13 }}>{error}</div>}
+        </div>
+        <button data-testid="solo-back" onClick={onBack} disabled={starting} style={{ border: 'none', background: 'transparent', color: '#888', cursor: 'pointer', fontSize: 13 }}>Назад</button>
       </div>
     </div>
   );
@@ -317,5 +344,6 @@ export function SoloGuide({ stage }: { stage: string }) {
 }
 
 const card: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 10, border: '1px solid #e2e2e2' };
+const introText: CSSProperties = { color: '#333', fontSize: 16, lineHeight: 1.5 };
 const cardText: CSSProperties = { color: '#666', fontSize: 14, lineHeight: 1.4 };
 const primary: CSSProperties = { padding: '10px 12px', borderRadius: 6, border: 'none', background: '#4a90e2', color: '#fff', fontSize: 15, cursor: 'pointer' };
