@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  ActiveSelection, Canvas, Ellipse, FabricImage, IText, Line, Path, PencilBrush, Rect, Triangle, util,
+  ActiveSelection, Canvas, Ellipse, FabricImage, Group, IText, Line, Path, PencilBrush, Rect, Triangle, util,
   type FabricObject, type TPointerEventInfo,
 } from 'fabric'
 import { SLIDE_HEIGHT as H, SLIDE_WIDTH as W } from './model'
@@ -114,6 +114,13 @@ export interface BoardPictures {
   crop(src: string): Promise<(BoardPicture & { from: { x: number; y: number; w: number; h: number } }) | null>
 }
 
+/** Drawn straight onto the page: a canvas of its own for every stroke takes seconds to set up on a board full of them,
+ *  and pays off only while things are moved about */
+function direct(o: FabricObject) {
+  o.objectCaching = false
+  if (o instanceof Group) o.getObjects().forEach(direct)
+}
+
 interface Props {
   role?: BoardRole
   /** Pictures on the board (teacher only): without it there is no such button */
@@ -170,6 +177,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
       const { tool, readOnly } = live.current
       const sel = tool === 'select' && !readOnly && o.stroke !== ERASER_COLOR // a rub-out isn't something to pick up
       o.set({ selectable: sel, evented: sel, hoverCursor: 'move' })
+      if (readOnly) direct(o)
     }
 
     // ---- applying operations to the canvas (remote ones and undo/redo) ----
@@ -537,7 +545,7 @@ export function Board({ role = 'student', readOnly = false, link, underlay, pict
       )}
       <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ position: 'relative', lineHeight: 0, boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
+          <div style={{ position: 'relative', lineHeight: 0, background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
             {underlay && pageWidth > 0 && <div style={{ position: 'absolute', left: 0, top: 0 }}>{underlay(pageWidth)}</div>}
             <div ref={hostRef} data-testid="board" style={{ position: 'relative', lineHeight: 0, pointerEvents: 'none' }} />
           </div>
