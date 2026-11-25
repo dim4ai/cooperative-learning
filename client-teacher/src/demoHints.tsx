@@ -250,7 +250,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       const call = x.calls[x.room];
       if (x.legs) return [
         { id: 'draw-legs', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text:
-          'Помогите применить теорему Пифагора: выберите карандаш и обведите мигающие катеты. '
+          'Помогите применить теорему Пифагора: выберите карандаш и обведите мигающие катеты на правом рисунке. '
           + 'К AO — 5 клеток вправо и 2 вверх, к AB — 4 вверх и 2 вправо.' },
         { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
       ];

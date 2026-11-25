@@ -101,7 +101,7 @@ interface TalkPlan {
   last: string;         // …and the last
   tq: string; ta: string; // the teacher's question and ready answer
   toOther?: string;     // said to the other one: its «…f» variant if that's a girl
-  legs?: boolean;       // the pale legs of Pythagoras over {1}'s sheet as the answer is said (Миша's pair)
+  legs?: boolean;       // the pale legs of Pythagoras over {2}'s sheet as the answer is said (Миша's pair)
 }
 const P1_PLAN: TalkPlan = { greet: 'p1-32', cut: 'p1-15', direct: ['p1-33'], call: ['p1-17'], callBy: 2, after: 'p1-18', last: 'p1-31', tq: 'p1-tq', ta: 'p1-ta', toOther: 'p1-21', legs: true };
 const P3_PLAN: TalkPlan = { greet: 'p3-38', cut: 'p3-19', direct: ['p3-39', 'p3-40'], call: ['p3-21', 'p3-22'], callBy: 1, after: 'p3-23', last: 'p3-41', tq: 'p3-tq', ta: 'p3-ta', toOther: 'p3-17' };
@@ -211,6 +211,7 @@ for (const [pre, board] of [['c1-', TRAP_BOARD], ['c2-', SIXTH_BOARD]] as const)
 const TEACHER_COLOR = '#c92a2a';
 /** The pairs' boards from the voice editor, by line */
 const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD, ...CHOCOLATE_BOARD, ...EXPLAIN_BOARD, ...CHAT_BOARD };
+delete PAIR_BOARD['p1-ta']; // the legs are for the teacher to draw, over the blinking ones (client-teacher demoLegs.tsx)
 /** The dialogues whose boards were drawn by hand: the checking marks are in those drawings, none put in print */
 const HAND_MARKS = new Set(Object.keys(PAIR_BOARD).filter(id => PAIR_BOARD[id].draw?.length).map(id => id.slice(0, id.indexOf('-'))));
 /** The dialogues (by the ids' prefix) whose common list is written by hand */
@@ -1440,9 +1441,9 @@ export class BotRun {
     }
   }
 
-  /** Миша's pair: where his sheet lies, for the pale legs over it (client-teacher demoLegs.tsx) */
+  /** Миша's pair: where the other one's sheet lies (the right one, with no legs drawn on it), for the pale legs over it (client-teacher demoLegs.tsx) */
   private legs(room: string): SheetPlace | null | undefined {
-    return this.talks.get(room)?.plan.legs ? this.host.sheetAt(room, this.names.get(room)?.[0] ?? '') : undefined;
+    return this.talks.get(room)?.plan.legs ? this.host.sheetAt(room, this.names.get(room)?.[1] ?? '') : undefined;
   }
 
   /** One line out loud: a student's counted as talk; how long it takes */

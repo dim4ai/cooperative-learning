@@ -3,11 +3,11 @@ import type { SheetPlace } from './DemoVoice';
 
 // The solo demo, Миша's pair: the teacher has said «клетки — это катеты». Pale blinking legs over their board
 // show where to draw: AO goes 5 cells right along AD and 2 up, AB goes 4 up and 2 right (outside the figure).
-// Coordinates of Миша's sheet from b2 (1600×900, a cell is 56: A(116,568), B(228,344), O(396,456)), shrunk to where
+// Over the right sheet: the left one has legs drawn already. Coordinates of a sheet from b2 (1600×900, a cell is 56: A(116,568), B(228,344), O(396,456)), shrunk to where
 // it lies on the pair's board.
 
-const AO = { color: '#e67e22', path: 'M116 568 H396 V456', labels: [{ x: 256, y: 600, t: '5' }, { x: 420, y: 520, t: '2' }] };
-const AB = { color: '#8e44ad', path: 'M116 568 V344 H228', labels: [{ x: 90, y: 462, t: '4' }, { x: 172, y: 326, t: '2' }] };
+const AO = { color: '#e03131', path: 'M116 568 H396 V456', labels: [{ x: 256, y: 600, t: '5' }, { x: 420, y: 520, t: '2' }] };
+const AB = { color: '#e03131', path: 'M116 568 V344 H228', labels: [{ x: 90, y: 462, t: '4' }, { x: 172, y: 326, t: '2' }] };
 
 export function LegsGhost({ at }: { at: SheetPlace }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -30,11 +30,11 @@ export function LegsGhost({ at }: { at: SheetPlace }) {
 
   return (
     <div ref={ref} data-testid="legs-ghost" style={{ position: 'absolute', pointerEvents: 'none', ...(box ?? { display: 'none' }) }}>
-      <style>{'@keyframes legs-blink { 0%, 100% { opacity: 0.15 } 50% { opacity: 0.6 } }'}</style>
+      <style>{'@keyframes legs-blink { 0%, 100% { opacity: 0.2 } 50% { opacity: 0.85 } }'}</style>
       <svg viewBox="0 0 1600 900" width="100%" height="100%" style={{ animation: 'legs-blink 1.4s ease-in-out infinite' }}>
         <g transform={`translate(${at.x} ${at.y}) scale(${at.s})`}>
         {[AO, AB].map(l => (
-          <g key={l.path} fill="none" stroke={l.color} strokeWidth={10} strokeLinecap="round" strokeLinejoin="round">
+          <g key={l.path} fill="none" stroke={l.color} strokeWidth={12} strokeLinecap="round" strokeLinejoin="round">
             <path d={l.path} strokeDasharray="22 16" />
             {l.labels.map(s => (
               <text key={s.t + s.x} x={s.x} y={s.y} fill={l.color} stroke="none" fontSize={34} fontWeight={700} fontFamily="sans-serif" textAnchor="middle">{s.t}</text>
