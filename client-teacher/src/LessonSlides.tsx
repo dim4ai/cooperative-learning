@@ -218,7 +218,7 @@ const TYPE_LABELS: Record<string, string> = { group: 'объяснение', ind
 
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */
-/** off: the blocks that can't be started here (the solo demo skips some), looking like the rest; a press tells what happens there */
+/** off: the blocks that can't be started here (the solo demo skips some), grey; a press tells what happens there */
 export function LessonPlan({ slides, stage, off }: { slides: TeacherSlides; stage: string; off?: (b: MaterialBlock) => boolean }) {
   // the server's order: the tasks added during the lesson are in it too
   const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
@@ -238,10 +238,10 @@ export function LessonPlan({ slides, stage, off }: { slides: TeacherSlides; stag
             ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined}
             onClick={() => pale ? setPeek(p => p === b.id ? null : b.id) : socket.emit('block:start', { blockId: b.id })} style={{
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'center',
-            background: on ? '#4a90e2' : '#fff', color: on ? '#fff' : '#333',
+            background: on ? '#4a90e2' : pale ? '#ddd6ca' : '#fff', color: on ? '#fff' : pale ? '#8f887c' : '#333',
           }}>
             <div style={{ fontSize: 12.5, fontWeight: on ? 'bold' : 'normal', lineHeight: 1.25 }}>{b.title || 'Без названия'}</div>
-            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : '#777' }}>
+            <div style={{ fontSize: 10, marginTop: 2, color: on ? '#dbe9fa' : pale ? '#9c958a' : '#777' }}>
               {isLiveBlock(b) && <span data-testid="plan-block-added" title="Добавлено по ходу урока">＋ </span>}
               {TYPE_LABELS[b.type] ?? b.type}{b.duration ? ` · ${b.duration} мин` : ''}
             </div>
