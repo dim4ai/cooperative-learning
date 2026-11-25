@@ -40,6 +40,10 @@ export interface HintsInput {
   poll: TeacherPollView | null;
   /** the kind of task whose dialog is open */
   newTask: string | null;
+  /** the made-up file window is open */
+  lessonPick: boolean;
+  /** the class's journal is chosen: the class comes in after that */
+  journalChosen: boolean;
   /** the class journal is open */
   journalOpen: boolean;
   /** the «Завершить урок» dialog is open */
@@ -110,6 +114,22 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     + 'В демо они болтать не станут — урок просто закончится. Выберите любой вариант.' };
 
   if (stage === 'waiting') {
+    // first the lesson, then the class's journal; each hint shows while its button is there
+    if (!slides.local) return x.lessonPick
+      ? [
+          { id: 'lesson-file', anchor: '[data-testid="sample-file"][aria-selected="false"]', text: 'Выберите урок. На настоящем занятии здесь будут ваши файлы.' },
+          { id: 'lesson-file-open', anchor: '[data-testid="sample-open"]:not(:disabled)', text: 'Откройте его' },
+        ]
+      : [
+          { id: 'lesson-menu', anchor: '[data-testid="menu-lesson"][aria-expanded="false"]', text: 'Начнём с урока: откройте это меню' },
+          { id: 'lesson-open', anchor: '[data-testid="menu-open"]', text: 'Откройте урок' },
+        ];
+    if (!x.journalChosen) return x.journalOpen
+      ? [
+          { id: 'journal-class', anchor: '[data-testid="journal"][data-class=""] select[aria-label="Класс"]', text: 'Выберите журнал класса: 8 «Б»' },
+          { id: 'journal-class-choose', anchor: '[data-testid="journal"]:not([data-class=""]) [data-testid="journal-choose"]', text: 'Нажмите «Выбрать». После этого ученики начнут заходить.' },
+        ]
+      : { id: 'journal-first', anchor: '[data-testid="journal-open"]', text: 'Урок открыт. Теперь откройте журнал класса.' };
     const seated = seats.filter(s => s.occupant);
     const allIn = students.length >= CLASS_SIZE && waiting.length === 0 && seated.length >= CLASS_SIZE;
     // one came in from someone else's device: a desk apart, until the teacher has talked to him and told the journal who he is
@@ -256,7 +276,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
     }
     return { id: `next-block:${stage}`, anchor: nextBlock(x), text: stage === 'individual' ? 'Все, кто звал, получили ответ. Дальше — работа в парах'
-      : stage === 'pairs' ? 'Этапы с 4-го по 8-й в демо пропущены — в плане они бледные, нажмите, чтобы узнать, что там. Дальше — признаки параллелограмма'
+      : stage === 'pairs' ? 'Этапы с 4-го по 8-й в демо пропущены — нажмите на них в плане, чтобы узнать, что там. Дальше — признаки параллелограмма'
       : 'Четвёрки разобрались. Подведите итог урока' };
   }
 

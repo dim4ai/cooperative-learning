@@ -25,7 +25,7 @@ import { forgetJournal, loadJournal, lockJournal, openJournalInMemory, seatPlanO
 import { logIn, type Teacher } from './login';
 import { ResetPassword } from './ResetPassword';
 import { RecordButton, RecordingFinished } from './RecordingUI';
-import { LessonMenu, NewTaskDialog, TaskMenu } from './TopMenu';
+import { LessonMenu, NewTaskDialog, SampleLessonDialog, TaskMenu } from './TopMenu';
 import { StageTimer, type TimerState } from './StageTimer';
 import { useRecording } from './recording';
 import { setRecordingNames, stopRecording } from './recording';
@@ -669,22 +669,26 @@ export default function App() {
   const recording = useRecording().recording;
   const [startWarning, setStartWarning] = useState(false);
 
-  // The solo demo's class works on the sample lesson, so it is open from the start
-  const soloLoaded = useRef<string | null>(null);
-  useEffect(() => {
-    if (!demo?.solo || !confirmed || !lessonCode || soloLoaded.current === lessonCode) return;
-    soloLoaded.current = lessonCode;
+  // The solo demo's class works on the sample lesson: the teacher opens it from a made-up file window (?fast: at once)
+  const [lessonPick, setLessonPick] = useState(false);
+  function openSample() {
     fetch(`${import.meta.env.BASE_URL}demo/parallelogram.colesson`)
       .then(res => res.ok ? res.blob() : Promise.reject(new Error('no sample lesson')))
       .then(blob => slides.open(new File([blob], 'parallelogram.colesson')))
       .catch(e => console.error('sample lesson not loaded:', e));
-  }, [demo, confirmed, lessonCode, slides]);
+  }
+  const soloLoaded = useRef<string | null>(null);
+  useEffect(() => {
+    if (!demo?.solo || FAST_BLOCK === null || !confirmed || !lessonCode || soloLoaded.current === lessonCode) return;
+    soloLoaded.current = lessonCode;
+    openSample();
+  }, [demo, confirmed, lessonCode, slides]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // the solo demo's class is in a journal made up in the page: its seating seats the bots
+  // the solo demo's class is in a journal made up in the page: once the teacher has chosen it, its seating seats the bots
   useEffect(() => {
     if (!demo?.solo) return;
     openJournalInMemory(SOLO_JOURNAL);
-    setClassId(SOLO_CLASS_ID);
+    setClassId(FAST_BLOCK === null ? null : SOLO_CLASS_ID);
   }, [demo?.solo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // testing (?fast=b9): once the class is in, the lesson starts right on that block
@@ -842,6 +846,7 @@ export default function App() {
     .filter(p => !seats.some(s => s.occupant === p.name && s.extra === undefined))
     .map(p => p.name);
   function startLesson() {
+    if (demo?.solo && (!slides.material || !students.length)) return; // the lesson and the journal first: the hints say so
     const blocks = slides.material?.blocks;
     if (blocks?.length) socket.emit('block:start', { blockId: slides.state.block ?? blocks[0].id });
     // no lesson file: an explanation on a clean board, the rest is added as the lesson goes
@@ -995,7 +1000,7 @@ export default function App() {
         {state.stage === 'waiting' && (
           <button
             data-hint="start-lesson"
-            onClick={() => { if (unseated.length || !slides.material) setStartWarning(true); else startLesson(); }}
+            onClick={() => { if (unseated.length || !slides.material && !demo?.solo) setStartWarning(true); else startLesson(); }}
             style={{
               marginTop: GROUP_GAP, padding: '10px 6px', borderRadius: 6, border: 'none',
               cursor: 'pointer', background: '#2ecc71', color: '#fff',
@@ -1040,7 +1045,8 @@ export default function App() {
         {state.demo && <DemoBanner times={state.demo} clockSkew={clockSkew} />}
         <div data-testid="top-bar" style={{ padding: '8px 16px', background: '#ece2d2', borderBottom: '1px solid #e0d4c0', fontSize: 14, color: '#555', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <LessonMenu slides={slides} entry={!demo && entry ? entry : null} recording={recording} onRecord={demo ? null : () => setRecordAsk(n => n + 1)}
-            demoNote={demo?.solo ? 'В демо урок уже открыт: параллелограмм. На настоящем уроке здесь открывают свой урок, закрывают вход, когда все пришли, меняют код и записывают урок.' : undefined} />
+            onDemoOpen={() => setLessonPick(true)}
+            demoNote={demo?.solo ? 'На настоящем уроке здесь закрывают вход, когда все пришли, меняют код и записывают урок.' : undefined} />
           <TaskMenu onPick={setNewTask} only={demo?.solo ? 'poll' : undefined} />
           {/* right after the menus, so it stays put whatever the stage's title is */}
           {state.stage !== 'waiting' && <StageTimer endsAt={state.timerEndsAt} timer={state.timer} clockSkew={clockSkew} />}
@@ -1086,6 +1092,7 @@ export default function App() {
             <RecordingFinished />
           </div>}
         </div>
+        {lessonPick && <SampleLessonDialog onOpen={() => { setLessonPick(false); openSample(); }} onClose={() => setLessonPick(false)} />}
         {newTask && (newTask === 'poll'
           ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} draft={demo?.solo ? SOLO_POLL : undefined} />
           : <NewTaskDialog type={newTask} running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} />)}
@@ -1114,7 +1121,7 @@ export default function App() {
       <HighFive room={inSmallRoom ? livekit?.room ?? null : null} />
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={!!legs} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} lessonPick={lessonPick} journalChosen={!!currentClass} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={!!legs} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{
@@ -1122,7 +1129,7 @@ export default function App() {
           background: '#fbf7f0', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',
         }}>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {demo?.solo && <SoloGuide stage={state.stage} />}
+            {demo?.solo && <SoloGuide stage={state.stage === 'waiting' && !(slides.local && currentClass) ? 'setup' : state.stage} />}
             {state.stage !== 'waiting' && <BlockNotes slides={slides} />}
           </div>
           {state.stage === 'group' && <HandsPanel hands={hands} />}

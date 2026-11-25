@@ -710,7 +710,7 @@ function startBots(code: string, lesson: LessonRuntime) {
     },
   }, demos.get(code)?.teacher);
   lesson.bots = bots;
-  bots.seatEveryone(!!fast);
+  if (fast) bots.seatEveryone(true); // else they come in once the teacher has chosen the journal (seatPlan)
 }
 
 /** The solo demo: once the lesson began, the class stays where it sat (the bots' work goes by who sits with whom) */
@@ -2304,6 +2304,7 @@ io.on('connection', async (socket) => {
     socket.on('seatPlan', ({ capacity, seats }: { capacity?: unknown; seats?: unknown } = {}) => {
       if (role !== 'teacher') return;
       applySeatPlan(lesson, capacity, seats);
+      if (lesson.seatPlan.size) lesson.bots?.comeIn();
       settleSeats(code, lesson).catch(e => console.error('seats not settled:', e));
     });
 

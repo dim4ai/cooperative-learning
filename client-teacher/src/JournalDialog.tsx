@@ -32,7 +32,7 @@ export function JournalDialog({ email, classId, onClassId, lesson, onClose, inMe
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }}>
-      <div role="dialog" aria-label="Профиль" data-testid="journal" onClick={e => e.stopPropagation()} style={{
+      <div role="dialog" aria-label="Профиль" data-testid="journal" data-class={draftId ?? ''} onClick={e => e.stopPropagation()} style={{
         background: '#fff', color: '#222', borderRadius: 10, padding: 20, width: 460, maxWidth: '100%', maxHeight: '90vh',
         overflow: 'auto', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif',
       }}>

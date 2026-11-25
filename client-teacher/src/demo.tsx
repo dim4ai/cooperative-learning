@@ -273,6 +273,10 @@ export async function startSolo(teacher: TeacherSex = 'f'): Promise<{ code: stri
 
 /** short: the steps when the hints beside the buttons are on and say where to press */
 const GUIDE: Record<string, { title: string; steps: string[]; short?: string[] }> = {
+  setup: { title: 'Подготовка', steps: [
+    'Откройте урок, который вы подготовили заранее, и журнал класса.',
+    'В журнале записаны ученики и закреплённые за ними места. Когда вы его выберете, ученики начнут заходить.',
+  ] },
   waiting: { title: 'Рассадка', steps: [
     'Рассадка класса хранится в журнале: ученики заходят и сами садятся на свои места. Ряд за партой — это пара, вся парта — четвёрка.',
     'Кто зашёл с незнакомого устройства, садится за отдельную парту «Новые ученики». Поговорите с ним (💬) и отметьте в журнале, кто это — он сядет на своё место.',

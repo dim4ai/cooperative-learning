@@ -546,8 +546,13 @@ export class BotRun {
     set.add(t);
   }
 
+  private came = false;
+  /** The journal is chosen: the class comes in, once */
+  comeIn() { if (!this.came) this.seatEveryone(); }
+
   /** fast (testing): all at once */
   seatEveryone(fast = false) {
+    this.came = true;
     ARRIVAL.forEach((name, n) => {
       const i = BOTS.findIndex(b => b.name === name);
       this.after(fast ? 300 + n * 100 : 1200 + n * SEAT_PAUSE_MS, () => this.host.seat(i), this.timers);

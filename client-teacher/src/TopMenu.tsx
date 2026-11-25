@@ -54,10 +54,12 @@ const Line = () => <div style={{ height: 1, background: '#eee5d6', margin: '3px 
 interface Entry { closed: boolean }
 
 /** «Урок»: the file, the way in, the recording */
-export function LessonMenu({ slides, entry, recording, onRecord, demoNote }: {
+export function LessonMenu({ slides, entry, recording, onRecord, demoNote, onDemoOpen }: {
   slides: TeacherSlides; entry: Entry | null; recording: boolean; onRecord: (() => void) | null; // null: no recording here (a demo lesson)
   /** the solo demo: the items do nothing, a press tells what they do in a real lesson */
   demoNote?: string;
+  /** …all but this one: it opens the sample lesson */
+  onDemoOpen?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [records, setRecords] = useState(false);
@@ -66,7 +68,7 @@ export function LessonMenu({ slides, entry, recording, onRecord, demoNote }: {
     <input ref={input} type="file" accept=".colesson" style={{ display: 'none' }} data-testid="material-input"
       onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} />
     <Menu label="Урок" testid="menu-lesson">{close => demoNote ? (<>
-      <Item onClick={() => setTold(true)}>Заменить урок…</Item>
+      <Item testid="menu-open" onClick={() => { close(); onDemoOpen?.(); }}>{slides.local ? 'Заменить урок…' : 'Открыть урок…'}</Item>
       <Line />
       <Item onClick={() => setTold(true)}>Закрыть вход</Item>
       <Item onClick={() => setTold(true)}>Сменить код</Item>
@@ -91,6 +93,29 @@ export function LessonMenu({ slides, entry, recording, onRecord, demoNote }: {
     </>)}</Menu>
     {records && <RecordingsDialog onClose={() => setRecords(false)} />}
   </>);
+}
+
+/** The solo demo: stands in for the file window, with the one lesson there is */
+export function SampleLessonDialog({ onOpen, onClose }: { onOpen: () => void; onClose: () => void }) {
+  const [picked, setPicked] = useState(false);
+  return (
+    <div onClick={onClose} style={overlay}>
+      <div role="dialog" aria-label="Открыть урок" data-testid="sample-lesson" onClick={e => e.stopPropagation()} style={{ ...dialog, width: 560 }}>
+        <h3 style={{ margin: 0 }}>Открыть урок</h3>
+        <div style={{ fontSize: 12, color: '#777' }}>📁 Мои уроки</div>
+        <div role="listbox" aria-label="Уроки" style={{ border: '1px solid #ddd', borderRadius: 6, height: 180, padding: 4 }}>
+          <button role="option" aria-selected={picked} data-testid="sample-file" onClick={() => setPicked(true)} onDoubleClick={onOpen} style={{
+            width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 14, color: '#222',
+            border: '1px solid transparent', background: picked ? '#dbe9fa' : 'transparent',
+          }}>📄 Параллелограмм. Свойства и признаки.colesson</button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={btn}>Отмена</button>
+          <button data-testid="sample-open" disabled={!picked} onClick={onOpen} style={{ ...btn, border: 'none', background: '#4a90e2', color: '#fff', opacity: picked ? 1 : 0.5, cursor: picked ? 'pointer' : 'default' }}>Открыть</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const TASK_TYPES: { type: string; label: string; hint: string }[] = [
