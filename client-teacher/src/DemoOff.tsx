@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
-// In the demo: a control of the real lesson, shown pale so the visitor knows it is there; a tap tells what it does
+// In the demo: a control of the real lesson that does nothing here. It looks as it does there; a tap tells what it does
 
 const NOTE_W = 230;
 
@@ -26,10 +26,10 @@ export function DemoOff({ note, children, style }: { note: string; children: Rea
 
   return (
     <div ref={box} data-testid="demo-off" style={{ position: 'relative', ...style }}>
-      {/* what is under the veil can't be pressed: the veil takes the tap */}
-      <div aria-hidden style={{ opacity: 0.4, pointerEvents: 'none', filter: 'grayscale(0.6)' }}>{children}</div>
+      {/* what is under the cover can't be pressed: the cover takes the tap */}
+      <div aria-hidden style={{ pointerEvents: 'none' }}>{children}</div>
       <button type="button" aria-label={note} onClick={() => (at ? setAt(null) : open())}
-        style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none', cursor: 'help', padding: 0 }} />
+        style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }} />
       {at && (
         <div role="note" data-testid="demo-off-note" style={{
           position: 'fixed', zIndex: 1000, width: NOTE_W, left: at.left,

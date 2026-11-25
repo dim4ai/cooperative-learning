@@ -56,20 +56,24 @@ interface Entry { closed: boolean }
 /** «Урок»: the file, the way in, the recording */
 export function LessonMenu({ slides, entry, recording, onRecord, demoNote }: {
   slides: TeacherSlides; entry: Entry | null; recording: boolean; onRecord: (() => void) | null; // null: no recording here (a demo lesson)
-  /** the solo demo: the items shown pale, with what they do in a real lesson */
+  /** the solo demo: the items do nothing, a press tells what they do in a real lesson */
   demoNote?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [records, setRecords] = useState(false);
+  const [told, setTold] = useState(false);
   return (<>
     <input ref={input} type="file" accept=".colesson" style={{ display: 'none' }} data-testid="material-input"
       onChange={e => { const f = e.target.files?.[0]; if (f) slides.open(f); e.target.value = ''; }} />
     <Menu label="Урок" testid="menu-lesson">{close => demoNote ? (<>
-      {['Открыть урок…', 'Закрыть вход', 'Сменить код', 'Записать урок', 'Записи уроков'].map(t => (
-        <div key={t} style={{ padding: '6px 12px', fontSize: 13, color: '#aaa' }}>{t}</div>
-      ))}
+      <Item onClick={() => setTold(true)}>Заменить урок…</Item>
       <Line />
-      <div data-testid="menu-demo-note" style={{ padding: '6px 12px', fontSize: 12, color: '#555', maxWidth: 260, lineHeight: 1.35 }}>{demoNote}</div>
+      <Item onClick={() => setTold(true)}>Закрыть вход</Item>
+      <Item onClick={() => setTold(true)}>Сменить код</Item>
+      <Line />
+      <Item onClick={() => setTold(true)}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</Item>
+      <Item onClick={() => setTold(true)}>Записи уроков</Item>
+      {told && <div data-testid="menu-demo-note" style={{ padding: '6px 12px', fontSize: 12, color: '#555', maxWidth: 260, lineHeight: 1.35 }}>{demoNote}</div>}
     </>) : (<>
       <Item testid="menu-open" onClick={() => { close(); input.current?.click(); }}>{slides.local ? 'Заменить урок…' : 'Открыть урок…'}</Item>
       {entry && <>
@@ -98,14 +102,15 @@ const TASK_TYPES: { type: string; label: string; hint: string }[] = [
 ];
 
 /** «Новое задание»: a task of any kind, right after the running one. only: the one kind that can be added here
- *  (the solo demo), the rest shown pale */
+ *  (the solo demo), a press on the rest tells so */
 export function TaskMenu({ onPick, only }: { onPick: (type: string) => void; only?: string }) {
+  const [told, setTold] = useState<string | null>(null);
   return (
     <Menu label="Новое задание" testid="menu-task">{close => TASK_TYPES.map(t => only && t.type !== only ? (
-      <div key={t.type} data-testid={`task-${t.type}`} data-off style={{ padding: '6px 12px', color: '#aaa', fontSize: 13, cursor: 'default' }}>
+      <Item key={t.type} testid={`task-${t.type}`} onClick={() => setTold(t.type)}>
         <div>{t.label}</div>
-        <div style={{ fontSize: 11, color: '#bbb', whiteSpace: 'normal', maxWidth: 240, marginTop: 1 }}>{t.hint}</div>
-      </div>
+        <div style={{ fontSize: 11, color: told === t.type ? '#a06a00' : '#888', whiteSpace: 'normal', maxWidth: 240, marginTop: 1 }}>{told === t.type ? 'В демо можно добавить только голосование' : t.hint}</div>
+      </Item>
     ) : (
       <Item key={t.type} testid={`task-${t.type}`} onClick={() => { close(); onPick(t.type); }}>
         <div>{t.label}</div>

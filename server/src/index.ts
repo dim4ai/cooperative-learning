@@ -623,7 +623,6 @@ const BOT_PLAN_WAIT_MS = 5000;
 function startBots(code: string, lesson: LessonRuntime) {
   const fast = demos.get(code)?.fast;
   const startedAt = Date.now();
-  lesson.atDesks = false; // the simulated class waits in the room, as its script expects
   createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
   const bots = new BotRun({
@@ -648,6 +647,7 @@ function startBots(code: string, lesson: LessonRuntime) {
       }
       broadcastSeats(code, lesson);
       broadcastState(code, lesson);
+      settleDesks(code, lesson).catch(e => console.error('!!! bots to desks:', e));
     },
     rooms: () => [...new Set(realBotRooms(lesson))].sort(),
     write: (room, obj, author) => applyBoardOp(lesson, room, { t: 'add', obj }, author ?? 'Ученик', false, ''),
@@ -2428,7 +2428,7 @@ io.on('connection', async (socket) => {
 
     // Before the lesson: those seated wait at their desks, or everyone comes back to the class
     socket.on('desks:set', async ({ on }: { on?: unknown } = {}) => {
-      if (role !== 'teacher' || lesson.stage !== 'waiting' || lesson.block || lesson.bots) return;
+      if (role !== 'teacher' || lesson.stage !== 'waiting' || lesson.block) return;
       if (typeof on !== 'boolean' || on === lesson.atDesks) return;
       lesson.atDesks = on;
       console.log(`[${code}] at desks -> ${on}`);

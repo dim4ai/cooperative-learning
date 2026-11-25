@@ -899,7 +899,7 @@ export default function App() {
           <div data-testid="video-mode" style={{ fontSize: 11, color: '#b07800', marginTop: 2 }}>{VIDEO_MODE_LABELS[state.videoMode]}</div>
         )}
 
-        {(state.stage === 'waiting' || !slides.local) && !demo?.solo && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} /></div>}
+        {(state.stage === 'waiting' || !slides.local) && <div style={{ marginTop: GROUP_GAP - 8 }}><MaterialPanel slides={slides} /></div>}
 
         {(!demo || demo.solo) && state.stage === 'waiting' && <button data-testid="journal-open" onClick={() => setJournalOpen(true)} style={{
           marginTop: GROUP_GAP, padding: '6px', borderRadius: 6, border: '1px solid #c9b99c', cursor: 'pointer',
@@ -930,7 +930,7 @@ export default function App() {
           </>
         )}
 
-        {state.stage === 'waiting' && !slides.state.block && !demo?.solo && (
+        {state.stage === 'waiting' && !slides.state.block && (
           <button data-testid="desks-toggle" onClick={() => socket.emit('desks:set', { on: !state.atDesks })}
             title={state.atDesks ? 'Все вернутся в класс и услышат вас' : 'Кто уже сел, пообщается за своим столом до начала урока'}
             style={{
@@ -1085,11 +1085,6 @@ export default function App() {
             <RecordButton title={currentClass?.name ?? ''} code={lessonCode} clockSkew={clockSkew} ask={recordAsk} />
             <RecordingFinished />
           </div>}
-          {lessonCode && demo && (
-            <DemoOff style={{ marginLeft: 'auto' }} note="Запись урока: слайды, доски и разговоры в группах, чтобы потом пересмотреть, как шла работа. Записывает учитель, согласие учеников или родителей — на нём.">
-              <button tabIndex={-1} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #c9b99c', background: '#fff', color: '#333', fontSize: 12 }}><span style={{ color: '#e74c3c' }}>●</span> Записать урок</button>
-            </DemoOff>
-          )}
         </div>
         {newTask && (newTask === 'poll'
           ? <NewPollDialog running={state.stage !== 'waiting'} onClose={() => setNewTask(null)} draft={demo?.solo ? SOLO_POLL : undefined} />
