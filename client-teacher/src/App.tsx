@@ -1126,7 +1126,7 @@ export default function App() {
       <HighFive room={inSmallRoom ? livekit?.room ?? null : null} />
       {demo?.solo && lessonCode && <DemoHints lesson={lessonCode} stage={state.stage} seats={seats} students={students.map(p => p.name)} waiting={waitingSeat}
         previewOpen={preview} slides={slides} mapOpen={mapOpen} calling={callingRooms} calls={calls} room={inSmallRoom ? livekit?.room ?? null : null}
-        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} lessonPick={lessonPick} journalChosen={!!currentClass} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={!!legs} />}
+        quiet={!!(inSmallRoom && livekit?.quiet)} activity={activity} poll={poll} newTask={newTask} lessonPick={lessonPick} journalChosen={!!currentClass} atDesks={!!state.atDesks} journalOpen={journalOpen} endOpen={endDialog} hands={hands} replyWaits={!!demoReply && demoReply.room === livekit?.room} legs={!!legs} />}
       {/* at a group's board the task is over the board already: the notes would only take room there */}
       {((demo?.solo && !preview) || (state.stage !== 'waiting' && !inSmallRoom)) && (
         <div data-testid="right-panel" style={{

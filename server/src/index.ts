@@ -623,6 +623,7 @@ const BOT_PLAN_WAIT_MS = 5000;
 function startBots(code: string, lesson: LessonRuntime) {
   const fast = demos.get(code)?.fast;
   const startedAt = Date.now();
+  lesson.atDesks = false; // the class gathers first; the teacher lets it go to the desks
   createSeats(lesson, SOLO_SEATS);
   broadcastSeats(code, lesson);
   const bots = new BotRun({
@@ -928,7 +929,8 @@ async function settleSeats(code: string, lesson: LessonRuntime) {
 
 /** Before the lesson the seated are at their desks: a change of seat is a change of room */
 async function settleDesks(code: string, lesson: LessonRuntime) {
-  if (!lesson.atDesks) return;
+  // the bots are put in their rooms here too: the one at the desk apart has their own even with the class gathered
+  if (!lesson.atDesks && !(lesson.bots && lesson.stage === 'waiting')) return;
   for (const p of lesson.participants.values()) if (p.role === 'student') await placeStudent(code, lesson, p);
   broadcastState(code, lesson);
 }

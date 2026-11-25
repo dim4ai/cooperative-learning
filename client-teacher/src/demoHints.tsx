@@ -44,6 +44,8 @@ export interface HintsInput {
   lessonPick: boolean;
   /** the class's journal is chosen: the class comes in after that */
   journalChosen: boolean;
+  /** before the lesson: the class is let go to its desks */
+  atDesks: boolean;
   /** the class journal is open */
   journalOpen: boolean;
   /** the «Завершить урок» dialog is open */
@@ -146,14 +148,11 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     if (x.journalOpen) return allIn ? { id: 'journal-close', anchor: '[data-testid="journal-choose"]', text: 'Миша на своём месте. Закройте журнал' } : null;
     if (x.previewOpen) {
-      if (allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
-      return done.has('preview-nav') ? null
-        : { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Листайте слайды стрелками ← → на клавиатуре или этими кнопками, блоки урока — стрелками ↑ ↓' };
+      if (newcomer && allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
+      if (done.has('preview-nav')) return allIn ? { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Когда посмотрите план, вернитесь к рассадке' } : null;
+      return { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Листайте слайды стрелками ← → на клавиатуре или этими кнопками, блоки урока — стрелками ↑ ↓' };
     }
-    if (!allIn) {
-      return done.has('preview') ? null
-        : { id: 'preview', anchor: '[data-testid="tab-preview"]', text: 'Пока ученики заходят, пролистайте урок: слайды и заметки к каждому блоку' };
-    }
+    if (!allIn || x.room) return null;
     // the class gathers at the two desks where most already sit
     const byDesk = new Map<number, number>();
     for (const s of seated) byDesk.set(s.groupIndex, (byDesk.get(s.groupIndex) ?? 0) + 1);
@@ -167,6 +166,10 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         prefer: { side: stray.row === 0 ? 'below' : 'above', align: stray.col === 0 ? 'start' : 'end' },
       };
     }
+    // all in, and gathered: let go to their desks; meanwhile the teacher looks through the plan
+    if (!done.has('desks')) return { id: 'desks', anchor: '[data-testid="desks-toggle"]', text:
+      'Все в сборе, и весь класс вас слышит. До начала урока ребят можно отпустить за столы: пусть подготовятся и пообщаются в своих четвёрках.' };
+    if (!done.has('preview')) return { id: 'preview', anchor: '[data-testid="tab-preview"]', text: 'Пока ученики готовятся к уроку, вы можете просмотреть план урока.' };
     return { id: 'start', anchor: '[data-hint="start-lesson"]', text: 'Все на своих местах. Можете начинать урок' };
   }
 
@@ -335,6 +338,7 @@ export function DemoHints(props: HintsInput) {
   const slideAt = slides.state.active ? `${slides.state.blockId}:${slides.state.index}` : null;
   const now = new Set<string>();
   if (previewOpen) now.add('preview');
+  if (props.stage === 'waiting' && props.atDesks && props.students.length >= CLASS_SIZE) now.add('desks');
   if (slides.state.revealed.length) now.add('reveal');
   if (props.hands.floor) now.add('hand'); // gave someone the word
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
