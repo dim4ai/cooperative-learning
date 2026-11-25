@@ -371,7 +371,7 @@ export const CHOCOLATE: DialogueLine[] = [
   {"id":"p1-31","who":1,"write":null,"ms":{"kirill":1567,"alexander":1567,"zahar":1541,"ermil":1489,"filipp":1750},"text":"Только теперь все честные."},
   {"id":"p1-32","who":1,"write":null,"ms":{"kirill":2351,"alexander":2247,"ermil":2194,"zahar":2429,"filipp":2456},"text":"Ой! Здравствуйте, Татьяна Алексеевна."},
   {"id":"p1-33","who":1,"write":null,"ms":{"kirill":8411,"alexander":7784,"ermil":7628,"zahar":7784,"filipp":8594},"text":"Татьяна Алексеевна, у меня записано, что а-бэ равно а о. На глаз одинаковые, а по клеткам разные. Как правильно?"},
-  {"id":"p1-tq","who":"T","write":null,"ms":{"alena":1149,"anton":1202},"text":"Какой у вас вопрос?"},
+  {"id":"p1-tq","who":"T","write":null,"ms":{"alena":2351,"anton":2273},"text":"Какой у вас вопрос?"},
   {"id":"p1-ta","who":"T","write":null,"ms":{"alena":20193,"anton":19879},"text":"Мы не можем утверждать, что отрезки равны, потому что так кажется из чертежа. Но то, что количество клеток вправо и вверх не совпадает, тоже не доказательство, что а-бэ не равно а-о. Тут Миша прав. Вспомните теорему Пифагора: клетки, — это катеты, а ваши отрезки, — гипотенузы. Посчитайте."},
 ];
 export const CHOCOLATE_BOARD: Record<string, LineBoard> = {
@@ -541,7 +541,7 @@ export const SCISSORS: DialogueLine[] = [
   {"id":"p3-38","who":1,"write":null,"ms":{"zahar":2456,"kirill":2429,"filipp":2586,"alexander":2273,"ermil":2247,"dasha":2325,"masha":2612,"lera":2456,"jane":2377},"text":"Ой, здравствуйте, Татьяна Алексеевна."},
   {"id":"p3-39","who":1,"write":null,"ms":{"kirill":6844,"filipp":6975,"zahar":6609,"alexander":6583,"ermil":6217,"dasha":6583,"lera":6792,"masha":7210,"jane":6687},"text":"Идёт. Давай спросим. Татьяна Алексеевна, можно записать, что угол ао-бэ равен углу цэо-дэ?"},
   {"id":"p3-40","who":2,"write":null,"ms":{"kirill":5669,"zahar":5251,"filipp":5825,"alexander":5094,"ermil":5303,"dasha":5355,"lera":5460,"masha":5747,"jane":5251},"text":"А я говорю, это вертикальные, они у любых двух прямых равны. Это не про параллелограмм.","gap":2500},
-  {"id":"p3-tq","who":"T","write":null,"ms":{"alena":1149,"anton":1202},"text":"Какой у вас вопрос?"},
+  {"id":"p3-tq","who":"T","write":null,"ms":{"alena":2351,"anton":2273},"text":"Какой у вас вопрос?"},
   {"id":"p3-ta","who":"T","write":null,"ms":{"alena":15256,"anton":14942},"text":"Вертикальные углы действительно равны, тут не поспоришь. Но диагонали любого четырёхугольника, пересекаясь, дают равные вертикальные углы. А в этом задании мы ищем то, что характерно именно для параллелограмма. Так что вы оба правы.","gap":2100},
 ];
 /** П3's board from the voice editor: drawn over the two sheets of b2 (the first one's on the left) */
