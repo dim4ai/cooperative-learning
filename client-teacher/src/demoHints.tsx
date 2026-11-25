@@ -12,7 +12,7 @@ import type { Hands } from './HandsPanel';
 // ---------- which hint, when ----------
 
 /** prefer: where the bubble goes if it fits — e.g. over the student's own desk, not the one they should move to */
-interface Hint { id: string; anchor: string; text: string; prefer?: { side: 'below' | 'above'; align: 'start' | 'end' } }
+interface Hint { id: string; anchor: string; text: string; prefer?: { side: 'below' | 'above' | 'right'; align: 'start' | 'end' } }
 
 export interface HintsInput {
   /** the lesson code: what was done is remembered per lesson */
@@ -149,7 +149,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (x.journalOpen) return allIn ? { id: 'journal-close', anchor: '[data-testid="journal-choose"]', text: 'Миша на своём месте. Закройте журнал' } : null;
     if (x.previewOpen) {
       if (newcomer && allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
-      if (done.has('preview-nav')) return allIn ? { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Когда посмотрите план, вернитесь к рассадке' } : null;
+      if (done.has('preview-nav')) return allIn ? { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Когда посмотрите план, вернитесь к рассадке',
+        prefer: { side: 'right', align: 'start' } } : null;
       return { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Листайте слайды стрелками ← → на клавиатуре или этими кнопками, блоки урока — стрелками ↑ ↓' };
     }
     if (!allIn || x.room) return null;
@@ -303,6 +304,7 @@ function place(r: Box, bubbleH: number, prefer?: Hint['prefer']): { side: Side; 
   const midY = r.top + r.height / 2 - bubbleH / 2;
   const midX = r.left + r.width / 2 - BUBBLE_W / 2;
   if (prefer) {
+    if (prefer.side === 'right') return { side: 'right', top: clampTop(midY), left: clampLeft(r.left + r.width + GAP) };
     const left = clampLeft(prefer.align === 'start' ? r.left : r.left + r.width - BUBBLE_W);
     if (prefer.side === 'below' && r.top + r.height + GAP + bubbleH < vh) return { side: 'below', top: r.top + r.height + GAP, left };
     if (prefer.side === 'above' && r.top - GAP - bubbleH > 0) return { side: 'above', top: r.top - GAP - bubbleH, left };
