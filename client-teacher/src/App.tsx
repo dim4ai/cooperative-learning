@@ -589,9 +589,10 @@ export default function App() {
 
   const journal = useJournal();
   const [journalOpen, setJournalOpen] = useState(false);
-  const [classId, setClassIdState] = useState<string | null>(() => { try { return localStorage.getItem(CLASS_KEY); } catch { return null; } });
+  const [classId, setClassIdState] = useState<string | null>(() => { if (STANDALONE) return null; try { return localStorage.getItem(CLASS_KEY); } catch { return null; } });
   function setClassId(id: string | null) {
     setClassIdState(id);
+    if (STANDALONE) return; // every demo lesson starts with no journal chosen
     try { if (id) localStorage.setItem(CLASS_KEY, id); else localStorage.removeItem(CLASS_KEY); } catch { /* private mode */ }
   }
   const currentClass = journal.data?.classes.find(c => c.id === classId) ?? null;
@@ -628,7 +629,8 @@ export default function App() {
   const planJson = journal.status === 'open' ? JSON.stringify(currentClass ? seatPlanOf(currentClass) : { seats: {} }) : '';
   const [joins, setJoins] = useState(0); // the server is ready for the plan after each (re)join
   useEffect(() => {
-    if (joins && planJson && (!demo || demo.solo)) socket.emit('seatPlan', JSON.parse(planJson));
+    // with no lesson on, the plan would wait in the socket and meet the next lesson: here it'd let the next class in at once
+    if (joins && planJson && (demo ? demo.solo : !STANDALONE)) socket.emit('seatPlan', JSON.parse(planJson));
   }, [joins, planJson, demo]);
 
   // The class remembers the code it came in by: next time the same code opens the lesson
@@ -795,6 +797,9 @@ export default function App() {
     return <DemoChoice onBack={() => setDemoScreen(null)} onBook={() => setDemoScreen('book')} onSolo={async teacher => {
       const started = await startSolo(teacher);
       if ('error' in started) return started.error;
+      // a journal left from the lesson before would let the class in at once
+      openJournalInMemory(SOLO_JOURNAL);
+      setClassId(FAST_BLOCK === null ? null : SOLO_CLASS_ID);
       setDemo({ ...started, solo: true });
       setDemoScreen(null);
       setLessonCodeReady(started.code);
