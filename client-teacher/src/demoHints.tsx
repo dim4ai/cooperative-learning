@@ -139,7 +139,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       if (x.room === room) return { id: 'newcomer-in', anchor: '[data-hint="room-back"]', text:
         'Это Миша: он зашёл с телефона тёти, поэтому система его не узнала. Вернитесь в класс и отметьте в журнале, кто это.' };
       if (!done.has(`visit:${room}`)) return { id: 'newcomer', anchor: '[data-testid="newcomer-talk"]', text:
-        'Кто-то зашёл с незнакомого устройства — его посадили за отдельную парту. Поговорите с ним: 💬' };
+        'Кто-то зашёл с нового устройства — его посадили за отдельную парту. Поговорите с ним: 💬' };
       return x.journalOpen
         ? { id: 'journal-link', anchor: '[data-testid="unmatched"] select', text: 'Укажите, кто это — Миша. Он сразу сядет на своё место из журнала.' }
         : { id: 'journal', anchor: '[data-testid="journal-open"]', text: 'Откройте журнал класса и отметьте, кто это.' };
