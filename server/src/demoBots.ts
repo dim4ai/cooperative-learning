@@ -95,7 +95,7 @@ interface TalkPlan {
   legs?: boolean;       // the pale legs of Pythagoras over {1}'s sheet as the answer is said (Миша's pair)
 }
 const P1_PLAN: TalkPlan = { greet: 'p1-32', cut: 'p1-15', direct: ['p1-33'], call: ['p1-17'], callBy: 2, after: 'p1-18', last: 'p1-31', tq: 'p1-tq', ta: 'p1-ta', toOther: 'p1-21', legs: true };
-const P3_PLAN: TalkPlan = { greet: 'p3-38', cut: 'p3-19', direct: ['p3-39', 'p3-40'], call: ['p3-21', 'p3-22'], callBy: 1, after: 'p3-23', last: 'p3-37', tq: 'p3-tq', ta: 'p3-ta', toOther: 'p3-17' };
+const P3_PLAN: TalkPlan = { greet: 'p3-38', cut: 'p3-19', direct: ['p3-39', 'p3-40'], call: ['p3-21', 'p3-22'], callBy: 1, after: 'p3-23', last: 'p3-41', tq: 'p3-tq', ta: 'p3-ta', toOther: 'p3-17' };
 
 interface Talk {
   room: string; lines: DialogueLine[]; plan: TalkPlan;
@@ -202,6 +202,8 @@ for (const [pre, board] of [['c1-', TRAP_BOARD], ['c2-', SIXTH_BOARD]] as const)
 const TEACHER_COLOR = '#c92a2a';
 /** The pairs' boards from the voice editor, by line */
 const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD, ...CHOCOLATE_BOARD, ...EXPLAIN_BOARD, ...CHAT_BOARD };
+/** The dialogues whose boards were drawn by hand: the checking marks are in those drawings, none put in print */
+const HAND_MARKS = new Set(Object.keys(PAIR_BOARD).filter(id => PAIR_BOARD[id].draw?.length).map(id => id.slice(0, id.indexOf('-'))));
 /** The dialogues (by the ids' prefix) whose common list is written by hand */
 const HAND_LISTS = new Set([SCISSORS, CHOCOLATE, EXPLAIN, CHAT].flatMap(ls => ls.filter(l => l.write && PAIR_BOARD[l.id]?.draw?.length).map(l => l.id.slice(0, l.id.indexOf('-')))));
 /** П2's drawings in the code, till they are drawn in the voice editor */
@@ -802,7 +804,7 @@ export class BotRun {
 
   /** A line is being said in a pair: the marks that go with it, on the sheets */
   private sheetMarks(room: string, id: string, ms: number) {
-    const marks = SHEET_MARKS[id.replace(/f$/, '')];
+    const marks = HAND_MARKS.has(id.slice(0, id.indexOf('-'))) ? undefined : SHEET_MARKS[id.replace(/f$/, '')];
     if (!marks || this.marked.has(`${room}:${id}`)) return;
     this.marked.add(`${room}:${id}`);
     const names = this.names.get(room) ?? ['', ''];
@@ -868,10 +870,10 @@ export class BotRun {
     const n = this.listed.get(room) ?? 0;
     this.listed.set(room, n + 1);
     const lead = this.names.get(room)?.[0] ?? author;
-    if (n === 0) this.host.write(room, { uid: `bot-${room}-${this.uid++}`, type: 'IText', text: 'Общий список', left: 40, top: 472,
-      originX: 'left', originY: 'top', fontSize: 24, fontFamily: 'sans-serif', fill: '#64748b' }, lead);
     // written by hand in the voice editor (the line's drawing): that is on the board already, the print would lie over it
     if (drawn) return;
+    if (n === 0) this.host.write(room, { uid: `bot-${room}-${this.uid++}`, type: 'IText', text: 'Общий список', left: 40, top: 472,
+      originX: 'left', originY: 'top', fontSize: 24, fontFamily: 'sans-serif', fill: '#64748b' }, lead);
     const col = Math.floor(n / 5), row = n % 5;
     this.host.write(room, this.hand(`bot-${room}-${this.uid++}`, author, text, 40 + col * 420, 510 + row * 76, 44), author);
   }
