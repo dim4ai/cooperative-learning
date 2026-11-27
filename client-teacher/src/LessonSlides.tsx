@@ -219,6 +219,15 @@ const TYPE_LABELS: Record<string, string> = { group: 'объяснение', ind
 /** Left panel: the lesson's blocks, in order. The stage follows the block */
 /** Time of the running block: what's left, then how much it has run over */
 /** off: the blocks that can't be started here (the solo demo skips some), grey; a press tells what happens there */
+/** The current block brought into sight once, as it becomes current: a ref made anew each render
+ *  would scroll the list back on every render, from under a hint pointing further down it */
+const inSightRefs = new Map<string, (el: HTMLElement | null) => void>();
+function inSight(id: string) {
+  let f = inSightRefs.get(id);
+  if (!f) { f = el => el?.scrollIntoView({ block: 'nearest' }); inSightRefs.set(id, f); }
+  return f;
+}
+
 export function LessonPlan({ slides, stage, off }: { slides: TeacherSlides; stage: string; off?: (b: MaterialBlock) => boolean }) {
   // the server's order: the tasks added during the lesson are in it too
   const blocks: MaterialBlock[] = slides.material?.blocks ?? slides.local?.blocks ?? [];
@@ -235,7 +244,7 @@ export function LessonPlan({ slides, stage, off }: { slides: TeacherSlides; stag
         return (
           <div key={b.id} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
           <button data-testid="plan-block" data-block-id={b.id} data-current={on || undefined} data-off={pale || undefined}
-            ref={on ? el => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+            ref={on ? inSight(b.id) : undefined}
             onClick={() => pale ? setPeek(p => p === b.id ? null : b.id) : socket.emit('block:start', { blockId: b.id })} style={{
             flexShrink: 0, padding: '6px 7px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'center',
             background: on ? '#4a90e2' : pale ? '#ddd6ca' : '#fff', color: on ? '#fff' : pale ? '#8f887c' : '#333',
