@@ -412,10 +412,23 @@ export function ExplainBoard({ slides: teacherSlides, readOnly, room }: { slides
           />
           {room && !(loaded.sheet && loaded.drawing) && <BoardShot room={room} width={width} />}
           {STANDALONE && scene.id === ANGLES_SCENE && <AnglesGhost width={width} />}
+          {STANDALONE && <HiddenAnswer scene={scene} revealed={revealed} width={width} />}
         </>)} />
       </div>
     </div>
   );
+}
+
+/** Where the slide's first answer still hidden from the students lies: the demo's hint points at it */
+function HiddenAnswer({ scene, revealed, width }: { scene: Scene; revealed: ReadonlySet<string>; width: number }) {
+  const o = scene.objects.find(o => o.studentHidden && !revealed.has(o.uid)) as (typeof scene.objects[number] & Record<string, unknown>) | undefined;
+  if (!o) return null;
+  const k = width / (scene.width ?? 1600), n = (v: unknown, d = 0) => typeof v === 'number' ? v : d;
+  const w = n(o.width) * n(o.scaleX, 1);
+  const h = n(o.height) * n(o.scaleY, 1) || n(o.fontSize, 24) * n(o.lineHeight, 1.2);
+  const left = n(o.left) - (o.originX === 'center' ? w / 2 : o.originX === 'right' ? w : 0);
+  const top = n(o.top) - (o.originY === 'center' ? h / 2 : o.originY === 'bottom' ? h : 0);
+  return <div data-hint="hidden-answer" style={{ position: 'absolute', left: left * k, top: top * k, width: w * k, height: h * k, pointerEvents: 'none' }} />;
 }
 
 const navBtn: CSSProperties = {

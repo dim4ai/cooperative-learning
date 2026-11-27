@@ -223,11 +223,15 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       ];
     }
     if (hidden > 0 && !done.has('reveal')) {
-      return { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝ и кликните по ответу' };
+      return [
+        { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝…' },
+        { id: 'reveal-answer', anchor: '[data-hint="hidden-answer"]', text: '…и кликните по скрытому ответу, например по этому: он откроется у всех учеников.' },
+      ];
     }
     // on every slide until the last: «Всем понятно?» appears only there, at the end of the explanation
     if (st.index < scenes.length - 1) {
-      return { id: 'next-slide', anchor: '[data-hint="slide-next"]', text: done.has('next-slide')
+      // above the arrows, over the lesson's menus: below them are the board's tools
+      return { id: 'next-slide', anchor: '[data-hint="slide-next"]', prefer: { side: 'above', align: 'start' }, text: done.has('next-slide')
         ? `Слайд ${st.index + 1} из ${scenes.length}. Объясняйте и листайте дальше — на последнем слайде появится кнопка «Всем понятно?»`
         : 'Следующий слайд — эта стрелка или клавиша →' };
     }
