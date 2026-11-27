@@ -298,6 +298,14 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       return { id: `bell:${ringing}`, anchor: `[data-calling-room="${CSS.escape(ringing)}"]`, text: 'Вас зовут. Нажмите на колокольчик, чтобы подойти' };
     }
     const answered = [...called].filter(r => done.has(`visit:${r}`)).length;
+    // pairs, some seconds in: they can be listened to. By the top row's last desk, at its middle
+    if (stage === 'pairs' && !done.has('pair-listen') && answered === 0 && Date.now() - stageSince.at >= LISTEN_AFTER_MS) {
+      const pairs = [...document.querySelectorAll<HTMLElement>('[data-pair-room]')].map(e => ({ room: e.dataset.pairRoom!, r: e.getBoundingClientRect() }));
+      const top = Math.min(...pairs.map(d => d.r.top));
+      const last = pairs.filter(d => d.r.top - top < 20).sort((a, b) => b.r.right - a.r.right)[0];
+      if (last) return { id: 'pair-listen', anchor: `[data-pair-room="${CSS.escape(last.room)}"]`, prefer: { side: 'right', align: 'start' }, text:
+        'Можете нажать на доску и послушать обсуждение учеников.' };
+    }
     if (answered < callsOn(x)) {
       // the class works; someone will call. Meanwhile, on the first work stage only: the countdown, if not started yet
       if (stage !== 'individual' || x.slides.state.block !== 'b2') return null;
@@ -327,6 +335,9 @@ const penRooms = new Set<string>();
 const calledRooms = new Map<string, Set<string>>();
 const BACK_PAUSE_MS = 2500;
 const PLAN_PAUSE_MS = 10000; // after a look at the lesson's stages: time to read before being sent back to the seating
+const LISTEN_AFTER_MS = 10000; // pairs: the talk has begun, then the hint that they can be listened to
+/** When the stage on screen began (set while rendering the hints) */
+const stageSince = { key: '', at: 0 };
 const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
 const BUBBLE_W = 250;
 const GAP = 12;
@@ -384,6 +395,7 @@ export function DemoHints(props: HintsInput) {
   // incognito doesn't answer a call: only an open visit does
   if (props.room && props.quiet) { if (props.stage === 'pairs') now.add('spy'); } // the detective's scene is the pairs'
   else if (props.room) { now.add(`visit:${props.room}`); now.add('in-room'); } else if (done.has('in-room')) now.add('room-back');
+  if (props.room && props.stage === 'pairs') now.add('pair-listen');
   if ([...now].some(id => !done.has(id))) setDone(new Set([...done, ...now]));
   if (slideAt && !firstSlide) setFirstSlide(slideAt);
 
@@ -433,19 +445,23 @@ export function DemoHints(props: HintsInput) {
     mem.room = props.room;
   }
   const sinceBack = Date.now() - (mem.backAt ?? 0);
+  const stageKey = `${props.lesson}:${props.stage}:${slides.state.block}`;
+  if (stageSince.key !== stageKey) { stageSince.key = stageKey; stageSince.at = Date.now(); }
+  const sinceStage = Date.now() - stageSince.at;
   let picked = sinceBack < BACK_PAUSE_MS ? null : pickHint(props, done);
   // after the last call: longer, to glance at the strips and lights before the detective's hint
   if (picked && !Array.isArray(picked) && picked.id === 'spy' && sinceBack < SPY_PAUSE_MS) picked = null;
   const sincePlan = Date.now() - (mem.planAt ?? 0);
   if (picked && !Array.isArray(picked) && picked.id === 'plan-back' && sincePlan < PLAN_PAUSE_MS) picked = null;
   const waitFor = sinceBack < BACK_PAUSE_MS ? BACK_PAUSE_MS - sinceBack : sincePlan < PLAN_PAUSE_MS ? PLAN_PAUSE_MS - sincePlan
-    : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack : 0;
+    : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack
+    : !picked && props.stage === 'pairs' && sinceStage < LISTEN_AFTER_MS ? LISTEN_AFTER_MS - sinceStage : 0;
   const [, setTick] = useState(0);
   useEffect(() => {
     if (waitFor <= 0) return;
     const t = setTimeout(() => setTick(n => n + 1), waitFor + 50);
     return () => clearTimeout(t);
-  }, [sinceBack < BACK_PAUSE_MS, waitFor > 0, mem.backAt, mem.planAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sinceBack < BACK_PAUSE_MS, waitFor > 0, mem.backAt, mem.planAt, stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
   return (<>
