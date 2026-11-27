@@ -304,7 +304,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       const top = Math.min(...pairs.map(d => d.r.top));
       const last = pairs.filter(d => d.r.top - top < 20).sort((a, b) => b.r.right - a.r.right)[0];
       if (last) return { id: 'pair-listen', anchor: `[data-pair-room="${CSS.escape(last.room)}"]`, prefer: { side: 'right', align: 'start' }, text:
-        'Можете нажать на доску и послушать обсуждение учеников.' };
+        'Можете нажать на любую доску и послушать обсуждение учеников за этой доской.' };
     }
     if (answered < callsOn(x)) {
       // the class works; someone will call. Meanwhile, on the first work stage only: the countdown, if not started yet
