@@ -589,6 +589,8 @@ export default function App() {
   callingNow.current = callingRooms;
   const roomNow = useRef<string | null>(null); // where the teacher is: asked in person there, no bell
   // the solo demo's calls of this stage, kept after the teacher answers: the hints show what to do in the room
+  // the question of the room the teacher is in: kept after the call is answered (below)
+  const askKept = useRef<{ room: string; ask: Say[] } | null>(null);
   const [calls, setCalls] = useState<Record<string, { note: string; who?: string; says?: Say[] }>>({});
   const [activity, setActivity] = useState<ClassActivity | null>(null); // who talks and writes at work, by student
   const slides = useTeacherSlides(lessonCode, lessonToken, logout);
@@ -872,7 +874,11 @@ export default function App() {
   // the solo demo: who called this room and what about — said by their tile at the board
   const roomOthers = demo?.solo ? students.filter(p => p.livekitRoom === livekit?.room).map(p => p.name) : [];
   const roomCall = demo?.solo && inSmallRoom && livekit ? calls[livekit.room] : undefined;
-  const roomAsk: Say[] | null = roomCall ? roomCall.says?.length ? roomCall.says : [{ who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note }] : null;
+  const roomAskNow: Say[] | null = roomCall ? roomCall.says?.length ? roomCall.says : [{ who: roomBase.startsWith('individual-') ? roomBase.slice('individual-'.length) : roomCall.who && roomOthers.includes(roomCall.who) ? roomCall.who : roomOthers[0], text: roomCall.note }] : null;
+  // the question stays by the board while the teacher is in that room, after the call is answered too
+  if (roomAskNow && livekit) askKept.current = { room: livekit.room, ask: roomAskNow };
+  else if (!inSmallRoom || askKept.current?.room !== livekit?.room) askKept.current = null;
+  const roomAsk = roomAskNow ?? askKept.current?.ask ?? null;
   // speaking to all is for the work in rooms; at a student's board the teacher speaks to them alone
   const voiceAllowed = !!voice && !demo?.solo && (state.stage === 'individual' || state.stage === 'pairs' || state.stage === 'fours') && !inSmallRoom;
   if (voiceOn && !voiceAllowed) setVoiceOn(false);
