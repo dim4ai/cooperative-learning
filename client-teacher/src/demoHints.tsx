@@ -471,6 +471,17 @@ export function DemoHints(props: HintsInput) {
 }
 
 /** One hint: a ring around its button and the bubble beside it */
+/** Out of sight in a scrolled list (the plan of the lesson, say) */
+function clipped(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (!/(auto|scroll|hidden)/.test(getComputedStyle(p).overflowY)) continue;
+    const c = p.getBoundingClientRect();
+    if (r.top < c.top || r.bottom > c.bottom) return true;
+  }
+  return false;
+}
+
 function Bubble({ hint }: { hint: Hint }) {
   // follow the button: it moves when the page lays out again
   const [measured, setMeasured] = useState<(Box & { anchor: string }) | null>(null);
@@ -489,7 +500,7 @@ function Bubble({ hint }: { hint: Hint }) {
     const first = requestAnimationFrame(() => {
       const el = document.querySelector(anchor);
       const r = el?.getBoundingClientRect();
-      if (el && r && (r.top < 0 || r.bottom + 140 > window.innerHeight)) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (el && r && (r.top < 0 || r.bottom + 140 > window.innerHeight || clipped(el))) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       measure();
     });
     const t = setInterval(measure, 300);
