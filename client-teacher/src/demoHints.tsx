@@ -227,7 +227,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     if (hidden > 0 && !done.has('reveal')) {
       return [
-        { id: 'reveal', anchor: '[data-testid="tool-slide"]', text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝…' },
+        { id: 'reveal', anchor: '[data-testid="tool-slide"]', prefer: { side: 'above', align: 'start' }, text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝…' },
         { id: 'reveal-answer', anchor: '[data-hint="hidden-answer"]', text: '…и кликните по скрытому ответу, например по этому: он откроется у всех учеников.' },
       ];
     }
@@ -241,7 +241,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     const ask: Hint = { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь спросите класс: всем понятно?' };
     // the first explanation ends on a drawing: the teacher may draw over it
     return block === 'b1' && !done.has('draw-slide') ? [
-      { id: 'draw-slide', anchor: '[data-testid="tool-pen"]', text: 'Выберите карандаш и отметьте на рисунке мигающие углы 1 и 2. Рисовать можно прямо во время объяснения: это увидят все ученики.' },
+      { id: 'draw-slide', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text: 'Выберите карандаш и отметьте на рисунке мигающие углы 1 и 2. Рисовать можно прямо во время объяснения: это увидят все ученики.' },
       ask,
     ] : ask;
   }
