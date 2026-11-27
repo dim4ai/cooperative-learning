@@ -86,7 +86,6 @@ const GREET_GAP_MS = 300; // the teacher came in: hello straight after the line 
 const ARRIVE_MS = 1500; // the teacher comes into a room: their page is there about this much later
 const EARLY_CALL_MS = 10_000; // the individual stage: the second call comes 10 s into the teacher's visit to the first
 const TALK_START_MS = 10_000; // the first seconds of a stage are quiet: the teacher looks round first
-const RECALL_MS = 15_000; // the teacher left without answering: they call again
 
 /** A dialogue that listens: the teacher coming in openly is greeted, one still there when they'd call is asked
  *  straight away, the call waits its turn among the others', and the second part begins once the teacher answered */
@@ -1363,10 +1362,11 @@ export class BotRun {
     if (!t) return;
     t.present = false;
     if (t.phase !== 'asked') return;
-    // gone before the answer: they call again a little later
+    // gone before the answer: the teacher came on their call, that's an answer; on they go (said 27.11)
     t.insert = [];
-    t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.trapLine(t, 'c1-19').text, 1, [{ who: t.names[0], text: this.trapLine(t, 'c1-19').text, ids: ['c1-19'] }]); });
+    t.phase = 'b';
+    this.host.callDone(room);
+    this.after(THINK_MS, () => this.trapStep(room));
   }
 
   // ---------- a dialogue that drifts (Chat) ----------
@@ -1517,11 +1517,9 @@ export class BotRun {
     if (!t) return;
     t.present = false;
     if (t.phase !== 'asked') return;
-    // gone without an answer: they call again a little later
-    this.host.offerReply(room, null);
+    // gone before a word of answer: the teacher came on their call, that's an answer; on they go (said 27.11)
     t.insert = [];
-    t.phase = 'calling';
-    this.after(RECALL_MS, () => { if (t.phase === 'calling') this.requestCall(room, this.callNote(t), t.plan.callBy, this.callSays(t)); });
+    this.onReply(room, false);
   }
 
   /** The teacher answered: with the ready answer, said in the teacher's voice, or in their own words */
