@@ -270,6 +270,13 @@ const MESSY = new Set(['p1-1', 'p4-2']);
 const INKS = ['#1971c2', '#5f3dc4', '#2b8a3e', '#c2255c', '#0c8599', '#e67700', '#862e9c', '#495057']; // each one's pen, by BOTS
 const ANY_SHEET: Sheet = { lines: OBSERVATIONS.slice(0, 3), start: 6, gap: 9 };
 const SHEET_TOP = 60, SHEET_ROW = 72, SHEET_LEFT = 860, SHEET_FONT = 40; // in the sheet's own pixels
+/** The voice's letter names written as the textbook does: «а-бэ» → AB, «цэо-дэ» → COD */
+const LETTER: Record<string, string> = { а: 'A', бэ: 'B', цэ: 'C', дэ: 'D', о: 'O' };
+export function latinLetters(text: string): string {
+  return text.replace(/(?<![а-яё])(?:бэ|цэ|дэ|а|о)(?:-?(?:бэ|цэ|дэ|а|о))+(?![а-яё])/giu, w =>
+    w.includes('-') ? w.toLowerCase().split('-').join('').match(/бэ|цэ|дэ|а|о/gu)!.map(x => LETTER[x]).join('') : w)
+    .replace(/равно а о(?![а-яё])/gu, 'равно AO'); // said apart, as Миша's call has it
+}
 const SHEET_BLOCK = 'b2'; // the sheet b3 shows (lesson's boardsFrom)
 
 /** b3: as a line is said, the one checking marks the partner's sheet: ✓, ?, a crossing out, or a line added under the list.
@@ -551,7 +558,8 @@ export class BotRun {
   private teacherVoice(ms: Record<string, number>) { const v = TEACHER_VOICES[this.teacher]; return ms[v] !== undefined ? v : Object.keys(ms)[0]; }
   /** A line that calls the teacher by name, as it is said to a man; undefined: as written */
   private maleAddress(id: string) { return this.teacher === 'm' ? MALE_ADDRESS[id] : undefined; }
-  private textOf(l: { id: string; text: string }) { return this.maleAddress(l.id)?.text ?? l.text; }
+  /** What the teacher reads of a line: the letters as in the textbook (AB, ∠ COD), not as said (а-бэ, цэ-о-дэ) */
+  private textOf(l: { id: string; text: string }) { return latinLetters(this.maleAddress(l.id)?.text ?? l.text); }
 
   private after(ms: number, fn: () => void, set = this.stageTimers) {
     const t = setTimeout(() => { set.delete(t); fn(); }, ms);

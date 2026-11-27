@@ -279,7 +279,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       }
       if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
         'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
-      if (call && /а-бэ/.test(call.note)) return { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' };
+      if (call && /а-бэ|AB = AO/.test(call.note)) return { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' };
       if (call) {
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it
@@ -303,7 +303,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       const pairs = [...document.querySelectorAll<HTMLElement>('[data-pair-room]')].map(e => ({ room: e.dataset.pairRoom!, r: e.getBoundingClientRect() }));
       const top = Math.min(...pairs.map(d => d.r.top));
       const last = pairs.filter(d => d.r.top - top < 20).sort((a, b) => b.r.right - a.r.right)[0];
-      if (last) return { id: 'pair-listen', anchor: `[data-pair-room="${CSS.escape(last.room)}"]`, prefer: { side: 'right', align: 'start' }, text:
+      if (last) return { id: 'pair-listen', anchor: `[data-pair-room="${CSS.escape(last.room)}"]`, prefer: { side: 'above', align: 'end' }, text:
         'Можете нажать на любую доску и послушать обсуждение учеников за этой доской.' };
     }
     if (answered < callsOn(x)) {
