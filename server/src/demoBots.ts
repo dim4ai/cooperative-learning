@@ -212,23 +212,6 @@ const TEACHER_COLOR = '#c92a2a';
 /** The pairs' boards from the voice editor, by line */
 const PAIR_BOARD: Record<string, LineBoard> = { ...SCISSORS_BOARD, ...CHOCOLATE_BOARD, ...EXPLAIN_BOARD, ...CHAT_BOARD };
 delete PAIR_BOARD['p1-ta']; // the legs are for the teacher to draw, over the blinking ones (client-teacher demoLegs.tsx)
-// Глеб's pair: as he names the angles AOB and COD, a bold red arc comes inside each, on his sheet (the left quarter:
-// a sheet of b2 shrunk by half, O(396,456), A(116,568), B(228,344), C(676,344), D(564,568))
-function angleArcs(at: number, gap: number): FourDraw[] {
-  const O = [198, 228], r = 26, deg = Math.PI / 180;
-  const arc = (from: number, to: number, t: number): FourDraw => {
-    const n = 10, path: Pt[] = [], ts: number[] = [];
-    for (let i = 0; i <= n; i++) {
-      const a = (from + (to - from) * i / n) * deg;
-      path.push([Math.round(O[0] + r * Math.cos(a)), Math.round(O[1] + r * Math.sin(a))]);
-      ts.push(t + 0.04 * i / n);
-    }
-    return { at: t, path, ts, ws: path.map(() => 7), color: '#e03131' };
-  };
-  return [arc(158, 214, at), arc(-22, 34, at + gap)]; // ∠AOB, then ∠COD
-}
-PAIR_BOARD['p3-21'] = { draw: angleArcs(0.42, 0.14) }; // «…что угол а-о-бэ равен углу цэ-о-дэ»
-PAIR_BOARD['p3-39'] = { draw: angleArcs(0.68, 0.14) }; // «…можно записать, что угол ао-бэ равен углу цэо-дэ?»
 /** The dialogues whose boards were drawn by hand: the checking marks are in those drawings, none put in print */
 const HAND_MARKS = new Set(Object.keys(PAIR_BOARD).filter(id => PAIR_BOARD[id].draw?.length).map(id => id.slice(0, id.indexOf('-'))));
 /** The dialogues (by the ids' prefix) whose common list is written by hand */
