@@ -299,7 +299,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     }
     const answered = [...called].filter(r => done.has(`visit:${r}`)).length;
     if (answered < callsOn(x)) {
-      // the class works; someone will call. Meanwhile: the stage's countdown, if not started yet
+      // the class works; someone will call. Meanwhile, on the first work stage only: the countdown, if not started yet
+      if (stage !== 'individual' || x.slides.state.block !== 'b2') return null;
       return { id: `timer:${stage}`, anchor: '[data-testid="timer-start"][title="Запустить"]:not(:disabled)', text:
         'В начале этапа можно запустить таймер: ученики будут видеть, сколько времени осталось.' };
     }
