@@ -260,7 +260,7 @@ const SHEETS: Record<string, Sheet> = {
   // П3 «Хоть ножницы нарисуй»: «Я тоже их нашёл и ещё две пары углов» — the vertical ones, after asking how to write angles;
   // «Стороны и диагонали. Четыре штуки»
   'p3-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 5, gap: 8, call: {
-    at: 15, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠AOB = ∠COD', '∠BOC = ∠AOD'], later: true, angles: true } },
+    at: 20, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠AOB = ∠COD', '∠BOC = ∠AOD'], later: true, angles: true } },
   'p3-2': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
   // «Четыре. Стороны и диагонали» — «У меня тоже четыре, только другие… Зато углы» in a scrawl: «Это бэ или восьмёрка?»
   'p4-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
