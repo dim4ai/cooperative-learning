@@ -63,24 +63,6 @@ function occupiedDesks(seats: Seat[]): number[] {
   return [...new Set(seats.filter(s => s.occupant && s.extra === undefined).map(s => s.groupIndex))].sort((a, b) => a - b);
 }
 
-/** The pair that talks but hardly writes (П4 «Трёп»), and didn't call: the detective has something to look at there */
-function chattyPair(x: HintsInput): string | null {
-  const pairs = new Map<string, string[]>();
-  for (const s of x.seats) {
-    if (!s.occupant) continue;
-    const room = `${x.lesson}:pair-g${s.groupIndex}-r${s.row}`;
-    pairs.set(room, [...(pairs.get(room) ?? []), s.occupant]);
-  }
-  let best: string | null = null, bestOps = Infinity;
-  for (const [room, names] of pairs) {
-    if (names.length < 2 || room in x.calls) continue;
-    const talk = names.reduce((a, n) => a + (x.activity?.students[n]?.talk ?? 0), 0);
-    const ops = names.reduce((a, n) => a + (x.activity?.students[n]?.ops ?? 0), 0);
-    if (talk >= 6 && ops < bestOps) { best = room; bestOps = ops; }
-  }
-  return best;
-}
-
 const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number; planAt?: number }>();
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT; b2 goes by SHEETS: two call there) */
@@ -254,11 +236,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     calledRooms.set(key, called);
     Object.keys(x.calls).forEach(r => called.add(r));
     // at a student's board
-    if (x.room && x.quiet) {
-      return { id: 'spy-in', anchor: '[data-testid="quiet-reveal"]', text:
-        'Вы здесь инкогнито — посмотрите на детектива справа: ученики вас не видят и не слышат. '
-        + 'Послушайте их и посмотрите, что они пишут. Заговорить с ними — «Войти открыто», уйти — «Назад».' };
-    }
+    if (x.room && x.quiet) return null; // incognito: they know what it means (said 27.11)
     if (x.room) {
       const call = x.calls[x.room];
       if (x.legs) return [
@@ -312,13 +290,6 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       return { id: `timer:${stage}`, anchor: '[data-testid="timer-start"][title="Запустить"]:not(:disabled)', text:
         'В начале этапа можно запустить таймер: ученики будут видеть, сколько времени осталось.' };
     }
-    // the detective: a pair that didn't call, but the map shows something's off there
-    if (stage === 'pairs' && !done.has('spy')) {
-      const room = chattyPair(x);
-      if (room) return { id: 'spy', anchor: `[data-pair-room="${CSS.escape(room)}"]`, text:
-        'Посмотрите на эту пару: разговаривают, а на доске почти ничего. '
-        + 'Нажмите на пару — вы зайдёте к ним инкогнито, они вас не заметят.' };
-    }
     return { id: `next-block:${stage}`, anchor: nextBlock(x), text: stage === 'individual' ? 'Все, кто звал, получили ответ. Можете перейти к работе в парах'
       : stage === 'pairs' ? 'Этапы с 4-го по 8-й в демо пропущены — нажмите на них в плане, чтобы узнать, что там. Дальше — признаки параллелограмма'
       : 'Четвёрки разобрались. Подведите итог урока' };
@@ -338,7 +309,6 @@ const PLAN_PAUSE_MS = 10000; // after a look at the lesson's stages: time to rea
 const LISTEN_AFTER_MS = 10000; // pairs: the talk has begun, then the hint that they can be listened to
 /** When the stage on screen began (set while rendering the hints) */
 const stageSince = { key: '', at: 0 };
-const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
 const BUBBLE_W = 250;
 const GAP = 12;
 
@@ -449,12 +419,9 @@ export function DemoHints(props: HintsInput) {
   if (stageSince.key !== stageKey) { stageSince.key = stageKey; stageSince.at = Date.now(); }
   const sinceStage = Date.now() - stageSince.at;
   let picked = sinceBack < BACK_PAUSE_MS ? null : pickHint(props, done);
-  // after the last call: longer, to glance at the strips and lights before the detective's hint
-  if (picked && !Array.isArray(picked) && picked.id === 'spy' && sinceBack < SPY_PAUSE_MS) picked = null;
   const sincePlan = Date.now() - (mem.planAt ?? 0);
   if (picked && !Array.isArray(picked) && picked.id === 'plan-back' && sincePlan < PLAN_PAUSE_MS) picked = null;
   const waitFor = sinceBack < BACK_PAUSE_MS ? BACK_PAUSE_MS - sinceBack : sincePlan < PLAN_PAUSE_MS ? PLAN_PAUSE_MS - sincePlan
-    : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack
     : !picked && props.stage === 'pairs' && sinceStage < LISTEN_AFTER_MS ? LISTEN_AFTER_MS - sinceStage : 0;
   const [, setTick] = useState(0);
   useEffect(() => {
