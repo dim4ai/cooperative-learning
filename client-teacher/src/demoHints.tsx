@@ -261,14 +261,23 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
           + 'К AO — 5 клеток вправо и 2 вверх, к AB — 4 вверх и 2 вправо.' },
         { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
       ];
-      if ([...x.calling].some(r => r !== x.room)) return { id: 'call-elsewhere', anchor: '[data-testid="call-elsewhere-go"]', text:
-        'Вас зовут ещё в одну группу — кому-то нужна помощь. Закончите объяснение здесь и переходите: «Перейти».' };
+      // Глеб asks how to write the angles: the teacher writes it for him; this stays while another calls
+      if (call && /равенство углов/.test(call.note)) penRooms.add(x.room);
+      const pen: Hint | null = penRooms.has(x.room)
+        ? { id: `pen:${x.room}`, anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text: 'Вы можете написать на доске ученика, чтобы помочь ему.' } : null;
+      if ([...x.calling].some(r => r !== x.room)) {
+        const elsewhere: Hint = { id: 'call-elsewhere', anchor: '[data-testid="call-elsewhere-go"]', prefer: { side: 'above', align: 'start' }, text:
+          'Вас зовут ещё в одну группу — кому-то нужна помощь. Закончите объяснение здесь и переходите: «Перейти».' };
+        // the call's bar is right above the tools: the pen's hint goes under them, over the empty top of the board
+        return pen ? [{ ...pen, prefer: { side: 'below', align: 'start' } }, elsewhere] : elsewhere;
+      }
       if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
         'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
       if (call && /а-бэ/.test(call.note)) return { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' };
       if (call) {
         const back: Hint = { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'После ответа ученику возвращайтесь в класс.' };
         // the first time at a student's board: the teacher may write on it
+        if (pen) return [pen, back];
         return done.has('room-back') ? back : [
           { id: 'draw', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text: 'Вы можете писать и рисовать прямо на доске ученика — он сразу это увидит.' },
           back,
@@ -301,6 +310,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 
 // ---------- the bubble ----------
 
+/** Rooms where the teacher was asked to write for the student: the pen's hint stays there after the call is done */
+const penRooms = new Set<string>();
 const BACK_PAUSE_MS = 2500;
 const PLAN_PAUSE_MS = 10000; // after a look at the lesson's stages: time to read before being sent back to the seating
 const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
