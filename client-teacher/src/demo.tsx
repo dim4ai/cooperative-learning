@@ -53,7 +53,8 @@ export const soloBlockOff = (b: { id: string }) => !SOLO_LIVE_BLOCKS.has(b.id) &
 /** The poll the solo demo suggests, both times: the class's answers are in server/src/demoBots.ts (POLL_ANSWERS), by option */
 export const SOLO_POLL = { question: 'Свойство и признак — это одно и то же?', options: ['Да, одно и то же', 'Нет, разные вещи', 'Иногда совпадают', 'Не знаю'] };
 
-/** ?fast=<block>: testing — the lesson starts on that block as soon as the class is in */
+/** ?fast=<block>: testing — no pages before the lesson, the lesson starts on that block as soon as the class is in;
+ *  ?fast=ready: the lesson and the journal open, the class seated, not started yet. &teacher=m: Николай Иванович */
 export const FAST_BLOCK = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('fast') || null;
 
 /** The solo demo's class in the teacher's journal: names, the device each comes in from, the seat each has.
@@ -175,6 +176,14 @@ const TEACHERS: { sex: TeacherSex; name: string }[] = [
 
 export function DemoChoice({ onSolo, onBook, onBack }: { onSolo: (teacher: TeacherSex) => Promise<string | null>; onBook: () => void; onBack: () => void }) {
   const [intro, setIntro] = useState(false);
+  // testing (?fast=…): straight into the lesson, no pages before it
+  const [skipped, setSkipped] = useState(false);
+  useEffect(() => {
+    if (!FAST_BLOCK || skipped) return;
+    setSkipped(true);
+    const t = new URLSearchParams(location.search).get('teacher');
+    void onSolo(t === 'm' ? 'm' : 'f');
+  }, [skipped, onSolo]);
   if (intro) return <SoloIntro onSolo={onSolo} onBack={() => setIntro(false)} />;
   return (
     <div style={screen}>
