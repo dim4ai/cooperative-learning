@@ -81,7 +81,7 @@ function chattyPair(x: HintsInput): string | null {
   return best;
 }
 
-const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number }>();
+const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number; planAt?: number }>();
 
 /** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
 const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
@@ -149,9 +149,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (x.journalOpen) return allIn ? { id: 'journal-close', anchor: '[data-testid="journal-choose"]', text: 'Миша на своём месте. Закройте журнал' } : null;
     if (x.previewOpen) {
       if (newcomer && allIn) return { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Ученики вошли в класс. Вернитесь к рассадке' };
-      if (done.has('preview-nav')) return allIn ? { id: 'back-to-seats', anchor: '[data-testid="tab-seating"]', text: 'Когда посмотрите план, вернитесь к рассадке',
+      if (!done.has('preview-nav')) return { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Можете посмотреть слайды этапа: этими стрелками или клавишами ← →' };
+      if (!done.has('preview-block')) return { id: 'preview-block', anchor: '[data-testid="preview-block"]:nth-child(2)', prefer: { side: 'right', align: 'start' },
+        text: 'Можете посмотреть все этапы урока: кликните по этапу или листайте клавишами ↑ ↓' };
+      // a while later, not to hurry the teacher reading the plan
+      return allIn ? { id: 'plan-back', anchor: '[data-testid="tab-seating"]', text: 'Когда посмотрите план, вернитесь к рассадке',
         prefer: { side: 'right', align: 'start' } } : null;
-      return { id: 'preview-nav', anchor: '[data-hint="preview-next"]', text: 'Листайте слайды стрелками ← → на клавиатуре или этими кнопками, блоки урока — стрелками ↑ ↓' };
     }
     if (!allIn || x.room) return null;
     // the class gathers at the two desks where most already sit
@@ -299,6 +302,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 // ---------- the bubble ----------
 
 const BACK_PAUSE_MS = 2500;
+const PLAN_PAUSE_MS = 10000; // after a look at the lesson's stages: time to read before being sent back to the seating
 const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
 const BUBBLE_W = 250;
 const GAP = 12;
@@ -363,14 +367,22 @@ export function DemoHints(props: HintsInput) {
   const lesson = props.lesson;
   useEffect(() => {
     if (!previewOpen) return;
-    const leafed = () => {
+    const leafed = (id: 'preview-nav' | 'preview-block') => {
       const m = memory.get(lesson);
-      if (!m || m.done.has('preview-nav')) return;
-      m.done = new Set([...m.done, 'preview-nav']);
+      if (!m || m.done.has(id)) return;
+      if (id === 'preview-block') m.planAt = Date.now();
+      m.done = new Set([...m.done, id]);
       setDoneState(m.done);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key.startsWith('Arrow')) leafed(); };
-    const onClick = (e: MouseEvent) => { if ((e.target as Element).closest?.('[data-testid="lesson-preview"] button')) leafed(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') leafed('preview-block');
+      else if (e.key.startsWith('Arrow')) leafed('preview-nav');
+    };
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (t.closest?.('[data-testid="preview-block"]')) leafed('preview-block');
+      else if (t.closest?.('[data-testid="lesson-preview"] button')) leafed('preview-nav');
+    };
     window.addEventListener('keydown', onKey);
     window.addEventListener('click', onClick);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('click', onClick); };
@@ -400,13 +412,16 @@ export function DemoHints(props: HintsInput) {
   let picked = sinceBack < BACK_PAUSE_MS ? null : pickHint(props, done);
   // after the last call: longer, to glance at the strips and lights before the detective's hint
   if (picked && !Array.isArray(picked) && picked.id === 'spy' && sinceBack < SPY_PAUSE_MS) picked = null;
-  const waitFor = sinceBack < BACK_PAUSE_MS ? BACK_PAUSE_MS - sinceBack : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack : 0;
+  const sincePlan = Date.now() - (mem.planAt ?? 0);
+  if (picked && !Array.isArray(picked) && picked.id === 'plan-back' && sincePlan < PLAN_PAUSE_MS) picked = null;
+  const waitFor = sinceBack < BACK_PAUSE_MS ? BACK_PAUSE_MS - sinceBack : sincePlan < PLAN_PAUSE_MS ? PLAN_PAUSE_MS - sincePlan
+    : !picked && sinceBack < SPY_PAUSE_MS ? SPY_PAUSE_MS - sinceBack : 0;
   const [, setTick] = useState(0);
   useEffect(() => {
     if (waitFor <= 0) return;
     const t = setTimeout(() => setTick(n => n + 1), waitFor + 50);
     return () => clearTimeout(t);
-  }, [sinceBack < BACK_PAUSE_MS, waitFor > 0, mem.backAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sinceBack < BACK_PAUSE_MS, waitFor > 0, mem.backAt, mem.planAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hints = !picked ? [] : Array.isArray(picked) ? picked : [picked];
   return (<>
