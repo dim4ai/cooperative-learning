@@ -301,7 +301,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     if (answered < callsOn(x)) {
       // the class works; someone will call. Meanwhile: the stage's countdown, if not started yet
       return { id: `timer:${stage}`, anchor: '[data-testid="timer-start"][title="Запустить"]:not(:disabled)', text:
-        'Пока класс работает, можно запустить таймер этапа: ученики увидят, сколько времени осталось.' };
+        'В начале этапа можно запустить таймер: ученики увидят, сколько времени осталось.' };
     }
     // the detective: a pair that didn't call, but the map shows something's off there
     if (stage === 'pairs' && !done.has('spy')) {
