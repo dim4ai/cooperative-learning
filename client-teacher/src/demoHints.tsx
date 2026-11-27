@@ -262,7 +262,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' },
       ];
       if ([...x.calling].some(r => r !== x.room)) return { id: 'call-elsewhere', anchor: '[data-testid="call-elsewhere-go"]', text:
-        'Вас зовут ещё в одну группу — кому-то нужна помощь. Договорите здесь и переходите: «Перейти».' };
+        'Вас зовут ещё в одну группу — кому-то нужна помощь. Закончите объяснение здесь и переходите: «Перейти».' };
       if (x.replyWaits) return { id: 'reply', anchor: '[data-testid="demo-reply-ready"]', text:
         'Ученики ждут ответа. Ответьте своими словами в микрофон — или скажите готовый ответ этой кнопкой.' };
       if (call && /а-бэ/.test(call.note)) return { id: `coach:${x.room}`, anchor: '[data-hint="room-back"]', text: 'Когда договорите, возвращайтесь в класс.' };
