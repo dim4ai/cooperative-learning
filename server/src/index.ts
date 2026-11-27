@@ -676,7 +676,7 @@ function startBots(code: string, lesson: LessonRuntime) {
       const key = `${room}#${block.slides[0]?.id ?? block.id}`;
       let board = boardAt(lesson, key);
       if (!board) { board = new Map(); lesson.boards.set(key, board); }
-      const own = [...board.values()].filter(o => o.author === name);
+      const own = [...board.values()].filter(o => o.author === name && !o.uid.startsWith('mark-'));
       if (own.length < objs.length) {
         for (const o of own) board.delete(o.uid);
         for (const o of objs) board.set(o.uid, { ...o, author: name } as BoardObject);
@@ -1377,7 +1377,9 @@ function layEarlierSheets(lesson: LessonRuntime): boolean {
       const sw = size(scene, 'width', W), sh = size(scene, 'height', H);
       const s = Math.min(W / 2 / sw, H / 2 / sh);
       const x = (i % 2) * W / 2, y = Math.floor(i / 2) * H / 2;
-      const objects = [...(scene?.objects ?? []), ...(boardAt(lesson, `${src.room}#${sc?.id ?? from.id}`)?.values() ?? [])] as Record<string, unknown>[];
+      // the demo's class: their own writing only, not the teacher's notes nor the marks of a question (demoBots angleArcs)
+      const own = (o: BoardObject) => !lesson.bots || (src.names.includes(o.author as string) && !o.uid.startsWith('mark-'));
+      const objects = [...(scene?.objects ?? []), ...[...boardAt(lesson, `${src.room}#${sc?.id ?? from.id}`)?.values() ?? []].filter(own)] as Record<string, unknown>[];
       const put = (o: Record<string, unknown>) => board!.set(o.uid as string, { ...o, pinned: true, author: src.names[0] } as unknown as BoardObject);
       put({ uid: `sheet${i}-frame`, type: 'Rect', left: x + 4, top: y + 4, width: sw * s - 8, height: sh * s - 8, originX: 'left', originY: 'top', fill: '', stroke: '#94a3b8', strokeWidth: 2 });
       objects.forEach((o, n) => {

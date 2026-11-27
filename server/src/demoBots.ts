@@ -243,8 +243,10 @@ const lines = (texts: string[], first: number, gap: number): Line[] => texts.map
 type Role = 'p1' | 'p2' | 'p3' | 'p4';
 const PAIR_PART: Record<Role, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }; // SCRIPT.pairs
 /** b2 «Что я замечаю»: what each one writes on their sheet, by their part in b3 — what the pair says of it there.
- *  start, gap: seconds; call: they ask the teacher, and write `reply` once the teacher has been */
-interface Sheet { lines: string[]; start: number; gap: number; call?: { at: number; note: string; reply?: string[] } }
+ *  start, gap: seconds; call: they ask the teacher, and write `reply` once the teacher has been;
+ *  later: not then, the teacher writes it for them: it is on their sheet on the next stage;
+ *  angles: as they ask, bold red arcs in ∠AOB and ∠COD show which angles they mean (only for this stage) */
+interface Sheet { lines: string[]; start: number; gap: number; call?: { at: number; note: string; reply?: string[]; later?: boolean; angles?: boolean } }
 const SHEETS: Record<string, Sheet> = {
   // Миша, with a mouse at his aunt's: «как курица лапкой», and AB = AO wrong
   'p1-1': { lines: ['AD = BC', 'AB = CD', '∠A = ∠C', '∠B = ∠D', 'AB = AO'], start: 6, gap: 9 },
@@ -258,7 +260,7 @@ const SHEETS: Record<string, Sheet> = {
   // П3 «Хоть ножницы нарисуй»: «Я тоже их нашёл и ещё две пары углов» — the vertical ones, after asking how to write angles;
   // «Стороны и диагонали. Четыре штуки»
   'p3-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 5, gap: 8, call: {
-    at: 30, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠AOB = ∠COD', '∠BOC = ∠AOD'] } },
+    at: 30, note: 'Не помню, как записывается равенство углов. Напишите, пожалуйста', reply: ['∠AOB = ∠COD', '∠BOC = ∠AOD'], later: true, angles: true } },
   'p3-2': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
   // «Четыре. Стороны и диагонали» — «У меня тоже четыре, только другие… Зато углы» in a scrawl: «Это бэ или восьмёрка?»
   'p4-1': { lines: ['AD = BC', 'AB = CD', 'AO = OC', 'BO = OD'], start: 7, gap: 9 },
@@ -520,6 +522,7 @@ export class BotRun {
   private roles = new Map<string, { role: Role; who: 1 | 2 }>();
   private sheetRows = new Map<string, { text: string; top: number }[]>(); // name → their b2 sheet's lines
   private marked = new Set<string>(); // room:line whose marks are on the sheets already
+  private asking = new Map<string, (ms: number) => void>(); // room → what they show on the board as they ask
   private pairDrawn = new Map<string, string[]>(); // room → what the pair drew from PAIR_BOARD (wiped by `erase`)
   private rowMarks = new Map<string, number>(); // room:owner:row → marks there already, the next one goes left of them
   private listed = new Map<string, number>(); // room → lines of the pair's common list under the sheets
@@ -786,15 +789,31 @@ export class BotRun {
       if (drawn) { sheet.lines.forEach(t => this.sheetRow(name, t)); draw(drawn.draw); }
       else sheet.lines.forEach((text, i) => this.after((sheet.start + i * sheet.gap) * 1000, () => put(text)));
       if (!sheet.call) continue;
-      const { note, reply } = sheet.call, at = drawn?.call ?? sheet.call.at;
+      const { note, reply, later, angles } = sheet.call, at = drawn?.call ?? sheet.call.at;
       this.callQueue.push({ room, at: at * 1000, fire: () => {
-        if (drawn) this.replies.set(room, () => { reply?.forEach(t => this.sheetRow(name, t)); draw(drawn.after ?? []); });
+        if (angles) this.asking.set(room, ms => this.angleArcs(room, name, ms));
+        if (later) { /* the teacher writes it */ }
+        else if (drawn) this.replies.set(room, () => { reply?.forEach(t => this.sheetRow(name, t)); draw(drawn.after ?? []); });
         else if (reply) this.replies.set(room, () => reply.forEach((t, i) => this.after(i * 2500, () => put(t))));
         this.askCall(room, note, name);
       } });
     }
     this.callQueue.sort((a, b) => a.at - b.at);
     this.nextCall();
+  }
+
+  /** Bold red arcs inside ∠AOB and ∠COD of a sheet from b2 (O(396,456), A(116,568), B(228,344), C(676,344), D(564,568)),
+   *  as they are named in a question `ms` long; marks of the moment: not laid on the next stage's board */
+  private angleArcs(room: string, name: string, ms: number) {
+    const O = [396, 456], r = 52, deg = Math.PI / 180, n = 10;
+    ([[158, 214, 0.45], [-22, 34, 0.6]] as const).forEach(([from, to, at]) => {
+      const pt = (i: number) => { const a = (from + (to - from) * i / n) * deg; return [O[0] + r * Math.cos(a), O[1] + r * Math.sin(a)]; };
+      for (let i = 0; i < n; i++) this.after(at * ms + i * 40, () => {
+        const [x1, y1] = pt(i), [x2, y2] = pt(i + 1);
+        this.host.write(room, { uid: `mark-${room}-${this.uid++}`, type: 'Line', x1, y1, x2, y2, left: (x1 + x2) / 2, top: (y1 + y2) / 2,
+          originX: 'center', originY: 'center', stroke: '#e03131', strokeWidth: 10, strokeLineCap: 'round' }, name, i > 0);
+      });
+    });
   }
 
   private sheetKey(name: string) { const r = this.roles.get(name); return r ? `${r.role}-${r.who}` : ''; }
@@ -1042,7 +1061,9 @@ export class BotRun {
     let replyAt = VISIT_REPLY_MS;
     if (ask) {
       this.asks.delete(room);
-      this.after(ARRIVE_MS, () => this.voice(room, ask.who, ask.line.id, ask.line.ms));
+      const marks = this.asking.get(room);
+      this.asking.delete(room);
+      this.after(ARRIVE_MS, () => { const ms = this.voice(room, ask.who, ask.line.id, ask.line.ms); marks?.(ms); });
       replyAt = Math.max(VISIT_REPLY_MS, ARRIVE_MS + (ask.line.ms[VOICE_OF[ask.who]] ?? 5000) + 2500);
     }
     const reply = this.replies.get(room);
