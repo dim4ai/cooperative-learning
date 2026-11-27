@@ -238,7 +238,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
         ? `Слайд ${st.index + 1} из ${scenes.length}. Объясняйте и листайте дальше — на последнем слайде появится кнопка «Всем понятно?»`
         : 'Следующий слайд — эта стрелка или клавиша →' };
     }
-    const ask: Hint = { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь спросите класс: всем понятно?' };
+    const ask: Hint = { id: 'ask', anchor: '[data-testid="understood-ask"]', text: 'Последний слайд, объяснение закончено. Теперь можете спросить класс, всем ли понятно.' };
     // the first explanation ends on a drawing: the teacher may draw over it
     return block === 'b1' && !done.has('draw-slide') ? [
       { id: 'draw-slide', anchor: '[data-testid="tool-pen"]', prefer: { side: 'above', align: 'start' }, text: 'Выберите карандаш и отметьте на рисунке мигающие углы 1 и 2. Рисовать можно прямо во время объяснения: это увидят все ученики.' },
