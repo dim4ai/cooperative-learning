@@ -83,8 +83,9 @@ function chattyPair(x: HintsInput): string | null {
 
 const memory = new Map<string, { done: ReadonlySet<string>; firstSlide: string | null; room?: string | null; backAt?: number; planAt?: number }>();
 
-/** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT) */
+/** How many rooms call on each work stage (server/src/demoBots.ts, SCRIPT; b2 goes by SHEETS: two call there) */
 const CALLS: Record<string, number> = { individual: 3, pairs: 2, fours: 1 };
+const callsOn = (x: HintsInput) => x.stage === 'individual' && x.slides.state.block === 'b2' ? 2 : CALLS[x.stage] ?? 2;
 
 /** The lesson's blocks in the server's order, the polls added during the lesson among them */
 const planBlocks = (x: HintsInput) => x.slides.material?.blocks ?? x.slides.local?.blocks ?? [];
@@ -247,6 +248,11 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
   }
 
   if (stage === 'individual' || stage === 'pairs' || stage === 'fours') {
+    // a call is dropped from x.calls once answered: count the rooms that called on this block
+    const key = `${stage}:${x.slides.state.block}`;
+    const called = calledRooms.get(key) ?? new Set<string>();
+    calledRooms.set(key, called);
+    Object.keys(x.calls).forEach(r => called.add(r));
     // at a student's board
     if (x.room && x.quiet) {
       return { id: 'spy-in', anchor: '[data-testid="quiet-reveal"]', text:
@@ -291,8 +297,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       // what they ask is in the right panel
       return { id: `bell:${ringing}`, anchor: `[data-calling-room="${CSS.escape(ringing)}"]`, text: 'Вас зовут. Нажмите на колокольчик, чтобы подойти' };
     }
-    const answered = Object.keys(x.calls).filter(r => done.has(`visit:${r}`)).length;
-    if (answered < (CALLS[stage] ?? 2)) return null; // the class works; someone will call
+    const answered = [...called].filter(r => done.has(`visit:${r}`)).length;
+    if (answered < callsOn(x)) {
+      // the class works; someone will call. Meanwhile: the stage's countdown, if not started yet
+      return { id: `timer:${stage}`, anchor: '[data-testid="timer-start"][title="Запустить"]:not(:disabled)', text:
+        'Пока класс работает, можно запустить таймер этапа: ученики увидят, сколько времени осталось.' };
+    }
     // the detective: a pair that didn't call, but the map shows something's off there
     if (stage === 'pairs' && !done.has('spy')) {
       const room = chattyPair(x);
@@ -312,6 +322,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
 
 /** Rooms where the teacher was asked to write for the student: the pen's hint stays there after the call is done */
 const penRooms = new Set<string>();
+/** The rooms that called, by stage and block: kept after the call is answered */
+const calledRooms = new Map<string, Set<string>>();
 const BACK_PAUSE_MS = 2500;
 const PLAN_PAUSE_MS = 10000; // after a look at the lesson's stages: time to read before being sent back to the seating
 const SPY_PAUSE_MS = 9000; // after the last call: time to glance at the strips and lights before the detective's hint
