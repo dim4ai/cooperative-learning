@@ -356,7 +356,7 @@ function StudentGrid({ seatsLocked, students, stage, atDesks, seats, hasLivekit,
     // a poll: the answers so far, and on the map who answered what
     return (
       <div data-testid="poll-view" style={{ height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <PollResults poll={poll} students={students.length} />
+        <PollResults poll={poll} students={students.length} compact={STANDALONE} />
         <SeatingMap seats={seats} showSelf={hasLivekit} readOnly lessonCode={lessonCode} names={names} answers={pollMarks(poll)} waiting={waiting} />
       </div>
     );

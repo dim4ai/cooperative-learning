@@ -161,7 +161,9 @@ export function NewPollDialog({ running, onClose, draft }: { running: boolean; o
 
 // ---------- the running poll, on the teacher's screen ----------
 
-export function PollResults({ poll, students }: { poll: TeacherPollView; students: number }) {
+/** compact (the solo demo): a few lines, so that the class's map below shows who answered what */
+export function PollResults({ poll, students, compact = false }: { poll: TeacherPollView; students: number; compact?: boolean }) {
+  if (compact) return <CompactPollResults poll={poll} students={students} />;
   const answered = Object.keys(poll.answers).length;
   const most = Math.max(1, ...poll.counts);
   const right = poll.options.some(o => o.correct);
@@ -215,6 +217,42 @@ export function PollResults({ poll, students }: { poll: TeacherPollView; student
       </div>
       {poll.revealed && <div style={{ fontSize: 12, color: '#777' }}>Класс видит, сколько выбрали каждый вариант, без имён. Ответы закрыты.</div>}
       {!poll.revealed && out && <div data-testid="poll-time-out" style={{ fontSize: 12, color: '#777' }}>Время вышло — ответы закрыты. Можно показать итоги или добавить время.</div>}
+    </div>
+  );
+}
+
+/** The results in a few lines: the question, then each option as its colour, its words — how many; no bars */
+function CompactPollResults({ poll, students }: { poll: TeacherPollView; students: number }) {
+  const answered = Object.keys(poll.answers).length;
+  const right = poll.options.some(o => o.correct);
+  const left = useSecondsLeft(poll);
+  const out = poll.timeUp || left === 0;
+  return (
+    <div data-testid="poll-results" style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 760 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {poll.question && <span style={{ fontSize: 15, fontWeight: 'bold' }}>{poll.question}</span>}
+        {left !== null && !out && <span data-testid="poll-time-left" style={{
+          marginLeft: 'auto', fontSize: 16, fontWeight: 'bold', fontVariantNumeric: 'tabular-nums', color: left <= 10 ? '#e67e22' : '#222',
+        }}>⏱ {clock(left)}</span>}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 14 }}>
+        {poll.options.map((o, i) => {
+          const color = right ? (o.correct ? GRADE_INFO.right.color : poll.multi ? '#94a3b8' : GRADE_INFO.wrong.color) : o.color;
+          return (
+            <span key={i} data-testid="poll-result-row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', background: color, flexShrink: 0 }} />
+              {o.text}{o.correct && <span style={{ color: GRADE_INFO.right.color, fontWeight: 'bold' }}>✓</span>}
+              <span> — <b data-testid="poll-count">{poll.counts[i]}</b></span>
+            </span>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span data-testid="poll-answered" style={{ fontSize: 13, color: '#555' }}>Ответили {answered} из {students}</span>
+        <button data-testid="poll-reveal" onClick={() => socket.emit('poll:reveal', { revealed: !poll.revealed })} style={{
+          ...smallBtn, marginLeft: 'auto', ...(poll.revealed ? {} : { background: '#4a90e2', color: '#fff', border: 'none' }),
+        }}>{poll.revealed ? 'Скрыть итоги' : 'Показать итоги классу'}</button>
+      </div>
     </div>
   );
 }
