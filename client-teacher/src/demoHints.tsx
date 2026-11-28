@@ -12,10 +12,14 @@ import type { Hands } from './HandsPanel';
 // ---------- which hint, when ----------
 
 /** prefer: where the bubble goes if it fits — e.g. over the student's own desk, not the one they should move to */
+const OPEN_POLL = 'Создайте новое задание: голосование.';
+
 interface Hint {
   id: string; anchor: string; text: string; prefer?: { side: 'below' | 'above' | 'right'; align: 'start' | 'end' };
   /** while this is on screen (the item in the opened menu), the bubble points at it from the right, off the menu */
   open?: string;
+  /** its words then */
+  openText?: string;
 }
 
 export interface HintsInput {
@@ -185,12 +189,12 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       : 'Поднята рука — у ученика вопрос. Дайте слово: нажмите на имя.' };
     if (block === 'b9' && polls === 0 && x.hands.floor) return null; // listening
     if (block === 'b9' && polls === 0 && [...done].filter(d => d.startsWith('hand:')).length < 2) return null; // the next hand goes up after the line
-    if (block === 'b9' && polls === 0) return { id: 'poll-new', anchor: '[data-testid="menu-task"]', open: '[data-testid="task-poll"]', text:
+    if (block === 'b9' && polls === 0) return { id: 'poll-new', anchor: '[data-testid="menu-task"]', open: '[data-testid="task-poll"]', openText: OPEN_POLL, text:
       'Ученики путают свойство и признак: один считает, что это одно и то же, другая — что разное. '
       + 'Узнайте прямо сейчас, что думает весь класс: «Новое задание» → «Голосование».' };
     // the summing up: the same question again
     if (block === 'b12') return polls < 2
-      ? { id: 'poll-again', anchor: '[data-testid="menu-task"]', open: '[data-testid="task-poll"]', text: 'Итог урока. Задайте классу тот же вопрос ещё раз — посмотрим, изменилось ли мнение: «Новое задание» → «Голосование».' }
+      ? { id: 'poll-again', anchor: '[data-testid="menu-task"]', open: '[data-testid="task-poll"]', openText: OPEN_POLL, text: 'Итог урока. Задайте классу тот же вопрос ещё раз — посмотрим, изменилось ли мнение: «Новое задание» → «Голосование».' }
       : { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Завершите урок и расскажите, что думаете' };
     const material = slides.local ?? slides.material;
     const st = slides.state;
@@ -508,7 +512,7 @@ function Bubble({ hint }: { hint: Hint }) {
         fontSize: 13, lineHeight: 1.4, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
       }}>
         <div style={arrowStyle(pos.side, box, pos)} />
-        {hint.text}
+        {box.anchor === open && hint.openText ? hint.openText : hint.text}
       </div>
     </>
   );
