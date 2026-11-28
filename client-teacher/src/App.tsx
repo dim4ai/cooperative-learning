@@ -13,7 +13,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_CLASS_ID, SOLO_JOURNAL, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_CLASS_ID, SOLO_JOURNAL, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, repeatBlock, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -1029,6 +1029,12 @@ export default function App() {
         )}
 
         <div style={{ marginTop: 'auto' }} />
+        {demo?.solo && slides.state.block && state.stage !== 'waiting' && (
+          <button data-testid="demo-repeat" onClick={() => repeatBlock(slides.state.block!)} style={{
+            marginBottom: 14, padding: '8px 10px', borderRadius: 8, border: '1px solid #ccc', background: '#fff',
+            color: '#222', fontSize: 13, cursor: 'pointer',
+          }}>↻ Повторить этап</button>
+        )}
         <div data-testid="join-code-box" style={{ marginBottom: 4 }}>
           <div style={{ fontSize: 11, color: '#222' }}>Код занятия</div>
           <div style={{ fontSize: 20, fontWeight: 'bold', letterSpacing: 2, color: '#222' }}>

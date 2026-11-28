@@ -266,7 +266,16 @@ function SoloIntro({ onSolo, onBack }: { onSolo: (teacher: TeacherSex) => Promis
   );
 }
 
+/** Who teaches in this solo demo: «Повторить этап» starts it again with the same teacher */
+let soloTeacher: TeacherSex = 'f';
+
+/** «Повторить этап» (solo demo only): the demo starts anew right on this block, the class already seated */
+export function repeatBlock(block: string) {
+  location.assign(`${location.pathname}?${new URLSearchParams({ fast: block, teacher: soloTeacher })}`);
+}
+
 export async function startSolo(teacher: TeacherSex = 'f'): Promise<{ code: string; token: string } | { error: string }> {
+  soloTeacher = teacher;
   try {
     // ?fast (testing): the class sits down at once, at two desks; ?fast=b9 also starts the lesson on that block
     const f = new URLSearchParams(location.search).get('fast');

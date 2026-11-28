@@ -178,9 +178,9 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     // b9: hands go up — the teacher hears both, then asks the class what it thinks
     if (block === 'b9' && polls === 0 && x.hands.up.length) return { id: 'hand', anchor: '[data-testid="hand-give"]', text: done.has('hand')
       ? 'Ещё одна рука — дайте слово.'
-      : 'Ученики подняли руки — у них вопрос. Дайте слово: нажмите на имя.' };
+      : 'Поднята рука — у ученика вопрос. Дайте слово: нажмите на имя.' };
     if (block === 'b9' && polls === 0 && x.hands.floor) return null; // listening
-    if (block === 'b9' && polls === 0 && !done.has('hand')) return null; // the hands are about to go up
+    if (block === 'b9' && polls === 0 && [...done].filter(d => d.startsWith('hand:')).length < 2) return null; // the next hand goes up after the line
     if (block === 'b9' && polls === 0) return { id: 'poll-new', anchor: '[data-testid="menu-task"]', text:
       'Ученики путают свойство и признак: один считает, что это одно и то же, другая — что разное. '
       + 'Узнайте прямо сейчас, что думает весь класс: «Новое задание» → «Голосование».' };
@@ -360,7 +360,7 @@ export function DemoHints(props: HintsInput) {
   if (previewOpen) now.add('preview');
   if (props.stage === 'waiting' && props.atDesks && props.students.length >= CLASS_SIZE) now.add('desks');
   if (slides.state.revealed.length) now.add('reveal');
-  if (props.hands.floor) now.add('hand'); // gave someone the word
+  if (props.hands.floor) { now.add('hand'); now.add(`hand:${props.hands.floor.name}`); } // gave someone the word
   if (slideAt && firstSlide && slideAt !== firstSlide) now.add('next-slide');
   // incognito doesn't answer a call: only an open visit does
   if (props.room && props.quiet) { if (props.stage === 'pairs') now.add('spy'); } // the detective's scene is the pairs'

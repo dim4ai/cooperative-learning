@@ -1535,22 +1535,29 @@ export class BotRun {
 
   private polls = 0;
   /** A poll began: each bot answers in its own time, a few quick, a few slow */
-  /** The explanation of b9: two raise hands, a moment after it starts (raised once: not again on coming back) */
+  /** The explanation of b9: a hand goes up a moment after it starts; the next one only when the one before has said its line
+   *  (raised once: not again on coming back) */
   private raiseHands(stage: string, blockId?: string | null) {
-    if (stage !== 'group' || this.handsRaised.has(blockId ?? '')) return;
-    const lines = HANDS[blockId ?? ''];
-    if (!lines) return;
-    // marked raised only as they go up: the stage may start again before that (its timers cleared)
-    lines.forEach((l, i) => this.after(HAND_FIRST_MS + i * HAND_GAP_MS, () => { this.handsRaised.add(blockId!); this.host.raise(l.who); }, this.stageTimers));
+    const first = HANDS[blockId ?? '']?.[0];
+    if (stage !== 'group' || !first || this.handsRaised.has(first.id)) return;
+    this.after(HAND_FIRST_MS, () => this.raiseHand(first), this.stageTimers);
   }
 
-  /** The teacher gave the word: a bot with a line says it */
+  private raiseHand(l: { who: string; id: string }) {
+    this.handsRaised.add(l.id);
+    this.host.raise(l.who);
+  }
+
+  /** The teacher gave the word: a bot with a line says it; when it is over, the next hand of that block goes up */
   onFloor(name: string) {
-    const line = Object.values(HANDS).flat().find(l => l.who === name);
-    if (!line) return;
+    const lines = Object.values(HANDS).find(ls => ls.some(l => l.who === name));
+    const line = lines?.find(l => l.who === name);
+    if (!lines || !line) return;
     const v = voiceFor(name, { [VOICE_OF[name] ?? 'kirill']: line.ms });
     this.host.speak(name, line.text, { src: `/demo/voice/${line.id}-${v}.mp3`, ms: line.ms });
     for (let d = 0; d < line.ms; d += TALK_TICK_MS) this.after(d, () => this.host.talk(name, Math.min(TALK_TICK_MS, line.ms - d)));
+    const next = lines.find(l => !this.handsRaised.has(l.id));
+    if (next) this.after(line.ms + HAND_GAP_MS, () => this.raiseHand(next), this.stageTimers);
   }
 
   onPoll(options: number) {
