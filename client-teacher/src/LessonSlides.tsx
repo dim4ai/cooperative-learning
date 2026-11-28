@@ -318,7 +318,8 @@ const noteText: CSSProperties = { whiteSpace: 'pre-wrap', fontSize: 14, lineHeig
 
 /** End of an explanation: ask the class, see the answers, drop the marks when they're of no more use */
 /** askReady: false hides «Всем понятно?» (the solo demo keeps it for the last slide: it's the end of an explanation) */
-export function UnderstoodPanel({ understood, canAsk, askReady = true, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; askReady?: boolean; mapOpen: boolean; onToggleMap: () => void }) {
+/** askLocked: shown but not to be pressed yet (the solo demo: the class is to be polled first) */
+export function UnderstoodPanel({ understood, canAsk, askReady = true, askLocked = false, mapOpen, onToggleMap }: { understood: Understood; canAsk: boolean; askReady?: boolean; askLocked?: boolean; mapOpen: boolean; onToggleMap: () => void }) {
   const answers = Object.values(understood.marks);
   const yes = answers.filter(a => a === 'yes').length;
   const no = answers.length - yes;
@@ -336,7 +337,8 @@ export function UnderstoodPanel({ understood, canAsk, askReady = true, mapOpen, 
         </div>
       )}
       {canAsk && askReady && !understood.asking && (
-        <button data-testid="understood-ask" onClick={() => socket.emit('understood:ask')} style={panelBtn}>Всем понятно?</button>
+        <button data-testid="understood-ask" disabled={askLocked} title={askLocked ? 'Сначала голосование' : undefined} onClick={() => socket.emit('understood:ask')}
+          style={askLocked ? { ...panelBtn, background: '#c9d3df', cursor: 'default' } : panelBtn}>Всем понятно?</button>
       )}
       {canAsk && !understood.asking && (
         <button data-testid="understood-map" onClick={onToggleMap} style={{ ...panelBtn, background: '#eef1f5', color: '#333' }}>{mapOpen ? '← К слайду' : 'Карта класса'}</button>

@@ -173,7 +173,7 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
     const polls = pollsAdded(x);
     // a poll of the teacher's own: its dialog, the answers coming in, the results
     if (x.newTask === 'poll') return { id: 'poll-start', anchor: '[data-testid="new-poll"]', prefer: { side: 'right', align: 'start' }, text:
-      'Голосование уже заполнено: вопрос, варианты и 30 секунд на ответ. Можно поправить или сразу нажать «Начать».' };
+      'Голосование уже заполнено: вопрос, варианты и 20 секунд на ответ. Можно поправить или сразу нажать «Начать».' };
     if (x.poll && block === x.poll.blockId) {
       const answered = Object.keys(x.poll.answers).length;
       if (!x.poll.revealed) return answered < CLASS_SIZE

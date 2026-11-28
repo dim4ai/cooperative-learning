@@ -1564,7 +1564,8 @@ export class BotRun {
     const answers = POLL_ANSWERS[Math.min(this.polls++, POLL_ANSWERS.length - 1)];
     const order = [...BOTS].sort(() => Math.random() - 0.5);
     order.forEach((b, i) => {
-      const at = 2500 + i * 1800 + Math.random() * 2500 + (i === order.length - 1 ? 5000 : 0); // the last one keeps them waiting
+      // all in within the demo poll's 20 s (about 16 s at most); the last one keeps them waiting
+      const at = 1500 + i * 1500 + Math.random() * 1500 + (i === order.length - 1 ? 2500 : 0);
       this.after(at, () => this.host.vote(b.name, Math.min(answers[b.name] ?? 0, options - 1)));
     });
   }

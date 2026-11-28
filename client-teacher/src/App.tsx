@@ -13,7 +13,7 @@ import type { Marks, Seat, SeatNames } from './SeatingMap';
 import { useTeacherSlides, BlockNotes, ExplainBoard, LessonPlan, LessonPreview, MaterialPanel, UnderstoodPanel, type TeacherSlides } from './LessonSlides';
 import { ClassCamVideo, ClassCams, useClassCam, useClassCamsRoom, type CamsInfo } from './classCams';
 import { MediaSetup, SidebarMediaToggles, VIDEO_MODE_LABELS, type DemoStart, type VideoMode } from './MediaSetup';
-import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, SOLO_CLASS_ID, SOLO_JOURNAL, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, repeatBlock, type DemoEnd, type DemoTimes } from './demo';
+import { DemoBanner, DemoChoice, DemoFinished, SoloGuide, STANDALONE, soloPollDue, SOLO_CLASS_ID, SOLO_JOURNAL, SOLO_POLL, FAST_BLOCK, soloBlockOff, startSolo, repeatBlock, type DemoEnd, type DemoTimes } from './demo';
 import { DemoHints } from './demoHints';
 import { BookingScreen, hasBookingLink } from './booking';
 import { EndLessonDialog } from './EndLessonDialog';
@@ -1159,7 +1159,7 @@ export default function App() {
           </div>
           {state.stage === 'group' && <HandsPanel hands={hands} />}
           {state.stage !== 'waiting' && !poll && (
-            <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} askReady={!demo?.solo || onLastSlide(slides)} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
+            <UnderstoodPanel understood={slides.understood} canAsk={state.stage === 'group'} askReady={!demo?.solo || onLastSlide(slides)} askLocked={!!demo?.solo && soloPollDue(slides.state.block, slides.material?.blocks ?? slides.local?.blocks ?? [])} mapOpen={mapOpen} onToggleMap={() => setMapOpen(o => !o)} />
           )}
         </div>
       )}
