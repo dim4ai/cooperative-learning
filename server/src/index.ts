@@ -1665,6 +1665,7 @@ async function startBlock(code: string, lesson: LessonRuntime, blockId: string) 
     const ids = new Set([block.id, ...block.slides.map(sl => sl.id)]);
     const ofBlock = (key: string) => ids.has(key.slice(key.lastIndexOf('#') + 1));
     for (const key of [...lesson.boards.keys()]) if (ofBlock(key)) lesson.boards.delete(key);
+    for (const key of [...lesson.roomPositions.keys()]) if (ofBlock(key)) lesson.roomPositions.delete(key); // the cards back where they were given
     for (const key of [...lesson.laidSheets.keys()]) if (ofBlock(key)) lesson.laidSheets.delete(key); // laid anew, as they are now
   }
   enterBlock(lesson, block);
