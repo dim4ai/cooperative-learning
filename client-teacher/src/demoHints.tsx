@@ -176,12 +176,16 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
       'Голосование уже заполнено: вопрос, варианты и 20 секунд на ответ. Можно поправить или сразу нажать «Начать».' };
     if (x.poll && block === x.poll.blockId) {
       const answered = Object.keys(x.poll.answers).length;
-      if (!x.poll.revealed) return answered < CLASS_SIZE
-        ? { id: 'poll-wait', anchor: '[data-testid="poll-results"]', text: 'Ответы приходят по одному. Вы видите, кто что выбрал; ученики не видят ни чужих ответов, ни итогов.' }
-        : { id: 'poll-reveal', anchor: '[data-testid="poll-reveal"]', text: 'Все ответили. Покажите итоги классу: ученики увидят, сколько выбрали каждый вариант, без имён.' };
-      if (polls < 2) return { id: 'poll-back', anchor: blockSel('b9'), text:
-        'Мнения разделились — значит, есть что разобрать. Вернитесь к объяснению признаков. А в конце урока спросим ещё раз.' };
-      return { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Мнения сдвинулись: урок сработал. Завершите урок и расскажите, что думаете' };
+      const after: Hint = polls < 2
+        ? { id: 'poll-back', anchor: blockSel('b9'), text: 'Мнения разделились — значит, есть что разобрать. Вернитесь к объяснению признаков. А в конце урока спросим ещё раз.' }
+        : { id: 'end', anchor: '[data-hint="end-lesson"]', text: 'Мнения сдвинулись: урок сработал. Завершите урок и расскажите, что думаете' };
+      if (!x.poll.revealed && answered < CLASS_SIZE) return { id: 'poll-wait', anchor: '[data-testid="poll-results"]', text: 'Ответы приходят по одному. Вы видите, кто что выбрал; ученики не видят ни чужих ответов, ни итогов.' };
+      // showing the results is up to the teacher: the way on is there at once
+      if (!x.poll.revealed) return [
+        { id: 'poll-reveal', anchor: '[data-testid="poll-reveal"]', text: 'Все ответили. Можете показать итоги всему классу: ученики увидят, сколько выбрали каждый вариант, без имён.' },
+        after,
+      ];
+      return after;
     }
     // b9: hands go up — the teacher hears both, then asks the class what it thinks
     if (block === 'b9' && polls === 0 && x.hands.up.length) return { id: 'hand', anchor: '[data-testid="hand-give"]', text: done.has('hand')
@@ -216,7 +220,8 @@ function pickHint(x: HintsInput, done: ReadonlySet<string>): Hint | Hint[] | nul
           + 'Вы можете ещё раз объяснить непонятные моменты или перейти к следующему этапу. На следующем этапе есть возможность подойти к ученику индивидуально.' },
       ];
     }
-    if (hidden > 0 && !done.has('reveal')) {
+    // ☝ is taught in the first explanation; not again in the ones after the poll
+    if (hidden > 0 && !done.has('reveal') && block !== 'b9' && block !== 'b12') {
       return [
         { id: 'reveal', anchor: '[data-testid="tool-slide"]', prefer: { side: 'above', align: 'start' }, text: 'Ответы на этом слайде ученики пока не видят. Дайте подумать, потом выберите ☝…' },
         { id: 'reveal-answer', anchor: '[data-hint="hidden-answer"]', text: '…и кликните по скрытому ответу, например по этому: он откроется у всех учеников.' },
