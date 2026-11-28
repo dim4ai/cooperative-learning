@@ -1540,8 +1540,8 @@ export class BotRun {
     if (stage !== 'group' || this.handsRaised.has(blockId ?? '')) return;
     const lines = HANDS[blockId ?? ''];
     if (!lines) return;
-    this.handsRaised.add(blockId!);
-    lines.forEach((l, i) => this.after(HAND_FIRST_MS + i * HAND_GAP_MS, () => this.host.raise(l.who), this.stageTimers));
+    // marked raised only as they go up: the stage may start again before that (its timers cleared)
+    lines.forEach((l, i) => this.after(HAND_FIRST_MS + i * HAND_GAP_MS, () => { this.handsRaised.add(blockId!); this.host.raise(l.who); }, this.stageTimers));
   }
 
   /** The teacher gave the word: a bot with a line says it */

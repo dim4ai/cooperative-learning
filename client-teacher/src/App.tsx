@@ -666,7 +666,7 @@ export default function App() {
   useEffect(() => { if (!Object.keys(slides.understood.marks).length && !slides.understood.asking) setMapOpen(false); }, [slides.understood]);
 
   const [endDialog, setEndDialog] = useState(false);
-  const hands = useHands();
+  const hands = useHands(lessonCode);
   const legs = useDemoLegs(demo?.solo ? livekit?.room ?? null : null); // Миша's pair: pale legs after the teacher's answer
   // the solo demo: once the lesson began the class stays where it sat (the bots' pairs go by it); the server keeps to it too
   const [begun, setBegun] = useState(false);

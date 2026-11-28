@@ -5,12 +5,13 @@ import { socket } from './socket';
 
 export interface Hands { up: string[]; floor: { name: string; text?: string; until: number } | null }
 
-export function useHands(): Hands {
+/** Listening anew for each lesson: App takes every listener off the socket on leaving one */
+export function useHands(lessonCode: string | null): Hands {
   const [hands, setHands] = useState<Hands>({ up: [], floor: null });
   useEffect(() => {
     socket.on('hands', setHands);
     return () => { socket.off('hands', setHands); };
-  }, []);
+  }, [lessonCode]);
   // the line is over: its words go
   const floor = hands.floor;
   useEffect(() => {
