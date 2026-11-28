@@ -1715,10 +1715,16 @@ function clearMarks(lesson: LessonRuntime) {
 }
 
 /** The simulated class answers so that every picture of the map shows up: a whole desk, a pair, one student */
-/** The solo demo's class answers «Всем понятно?»: one says no — Глеб, who will get stuck and call on the next stage too;
- *  two keep silent */
+/** The solo demo's class answers «Всем понятно?»: in the first explanation one says no — Глеб, who will get stuck and call
+ *  on the next stage too; two keep silent. In the ones after (the signs, after the poll; the summing up) all understood:
+ *  all yes, one keeps silent */
 function botAnswers(lesson: LessonRuntime) {
   const seated = lesson.seats.filter(s => s.occupant).map(s => s.occupant!);
+  if (lesson.block !== 'b1') {
+    const quiet = seated.includes('Артём') ? 'Артём' : seated[seated.length - 1];
+    for (const name of seated) if (name !== quiet) lesson.marks.set(name, 'yes');
+    return;
+  }
   const lost = seated.includes('Глеб') ? 'Глеб' : seated[0];
   // two don't answer at all, as in a real class
   const silent = new Set(['Соня', 'Артём'].filter(n => seated.includes(n) && n !== lost));
