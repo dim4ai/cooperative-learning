@@ -25,12 +25,13 @@ export interface TeacherPollView {
 }
 
 /** The running block's poll, as the server tells it */
-export function usePoll(): TeacherPollView | null {
+/** Listening anew for each lesson: App takes every listener off the socket on leaving one */
+export function usePoll(lessonCode: string | null): TeacherPollView | null {
   const [poll, setPoll] = useState<TeacherPollView | null>(null);
   useEffect(() => {
     socket.on('poll', setPoll);
     return () => { socket.off('poll', setPoll); };
-  }, []);
+  }, [lessonCode]);
   return poll;
 }
 

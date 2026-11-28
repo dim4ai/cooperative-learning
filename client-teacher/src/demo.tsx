@@ -51,7 +51,7 @@ export const SOLO_LIVE_BLOCKS = new Set(['b1', 'b2', 'b3', 'b9', 'b10', 'b12']);
 export const soloBlockOff = (b: { id: string }) => !SOLO_LIVE_BLOCKS.has(b.id) && !b.id.startsWith('live-');
 
 /** The poll the solo demo suggests, both times: the class's answers are in server/src/demoBots.ts (POLL_ANSWERS), by option */
-export const SOLO_POLL = { question: 'Свойство и признак — это одно и то же?', options: ['Да, одно и то же', 'Нет, разные вещи', 'Иногда совпадают', 'Не знаю'] };
+export const SOLO_POLL = { question: 'Свойство и признак — это одно и то же?', options: ['Да, одно и то же', 'Нет, разные вещи', 'Иногда совпадают', 'Не знаю'], seconds: 30 };
 
 /** ?fast=<block>: testing — no pages before the lesson, the lesson starts on that block as soon as the class is in;
  *  ?fast=ready: the lesson and the journal open, the class seated, not started yet. &teacher=m: Николай Иванович */

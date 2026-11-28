@@ -14,8 +14,9 @@ import { GRADE_INFO, LETTERS, MAX_OPTIONS, MAX_SECONDS, MIN_SECONDS, POLL_COLORS
 interface Draft { text: string; color: string; correct: boolean }
 const blank = (i: number): Draft => ({ text: '', color: POLL_COLORS[i % POLL_COLORS.length], correct: false });
 
-/** draft: what the dialog opens with (the solo demo suggests its question) */
-export interface PollDraft { question: string; options: string[] }
+/** draft: what the dialog opens with (the solo demo: all filled in, the time to answer too; no field takes the focus,
+ *  a tablet's keyboard would come up over the dialog) */
+export interface PollDraft { question: string; options: string[]; seconds?: number }
 
 export function NewPollDialog({ running, onClose, draft }: { running: boolean; onClose: () => void; draft?: PollDraft }) {
   const [title, setTitle] = useState('');
@@ -27,8 +28,8 @@ export function NewPollDialog({ running, onClose, draft }: { running: boolean; o
   const [sending, setSending] = useState(false);
   const [picking, setPicking] = useState(false);
   // time to answer: off, or seconds as typed (the field may be empty while typing)
-  const [timed, setTimed] = useState(false);
-  const [seconds, setSeconds] = useState('60');
+  const [timed, setTimed] = useState(!!draft?.seconds);
+  const [seconds, setSeconds] = useState(String(draft?.seconds ?? 60));
   const sec = Math.round(Number(seconds));
 
   const filled = options.filter(o => o.text.trim());
@@ -81,7 +82,7 @@ export function NewPollDialog({ running, onClose, draft }: { running: boolean; o
       <div role="dialog" aria-label="Новое голосование" data-testid="new-poll" style={dialog}>
         <h3 style={{ margin: 0 }}>Новое задание: голосование</h3>
         <input data-testid="poll-title" value={title} onChange={e => setTitle(e.target.value)} maxLength={120} placeholder="Название в плане (можно не писать)" style={field} />
-        <textarea data-testid="poll-question" value={question} onChange={e => setQuestion(e.target.value)} maxLength={500} rows={2} autoFocus
+        <textarea data-testid="poll-question" value={question} onChange={e => setQuestion(e.target.value)} maxLength={500} rows={2} autoFocus={!draft}
           placeholder="Вопрос, например «Что изображено на картинке?»" style={{ ...field, resize: 'vertical', fontFamily: 'inherit' }} />
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

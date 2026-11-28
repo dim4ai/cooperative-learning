@@ -674,7 +674,7 @@ export default function App() {
   const seatsLocked = !!demo?.solo && begun;
   const [demoReply, setDemoReply] = useState<{ room: string; text: string } | null>(null); // the solo demo: a group waits for an answer
   const [newTask, setNewTask] = useState<string | null>(null); // the kind of task being added
-  const poll = usePoll();
+  const poll = usePoll(lessonCode);
   const [recordAsk, setRecordAsk] = useState(0);
   const recording = useRecording().recording;
   const [startWarning, setStartWarning] = useState(false);
